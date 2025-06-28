@@ -17,9 +17,6 @@ memory-bank/
 # Claude Code instructions (keep private)
 CLAUDE.md
 
-# Test folder
-test/
-
 # Claude folder
 .claude/
 
@@ -32,3 +29,9 @@ test/
 # project setup files (keep private)
 project_setup_templates/
 project_setup.md
+
+# track do-files in ancillary_files folder
+ado/ancillary_files/**/*.xlsx
+ado/ancillary_files/**/*.xls
+ado/ancillary_files/**/*.zip
+!ado/ancillary_files/**/*.do
