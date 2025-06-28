@@ -11,7 +11,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtstat/dtstat_test2.log, replace
+log using ado/ancillary_files/test/log/dtstat_test2.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtstat

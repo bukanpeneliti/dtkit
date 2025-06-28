@@ -11,7 +11,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtstat/dtstat_test1.log, replace
+log using ado/ancillary_files/test/log/dtstat_test1.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtstat
@@ -242,7 +242,7 @@ else {
 di _n "=== TEST CASE 11: Excel export ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg weight, save("test/dtstat/dtstat_output.xlsx") replace
+dtstat price mpg weight, save("ado/ancillary_files/test/dtstat/dtstat_output.xlsx") replace
 if _rc {
     di as error "Test 11 failed with error " _rc
     local failed_tests "`failed_tests' 11"
@@ -508,8 +508,8 @@ else {
 di _n "=== TEST CASE 23: Excel export with custom filename ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg, save("test/dtstat/no-space.xlsx") replace
-capture confirm file "test/dtstat/no-space.xlsx"
+dtstat price mpg, save("ado/ancillary_files/test/dtstat/no-space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtstat/no-space.xlsx"
 if _rc {
     di as error "Test 23 failed with error " _rc
     local failed_tests "`failed_tests' 23"
@@ -523,8 +523,8 @@ else {
 di _n "=== TEST CASE 24: Excel export with custom filename and space ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg, save("test/dtstat/file with space.xlsx") replace
-capture confirm file "test/dtstat/file with space.xlsx"
+dtstat price mpg, save("ado/ancillary_files/test/dtstat/file with space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtstat/file with space.xlsx"
 
 if _rc {
     di as error "Test 24 failed with error " _rc
@@ -539,7 +539,7 @@ else {
 di _n "=== TEST CASE 25: Excel export to non-existent directory ==="
 local ++total_tests
 sysuse auto, clear
-capture dtstat price mpg, save("test/non-existent/file.xlsx") replace
+capture dtstat price mpg, save("ado/ancillary_files/test/non-existent/file.xlsx") replace
 
 if _rc == 601 {
     di as result "Test 25 completed successfully"
@@ -554,8 +554,8 @@ else {
 di _n "=== TEST CASE 26: Excel export without extension ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg, save("test/dtstat/no-extension") replace
-capture confirm file "test/dtstat/no-extension.xlsx"
+dtstat price mpg, save("ado/ancillary_files/test/dtstat/no-extension") replace
+capture confirm file "ado/ancillary_files/test/dtstat/no-extension.xlsx"
 if _rc {
     di as error "Test 26 failed with error " _rc
     local failed_tests "`failed_tests' 26"

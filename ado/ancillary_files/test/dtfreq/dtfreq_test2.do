@@ -15,7 +15,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtfreq/dtfreq_test2.log, replace
+log using ado/ancillary_files/test/log/dtfreq_test2.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtfreq
@@ -238,20 +238,20 @@ else {
 * 6.1 Test save() without REPlace (new file)
 local ++total_tests
 sysuse nlsw88, clear
-dtrace dtfreq married, save("test/dtfreq/dtfreq_output.xlsx")
+dtrace dtfreq married, save("ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx")
 if _rc {
     di as error "[Test 13] FAIL: dtfreq make, save(dtflux_output.xlsx) failed"
     local failed_tests "`failed_tests' 13"
 }
 else {
-    di as result "[Test 13] PASS: dtfreq make saved to test/dtfreq/dtfreq_output.xlsx"
+    di as result "[Test 13] PASS: dtfreq make saved to ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx"
     local passed_tests "`passed_tests' 13"
 }
 
 * 6.2 Test save() with REPlace
 local ++total_tests
 sysuse nlsw88, clear
-dtrace dtfreq married, save("test/dtfreq/dtfreq_output.xlsx") replace
+    dtrace dtfreq married, save("ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx") replace
 if _rc {
     di as error "[Test 14] FAIL: dtfreq make, save(dtflux_output.dta) replace failed"
     local failed_tests "`failed_tests' 14"

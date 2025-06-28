@@ -11,7 +11,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtmeta/dtmeta_test1.log, replace
+log using ado/ancillary_files/test/log/dtmeta_test1.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtmeta
@@ -126,7 +126,7 @@ else {
 di _n "=== TEST CASE 4: Excel export ==="
 local ++total_tests
 sysuse auto, clear
-dtmeta, save("test/dtmeta/dtmeta_output.xlsx") replace
+dtmeta, save("ado/ancillary_files/test/dtmeta/dtmeta_output.xlsx") replace
 if _rc {
     di as error "Test 4 failed with error " _rc
     local failed_tests "`failed_tests' 4"
@@ -234,8 +234,8 @@ else {
 di _n "=== TEST CASE 8: Excel export with custom filename ==="
 local ++total_tests
 sysuse auto, clear
-dtmeta, save("test/dtmeta/no-space.xlsx") replace
-capture confirm file "test/dtmeta/no-space.xlsx"
+dtmeta, save("ado/ancillary_files/test/dtmeta/no-space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtmeta/no-space.xlsx"
 if _rc {
     di as error "Test 8 failed with error " _rc
     local failed_tests "`failed_tests' 8"
@@ -249,8 +249,8 @@ else {
 di _n "=== TEST CASE 9: Excel export with custom filename and space ==="
 local ++total_tests
 sysuse auto, clear
-dtmeta, save("test/dtmeta/file with space.xlsx") replace
-capture confirm file "test/dtmeta/file with space.xlsx"
+dtmeta, save("ado/ancillary_files/test/dtmeta/file with space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtmeta/file with space.xlsx"
 
 if _rc {
     di as error "Test 9 failed with error " _rc
@@ -265,7 +265,7 @@ else {
 di _n "=== TEST CASE 10: Excel export to non-existent directory ==="
 local ++total_tests
 sysuse auto, clear
-capture dtmeta, save("test/non-existent/file.xlsx") replace
+capture dtmeta, save("ado/ancillary_files/test/non-existent/file.xlsx") replace
 
 if _rc == 601 {
     di as result "Test 10 completed successfully"
@@ -280,8 +280,8 @@ else {
 di _n "=== TEST CASE 11: Excel export without extension ==="
 local ++total_tests
 sysuse auto, clear
-dtmeta, save("test/dtmeta/no-extension") replace
-capture confirm file "test/dtmeta/no-extension.xlsx"
+dtmeta, save("ado/ancillary_files/test/dtmeta/no-extension") replace
+capture confirm file "ado/ancillary_files/test/dtmeta/no-extension.xlsx"
 if _rc {
     di as error "Test 11 failed with error " _rc
     local failed_tests "`failed_tests' 11"

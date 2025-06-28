@@ -11,7 +11,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtfreq/dtfreq_test1.log, replace
+log using ado/ancillary_files/test/log/dtfreq_test1.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtfreq
@@ -306,7 +306,7 @@ else {
 di _n "=== TEST CASE 13: Excel export ==="
 local ++total_tests
 sysuse auto, clear
-dtrace dtfreq rep78, save("test/dtfreq/xlsfile.xlsx") replace
+dtrace dtfreq rep78, save("ado/ancillary_files/test/dtfreq/xlsfile.xlsx") replace
 if _rc {
     di as error "Test 13 failed with error " _rc
     local failed_tests "`failed_tests' 13"
@@ -314,7 +314,7 @@ if _rc {
 else {
     di as result "Test 13 completed successfully"
     local passed_tests "`passed_tests' 13"
-    capture confirm file "test/dtfreq/xlsfile.xlsx"
+            capture confirm file "ado/ancillary_files/test/dtfreq/xlsfile.xlsx"
     if _rc {
         di as error "Excel file not created"
     }
@@ -499,8 +499,8 @@ else {
 di _n "=== TEST CASE 20: Excel export with custom filename ==="
 local ++total_tests
 sysuse auto, clear
-dtfreq rep78, save("test/dtfreq/no-space.xlsx") replace
-capture confirm file "test/dtfreq/no-space.xlsx"
+    dtfreq rep78, save("ado/ancillary_files/test/dtfreq/no-space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtfreq/no-space.xlsx"
 if _rc {
     di as error "Test 20 failed with error " _rc
     local failed_tests "`failed_tests' 20"
@@ -514,8 +514,8 @@ else {
 di _n "=== TEST CASE 21: Excel export with custom filename and space ==="
 local ++total_tests
 sysuse auto, clear
-dtrace dtfreq rep78, save("test/dtfreq/file with space.xlsx") replace
-capture confirm file "test/dtfreq/file with space.xlsx"
+    dtrace dtfreq rep78, save("ado/ancillary_files/test/dtfreq/file with space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtfreq/file with space.xlsx"
 
 if _rc {
     di as error "Test 21 failed with error " _rc
@@ -530,7 +530,7 @@ else {
 di _n "=== TEST CASE 22: Excel export to non-existent directory ==="
 local ++total_tests
 sysuse auto, clear
-capture dtfreq rep78, save("test/non-existent/file.xlsx") replace
+    capture dtfreq rep78, save("ado/ancillary_files/test/non-existent/file.xlsx") replace
 
 if _rc == 601 {
     di as result "Test 22 completed successfully"
@@ -545,8 +545,8 @@ else {
 di _n "=== TEST CASE 23: Excel export without extension ==="
 local ++total_tests
 sysuse auto, clear
-dtrace dtfreq rep78, save("test/dtfreq/no-extension") replace
-capture confirm file "test/dtfreq/no-extension.xlsx"
+    dtrace dtfreq rep78, save("ado/ancillary_files/test/dtfreq/no-extension") replace
+capture confirm file "ado/ancillary_files/test/dtfreq/no-extension.xlsx"
 if _rc {
     di as error "Test 23 failed with error " _rc
     local failed_tests "`failed_tests' 23"

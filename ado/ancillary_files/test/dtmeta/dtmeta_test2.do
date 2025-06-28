@@ -13,7 +13,7 @@ if c(hostname) == "NUXS" {
 else {
     cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
 }
-log using test/dtmeta/dtmeta_test2.log, replace
+log using ado/ancillary_files/test/log/dtmeta_test2.log, replace
 
 // manually drop main program and subroutines
 capture program drop dtmeta
