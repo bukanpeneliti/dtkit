@@ -1,10 +1,10 @@
-v 1.0.2
+v 1.1.0
 d dtkit: Data Toolkit for Stata
 d
 d Author: Hafiz Arfyanto
 d Support: email hafizarfyanto@gmail.com
 d
-d Distribution-Date: 25Jun2025
+d Distribution-Date: 28Jun2025
 d
 d This package provides utilities for data analysis in Stata
 d
@@ -14,6 +14,7 @@ f ado/dtmeta.ado
 f ado/dtmeta.sthlp
 f ado/dtstat.ado
 f ado/dtstat.sthlp
+f ado/dtkit.ado
 f ado/dtkit.sthlp
 f examples/dtfreq_examples.do
 f examples/dtmeta_examples.do

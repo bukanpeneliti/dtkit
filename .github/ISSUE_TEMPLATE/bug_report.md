@@ -5,16 +5,29 @@ title: "[BUG] "
 labels: bug
 ---
 
-<!-- What went wrong? -->
+## Bug Description
+<!-- A clear and concise description of the bug -->
 
-<!-- How can we recreate this problem? -->
+## Steps to Reproduce
 
-<!-- What should have happened instead? -->
+1. <!-- First step -->
+2. <!-- Second step -->
+3. <!-- And so on... -->
 
-<!-- What's your setup?
-- **OS:**
-- **Stata version:**
-- **Package version:**
--->
+## Expected Behavior
+<!-- What you expected to happen -->
 
-<!-- Got any screenshots or extra details that might help? -->
+## Actual Behavior
+<!-- What actually happened -->
+
+## Environment
+
+- Operating System (select one):
+  - [ ] Windows
+  - [ ] macOS
+  - [ ] Linux
+- Stata version: <!-- output of `c(stata_version)` and `c(edition_real)` -->
+- Package version: <!-- e.g. output of `which dtkit_cmdname` -->
+
+## Additional Context
+<!-- Add any other context about the problem here, such as screenshots, logs, etc. -->

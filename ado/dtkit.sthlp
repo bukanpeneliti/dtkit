@@ -1,183 +1,129 @@
 {smcl}
-{* *! version 1.0.2 25Jun2025}{...}
+{* *! version 1.1.0  28Jun2025}{...}
 {viewerjumpto "Syntax" "dtkit##syntax"}{...}
 {viewerjumpto "Description" "dtkit##description"}{...}
-{viewerjumpto "Commands" "dtkit##commands"}{...}
+{viewerjumpto "Options" "dtkit##options"}{...}
 {viewerjumpto "Examples" "dtkit##examples"}{...}
-{viewerjumpto "Authors" "dtkit##authors"}{...}
+{viewerjumpto "Author" "dtkit##author"}{...}
 
 {title:Title}
 
 {phang}
-{cmd:dtkit} {hline 2} Data toolkit for enhanced data exploration and summary statistics
+{bf:dtkit} {hline 2} Data Toolkit package management
 
 {marker syntax}{...}
 {title:Syntax}
 
-{pstd}
-{opt dtkit} is a collection of Stata commands designed to provide enhanced data exploration 
-and summary statistics capabilities. The package includes the following commands:
-
 {p 8 17 2}
-{manhelp dtstat R:dtstat} - Enhanced descriptive statistics with frame output{p_end}
+{cmdab:dtkit}
+[{cmd:,} {it:options}]
 
-{p 8 17 2}
-{manhelp dtfreq R:dtfreq} - Comprehensive frequency datasets and cross-tabulations{p_end}
+{synoptset 20 tabbed}{...}
+{synopthdr}
+{synoptline}
+{syntab:Package Management}
+{synopt:{opt upgrade}}upgrade dtkit to latest version{p_end}
+{synopt:{opt install_latest}}install latest version of dtkit{p_end}
+{synopt:{opt branch(string)}}specify GitHub branch (default: main){p_end}
 
-{p 8 17 2}
-{manhelp dtmeta R:dtmeta} - Dataset metadata extraction into multiple frames{p_end}
+{syntab:Information}
+{synopt:{opt licenses}}display license information{p_end}
+{synopt:{opt verbose}}display detailed license information{p_end}
+
+{syntab:Examples and Testing}
+{synopt:{opt examples}}run example files for all dtkit commands{p_end}
+{synopt:{opt showcase}}same as examples{p_end}
+{synopt:{opt test}}run basic functionality tests{p_end}
+{synopt:{opt tests(string)}}run specific tests (basic, dtfreq, dtstat, dtmeta){p_end}
+{synoptline}
+{p2colreset}{...}
 
 {marker description}{...}
 {title:Description}
 
 {pstd}
-{opt dtkit} is a Stata package that provides a collection of commands for data exploration
-and analysis. The package extends Stata's built-in capabilities by offering tools for
-enhanced summary statistics, detailed frequency analysis, and comprehensive metadata reporting.
-All commands in {opt dtkit} utilize Stata's {help frame} functionality to organize their output
-into datasets, facilitating further analysis, merging, or export, for instance, to Excel.
+{cmd:dtkit} provides package management functionality for the dtkit suite of data analysis commands.
+The dtkit package includes three main commands:
+
+{phang2}
+{bf:dtfreq} - Frequency analysis and cross-tabulation
+
+{phang2}
+{bf:dtstat} - Descriptive statistics with flexible output options
+
+{phang2}
+{bf:dtmeta} - Metadata analysis and variable exploration
 
 {pstd}
-The {opt dtkit} package is designed to streamline the initial data exploration process.
-It provides more detailed and structured output datasets compared with the display-only output
-of some standard Stata commands. Each command in the package offers unique features that
-complement Stata's existing functionality, aiming to provide deeper insights into data
-characteristics through datasets organized in frames.
+When called without options, {cmd:dtkit} displays version information and availability status of all components.
 
-{marker commands}{...}
-{title:Commands in dtkit}
+{marker options}{...}
+{title:Options}
 
-{dlgtab:Descriptive Statistics}
+{dlgtab:Package Management}
 
 {phang}
-{cmd:dtstat} {varlist} [{it:{help if}}] [{it:{help in}}] [{it:{help weight}}] [{cmd:using} {it:{help filename}}] [{cmd:,} {it:options}]
-
-{pmore}
-Creates a dataset in a {help frame} containing descriptive statistics for the specified numeric {varlist}.
-Unlike {help summarize} or {help tabstat}, {cmd:dtstat} produces an output dataset that can be further
-manipulated, merged, or exported. When used with the {opt by()} option, {cmd:dtstat} computes
-statistics for each group and includes overall totals, preserving value labels.
-
-{pmore}
-Main options: {opt df(framename)} specifies the output frame name; {opt by(varlist)} computes statistics by group;
-{opt stats(statlist)} specifies statistics to calculate (default: {cmd:count mean median min max});
-{opt format(%fmt)} sets the display format for statistic variables;
-{opt nomiss} excludes observations with missing values; {opt fast} uses {cmd:gtools} for faster processing;
-{opt save(filename)} exports results to Excel file; 
-and {opt replace} replaces existing Excel file when saving.
-
-{dlgtab:Frequency Analysis}
+{opt upgrade} upgrades dtkit to the latest version available on GitHub. This option first uninstalls 
+the current version and then installs the latest version from the main branch.
 
 {phang}
-{cmd:dtfreq} {varlist} [{it:{help if}}] [{it:{help in}}] [{it:{help weight}}] [{cmd:using} {it:filename}] [{cmd:,} {it:options}]
-
-{pmore}
-Produces comprehensive frequency datasets (counts, proportions, percentages) in a {help frame}.
-Offers cross-tabulation capabilities with row and column groupings, flexible calculation of statistics
-(row, column, or cell proportions/percentages), automatic totals, value label preservation,
-binary variable reshaping, and direct Excel export.
-
-{pmore}
-Main options: {opt df(framename)} specifies the output frame name; {opt by(varname)} defines row groups;
-{opt cross(varname)} defines column groups; {opt binary} reshapes binary variables;
-{opt stats(statlist)} specifies direction for statistics (row, col, cell);
-{opt type(typelist)} sets statistic type (prop, pct);
-{opt format(%fmt)} sets display format; {opt nomiss} excludes missing values from analysis;
-{opt save(excelname)} exports results to Excel file named {it:excelname}; 
-and {opt replace} replaces existing Excel file when saving.
-
-{dlgtab:Dataset Metadata}
+{opt install_latest} same as {opt upgrade}.
 
 {phang}
-{cmd:dtmeta} [{cmd:using} {it:{help filename}}] [{cmd:,} {it:options}]
+{opt branch(string)} specifies which GitHub branch to use for installation. Default is {bf:main}. 
+The {bf:develop} branch may contain experimental features.
 
-{pmore}
-Extracts comprehensive metadata from a Stata dataset and organizes it into separate {help frame:frames}.
-Creates frames for variable metadata ({cmd:_dtvars}), value label metadata ({cmd:_dtlabel}),
-variable notes ({cmd:_dtnotes}), and dataset information/characteristics ({cmd:_dtinfo}).
-Processes data in memory or from external Stata {cmd:.dta} files.
+{dlgtab:Information}
 
-{pmore}
-Main options: {opt clear} drops current data in memory when loading from an external file;
-{opt replace} allows overwriting an existing Excel export file; {opt report} displays a metadata extraction summary;
-and {opt save(filename)} exports metadata frames to a specified Excel file.
+{phang}
+{opt licenses} displays license information for dtkit and its components.
+
+{phang}
+{opt verbose} when combined with {opt licenses}, displays the complete license text.
+
+{dlgtab:Examples and Testing}
+
+{phang}
+{opt examples} runs the example files for all dtkit commands (dtfreq_examples.do, dtstat_examples.do, 
+dtmeta_examples.do). This provides a demonstration of package functionality.
+
+{phang}
+{opt showcase} same as {opt examples}.
+
+{phang}
+{opt test} runs basic functionality tests to verify that all dtkit commands are properly installed 
+and accessible.
+
+{phang}
+{opt tests(string)} runs specific test suites. Available options are:
+{break}    {bf:basic} - basic functionality tests
+{break}    {bf:dtfreq} - dtfreq-specific tests  
+{break}    {bf:dtstat} - dtstat-specific tests
+{break}    {bf:dtmeta} - dtmeta-specific tests
 
 {marker examples}{...}
 {title:Examples}
 
-{pstd}Load example dataset{p_end}
-{p 8 4 2}{stata sysuse auto, clear}{p_end}
+{phang}{cmd:. dtkit}{p_end}
+{phang2}Display version information and component availability{p_end}
 
-{pstd}{cmd:dtstat} - Enhanced descriptive statistics{p_end}
-{p 8 4 2}{stata dtstat price mpg weight}{p_end}
-{p 8 4 2}{stata dtstat price mpg, by(foreign)}{p_end}
-{p 8 4 2}{stata dtstat price mpg, save(summary.xlsx) replace}{p_end}
+{phang}{cmd:. dtkit, upgrade}{p_end}
+{phang2}Upgrade dtkit to the latest version{p_end}
 
-{pstd}{cmd:dtfreq} - Comprehensive frequency analysis{p_end}
-{p 8 4 2}{stata dtfreq rep78}{p_end}
-{p 8 4 2}{stata dtfreq rep78, by(foreign)}{p_end}
-{p 8 4 2}{stata dtfreq rep78, save(freq.xlsx) replace}{p_end}
+{phang}{cmd:. dtkit, examples}{p_end}
+{phang2}Run demonstration examples for all dtkit commands{p_end}
 
-{pstd}{cmd:dtmeta} - Dataset metadata extraction{p_end}
-{p 8 4 2}{stata dtmeta}{p_end}
-{p 8 4 2}{stata dtmeta, save(metadata.xlsx) replace}{p_end}
+{phang}{cmd:. dtkit, licenses}{p_end}
+{phang2}Display license information{p_end}
 
-{pstd}Combined workflow example{p_end}
-{p 8 4 2}{stata sysuse auto, clear}{p_end}
-{p 8 4 2}{stata dtmeta}{p_end}
-{p 8 4 2}{stata dtstat price mpg, by(foreign)}{p_end}
-{p 8 4 2}{stata dtfreq rep78, by(foreign)}{p_end}
-{p 8 4 2}{stata frame _df: list, noobs clean}{p_end}
+{phang}{cmd:. dtkit, test}{p_end}
+{phang2}Run basic functionality tests{p_end}
 
-{marker remarks}{...}
-{title:Remarks}
+{phang}{cmd:. dtkit, tests(dtfreq dtstat)}{p_end}
+{phang2}Run specific tests for dtfreq and dtstat{p_end}
 
-{pstd}
-The {opt dtkit} package is designed to integrate with standard Stata workflows.
-All commands adhere to Stata conventions for {it:if} and {it:in} qualifiers,
-{help weight:weights}, and {help varlist:varlists}. The package leverages Stata's
-{help frame:frame} functionality for managing output datasets and provides options
-for exporting these frames to Excel.
-
-{pstd}
-Key features of the {opt dtkit} commands include:
-
-{p 8 12 2}• Output datasets stored in {help frame:frames}, allowing for further manipulation, merging, or analysis.{p_end}
-{p 8 12 2}• Capability to export results to Excel files, with options for customization via the {opt save()} and {opt excel()} options.{p_end}
-{p 8 12 2}• Automatic application of appropriate display formats and preservation of value labels in output datasets.{p_end}
-{p 8 12 2}• Support for all Stata {help weight:weight} types.{p_end}
-{p 8 12 2}• Optional integration with the {cmd:gtools} package for improved performance with large datasets, particularly in {cmd:dtstat} via the {opt fast} option.{p_end}
-
-{pstd}
-For detailed information about each command's syntax, options, and stored results,
-refer to the individual help files:
-
-{p 8 12 2}• {help dtstat} for creating datasets of descriptive statistics.{p_end}
-{p 8 12 2}• {help dtfreq} for producing comprehensive frequency datasets and cross-tabulations.{p_end}
-{p 8 12 2}• {help dtmeta} for extracting and organizing dataset metadata.{p_end}
-
-{pstd}
-Each command can be used independently or as part of a larger data exploration and
-reporting workflow. They are suitable for both interactive use and for inclusion in
-do-files and Stata programs.
-
-{marker compatibility}{...}
-{title:Compatibility}
-
-{pstd}
-{opt dtkit} requires Stata version 16.0 or later due to its use of {help frame:frames},
-which were introduced in Stata 16. The commands have been tested in Stata/MP
-and on Windows platforms.
-
-{pstd}
-Optional dependencies for enhanced performance:
-
-{p 8 12 2}• {cmd:gtools}: Required by {cmd:dtstat} if the {opt fast} option is specified.
-Installation: {stata ssc install gtools}, then {stata gtools, upgrade}.
-Also consider {stata ssc install gcollapse} if using older versions of gtools.{p_end}
-
-{marker authors}{...}
-{title:Authors}
+{marker author}{...}
+{title:Author}
 
 {pstd}Hafiz Arfyanto{p_end}
 {pstd}Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}{p_end}
@@ -186,18 +132,12 @@ Also consider {stata ssc install gcollapse} if using older versions of gtools.{p
 {pstd}
 For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
 
-{pstd}
-The {opt dtkit} package was developed to provide Stata users with tools that enhance
-data exploration by producing structured datasets in frames, rather than display-only output.
-For questions, suggestions, or bug reports, please contact the author.
-
-{pstd}
-These commands are intended to complement Stata's native commands by offering
-additional functionalities suited for modern data analysis workflows that benefit
-from frame-based data organization and flexible export options.
-
 {marker alsosee}{...}
 {title:Also see}
 
-{p 4 13 2}
-{manhelp summarize R}, {manhelp tabulate R}, {manhelp describe R}, {manhelp codebook R}, {manhelp frames D}, {manhelp export_excel D}{p_end}
+{psee}
+Manual:  {bf:[D] dtfreq}, {bf:[D] dtstat}, {bf:[D] dtmeta}
+
+{psee}
+Online:  {helpb dtfreq}, {helpb dtstat}, {helpb dtmeta}
+{p_end}
