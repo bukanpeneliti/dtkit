@@ -1,4 +1,4 @@
-*! version 1.1.0 28Jun2025 Hafiz Arfyanto, hafizarfyanto@gmail.com
+*! version 1.1.0 28Jun2025
 *! Program for managing the dtkit package installation
 
 capture program drop dtkit
@@ -8,12 +8,9 @@ program dtkit
     syntax, [          ///
         LICENSEs       ///
         Verbose        ///
-        Install_latest ///
-        Upgrade        ///
-        showcase       ///
+        Update         ///
         examples       ///
         test           ///
-        TESTs(str)     ///
         branch(str)    ///
     ]
 
@@ -35,20 +32,20 @@ program dtkit
             dtkit_licenses
         }
 
-        if ( `"`install_latest'`upgrade'`showcase'`examples'`test'`tests'"' == `""' ) {
+        if ( `"`update'`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
     }
 
-    if ( ("`install_latest'" == "install_latest") | ("`upgrade'" == "upgrade") ) {
+    if ("`update'" == "update") {
         capture net uninstall dtkit
         net install dtkit, from(`github') replace
-        if ( `"`showcase'`examples'`test'`tests'"' == `""' ) {
+        if ( `"`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
     }
 
-    if ( "`showcase'`examples'" != "" ) {
+    if ( "`examples'" != "" ) {
         dtkit_showcase
         if ( "`test'`tests'" == "" ) {
             exit 0
@@ -86,7 +83,7 @@ program dtkit
     display "Available commands: dtfreq, dtstat, dtmeta"
     display ""
     display as smcl "Usage examples: {stata dtkit, examples}"
-    display as smcl "Package upgrade: {stata dtkit, upgrade}"
+    display as smcl "Package update: {stata dtkit, update}"
     display as smcl "License info: {stata dtkit, licenses}"
     display ""
     display "Version info:"
