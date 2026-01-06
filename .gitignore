@@ -6,6 +6,7 @@
 Thumbs.db
 *.xlsx
 package_maintenance_guide.*
+*.do 
 
 # Private configuration files
 # Memory bank documentation (private)
