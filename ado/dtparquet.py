@@ -19,6 +19,8 @@ def stata_to_arrow_type(stata_type):
         return pa.float32()
     elif stata_type == "double":
         return pa.float64()
+    elif stata_type == "strL":
+        return pa.string()
     elif stata_type.startswith("str"):
         return pa.string()
     else:
@@ -74,20 +76,13 @@ def extract_dtmeta():
     metadata = {"schema_version": 1, "frames": {}}
     target_frames = ["_dtvars", "_dtlabel", "_dtnotes", "_dtinfo"]
 
-    # Debug current frame
-    try:
-        orig_frame = sfi.Frame().name
-        if not orig_frame:
-            orig_frame = "default"
-    except:
-        orig_frame = "default"
+    # Use c(frame) macro for reliable frame tracking in batch mode
+    orig_frame = sfi.Macro.getGlobal("c(frame)") or "default"
 
     for fr_name in target_frames:
         if fr_name in sfi.Frame.getFrames():
-            # Switch frame via Stata command
             sfi.SFIToolkit.stata(f"cwf {fr_name}")
 
-            # Extract data from current frame
             var_count = sfi.Data.getVarCount()
             obs_count = sfi.Data.getObsTotal()
 
@@ -115,19 +110,12 @@ def apply_dtmeta(metadata_json):
     except:
         return
 
-    try:
-        orig_frame = sfi.Frame().name
-        if not orig_frame:
-            orig_frame = "default"
-    except:
-        orig_frame = "default"
+    orig_frame = sfi.Macro.getGlobal("c(frame)") or "default"
 
     for fr_name, frame_content in metadata.get("frames", {}).items():
-        # Drop existing frame if any
         if fr_name in sfi.Frame.getFrames():
-            sfi.Frame.drop(fr_name)
+            sfi.SFIToolkit.stata(f"capture frame drop {fr_name}")
 
-        # Create and populate frame
         sfi.Frame.create(fr_name)
         sfi.SFIToolkit.stata(f"cwf {fr_name}")
 
@@ -151,19 +139,29 @@ def save(filename, nolabel=False):
     var_names = [sfi.Data.getVarName(i) for i in range(var_count)]
     stata_types = [sfi.Data.getVarType(i) for i in range(var_count)]
 
-    # Extract data (column-major for Phase 1)
     data_arrays = []
     for i in range(var_count):
         data_arrays.append(pa.array(sfi.Data.get(i)))
 
-    # Schema construction
     fields = [
         pa.field(name, stata_to_arrow_type(t))
         for name, t in zip(var_names, stata_types)
     ]
-    table = pa.Table.from_arrays(data_arrays, schema=pa.schema(fields))
 
-    # Metadata
+    # Strictly respect nolabel for field-level metadata
+    updated_fields = []
+    for i, field in enumerate(fields):
+        if not nolabel:
+            vlab = sfi.Data.getVarLabel(i)
+            if vlab:
+                field_meta = field.metadata or {}
+                field_meta[b"stata.label"] = vlab.encode("utf-8")
+                field = field.with_metadata(field_meta)
+        updated_fields.append(field)
+
+    table = pa.Table.from_arrays(data_arrays, schema=pa.schema(updated_fields))
+
+    # Strictly respect nolabel for file-level metadata
     custom_meta = {}
     if not nolabel:
         dtmeta_json = extract_dtmeta()
@@ -171,7 +169,6 @@ def save(filename, nolabel=False):
 
     if custom_meta:
         existing_meta = table.schema.metadata or {}
-        # Arrow expects binary keys/values in metadata
         merged_meta = {
             **existing_meta,
             **{k.encode(): v.encode() for k, v in custom_meta.items()},
@@ -182,23 +179,93 @@ def save(filename, nolabel=False):
 
 
 def load(filename, varlist=None, nolabel=False):
-    """Loads Parquet file into Stata memory."""
     table = pq.read_table(filename, columns=varlist)
 
-    # Clear current data
-    if sfi.Data.getVarCount() > 0:
-        sfi.Data.dropVar("_all")
-    sfi.Data.addObs(table.num_rows)
+    if nolabel:
+        clean_fields = [pa.field(f.name, f.type) for f in table.schema]
+        table = table.cast(pa.schema(clean_fields))
 
-    # Restore variables
+    vcount = sfi.Data.getVarCount()
+    if vcount > 0:
+        sfi.Data.dropVar(list(range(vcount)))
+
+    cur_obs = sfi.Data.getObsTotal()
+    target_obs = table.num_rows
+    if cur_obs > target_obs:
+        if target_obs > 0:
+            sfi.Data.keepObs(list(range(target_obs)))
+        else:
+            sfi.SFIToolkit.stata("quietly drop _all")
+    elif cur_obs < target_obs:
+        sfi.Data.addObs(target_obs - cur_obs)
+
     for i, field in enumerate(table.schema):
         stata_type = arrow_to_stata_type(field.type)
         add_stata_var(stata_type, field.name)
-        # Convert arrow array to list for sfi.Data.store
+
+        if nolabel:
+            sfi.Data.setVarLabel(i, "")
+
         sfi.Data.store(i, None, table.column(i).to_pylist())
 
-    # Restore metadata frames
+        if not nolabel:
+            if field.metadata:
+                vlab = field.metadata.get(b"stata.label")
+                if vlab:
+                    sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
+        else:
+            sfi.Data.setVarLabel(i, "")
+
     if not nolabel and table.schema.metadata:
         dtmeta_json = table.schema.metadata.get(DTMETA_KEY.encode())
         if dtmeta_json:
             apply_dtmeta(dtmeta_json.decode())
+
+
+def cleanup_orphaned_tmp_files():
+    """Clean up orphaned .tmp files from previous failed operations."""
+    import glob
+    import os
+
+    for tmp_file in glob.glob("**/*.parquet.tmp", recursive=True):
+        try:
+            os.unlink(tmp_file)
+        except:
+            pass
+
+    temp_dir = os.environ.get("TEMP", os.environ.get("TMP", "."))
+    for tmp_file in glob.glob(os.path.join(temp_dir, "*.parquet.tmp")):
+        try:
+            os.unlink(tmp_file)
+        except:
+            pass
+
+
+def save_atomic(filename, nolabel=False):
+    """Atomic version of save: writes to .tmp file then renames."""
+    import tempfile
+    import os
+
+    target_dir = os.path.dirname(filename) or "."
+    if target_dir and not os.path.exists(target_dir):
+        os.makedirs(target_dir, exist_ok=True)
+
+    with tempfile.NamedTemporaryFile(
+        mode="wb", delete=False, suffix=".tmp", dir=target_dir
+    ) as tmp:
+        temp_path = tmp.name
+
+    try:
+        save(temp_path, nolabel)
+        os.replace(temp_path, filename)
+    except Exception as e:
+        if os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+        raise e
+
+
+def load_atomic(filename, nolabel=False):
+    return load(filename, varlist=None, nolabel=nolabel)
