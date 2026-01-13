@@ -101,16 +101,18 @@ def extract_dtmeta():
 
 
 def apply_dtmeta(metadata_json):
-    """Restores _dt* frames from JSON string."""
+    """Restores _dt* frames from JSON string. Returns type mapping from _dtvars."""
     if not metadata_json:
-        return
+        return {}
 
     try:
         metadata = json.loads(metadata_json)
     except:
-        return
+        return {}
 
     orig_frame = sfi.Macro.getGlobal("c(frame)") or "default"
+
+    type_mapping = {}
 
     for fr_name, frame_content in metadata.get("frames", {}).items():
         if fr_name in sfi.Frame.getFrames():
@@ -130,7 +132,12 @@ def apply_dtmeta(metadata_json):
             add_stata_var(vtype, name)
             sfi.Data.store(i, None, data[i])
 
+        if fr_name == "_dtvars":
+            type_mapping = dict(zip(colnames, types))
+
     sfi.SFIToolkit.stata(f"cwf {orig_frame}")
+
+    return type_mapping
 
 
 def save(filename, nolabel=False):
@@ -151,13 +158,14 @@ def save(filename, nolabel=False):
     # Strictly respect nolabel for field-level metadata
     updated_fields = []
     for i, field in enumerate(fields):
+        field_meta = field.metadata or {}
         if not nolabel:
             vlab = sfi.Data.getVarLabel(i)
             if vlab:
-                field_meta = field.metadata or {}
                 field_meta[b"stata.label"] = vlab.encode("utf-8")
-                field = field.with_metadata(field_meta)
-        updated_fields.append(field)
+        if stata_types[i].startswith("str"):
+            field_meta[b"stata.type"] = stata_types[i].encode("utf-8")
+        updated_fields.append(field.with_metadata(field_meta))
 
     table = pa.Table.from_arrays(data_arrays, schema=pa.schema(updated_fields))
 
@@ -199,9 +207,25 @@ def load(filename, varlist=None, nolabel=False):
     elif cur_obs < target_obs:
         sfi.Data.addObs(target_obs - cur_obs)
 
+    dtmeta_types = {}
+    if not nolabel and table.schema.metadata:
+        dtmeta_json = table.schema.metadata.get(DTMETA_KEY.encode())
+        if dtmeta_json:
+            dtmeta_types = apply_dtmeta(dtmeta_json.decode())
+
     for i, field in enumerate(table.schema):
-        stata_type = arrow_to_stata_type(field.type)
-        add_stata_var(stata_type, field.name)
+        varname = field.name
+        if varname in dtmeta_types:
+            stata_type = dtmeta_types[varname]
+        elif field.metadata:
+            stored_type = field.metadata.get(b"stata.type")
+            if stored_type:
+                stata_type = stored_type.decode("utf-8")
+            else:
+                stata_type = arrow_to_stata_type(field.type)
+        else:
+            stata_type = arrow_to_stata_type(field.type)
+        add_stata_var(stata_type, varname)
 
         if nolabel:
             sfi.Data.setVarLabel(i, "")
@@ -215,11 +239,6 @@ def load(filename, varlist=None, nolabel=False):
                     sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
         else:
             sfi.Data.setVarLabel(i, "")
-
-    if not nolabel and table.schema.metadata:
-        dtmeta_json = table.schema.metadata.get(DTMETA_KEY.encode())
-        if dtmeta_json:
-            apply_dtmeta(dtmeta_json.decode())
 
 
 def cleanup_orphaned_tmp_files():
