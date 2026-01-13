@@ -1,4 +1,4 @@
-*! Version 1.0.8 13Jan2026
+*! Version 1.1.0 13Jan2026
 program dtparquet
     version 16
     _cleanup_orphaned
@@ -54,8 +54,16 @@ program dtparquet_use
     local cmdline `"`0'"'
     gettoken everything options : cmdline, parse(",")
     if substr(`"`options'"', 1, 1) == "," local options = substr(`"`options'"', 2, .)
+    
+    // Parse options manually for chunksize
     local is_nolabel = strpos(`"`options'"', "nolabel") > 0
     local is_clear = strpos(`"`options'"', "clear") > 0
+    
+    local chunksize "None"
+    if regexm(`"`options'"', "chunksize\(([0-9]+)\)") {
+        local chunksize = regexs(1)
+    }
+
     local upos = strpos(`"`everything'"', " using ")
     if `upos' == 0 {
         if substr(trim(`"`everything'"'), 1, 5) == "using" {
@@ -109,7 +117,7 @@ program dtparquet_use
         local py_varlist `"`py_varlist']"'
     }
     else local py_varlist "None"
-    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'))
+    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize')
     if `"`if_in'"' != "" quietly keep `if_in'
     if `is_nolabel' == 0 _apply_dtmeta
 end
@@ -117,13 +125,8 @@ end
 capture program drop dtparquet_export
 program dtparquet_export
     _check_python
-    syntax anything(name=pqfile) using/ [, replace nolabel]
+    syntax anything(name=pqfile) using/ [, replace nolabel chunksize(integer 50000)]
     local is_nolabel = ("`nolabel'" != "")
-    
-    // Cleanup existing metadata frames
-    foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
-        capture frame drop `fr'
-    }
     
     local target = subinstr(trim(`"`pqfile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
@@ -133,41 +136,54 @@ program dtparquet_export
     confirm file `"`source'"'
     if "`replace'" == "" confirm new file `"`target'"'
     
-    tempname temp_frame
     local orig_frame = c(frame)
-    frame create `temp_frame'
-    frame `temp_frame': use `"`source'"', clear
     
-    if `is_nolabel' == 0 {
-        frame `temp_frame': capture which dtmeta
-        if _rc == 0 {
-            quietly frame `temp_frame': dtmeta
-        }
-        else {
-            local is_nolabel 1
-        }
-    }
-    
-    frame change `temp_frame'
+    // 1. Initialize Stream
     python: import dtparquet
-    python: dtparquet.save_atomic("`target'", bool(`is_nolabel'))
+    python: dtparquet.StreamManager.init_export("`target'", bool(`is_nolabel'))
+    
+    // 2. Metadata Phase (using first observation)
+    tempname metadata_frame
+    frame create `metadata_frame'
+    quietly frame `metadata_frame': use `"`source'"' in 1/1, clear
     
     if `is_nolabel' == 0 {
-        foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
-            capture frame drop `fr'
+        frame `metadata_frame': capture which dtmeta
+        if _rc == 0 {
+            quietly frame `metadata_frame': dtmeta
         }
     }
     
+    // 3. Streaming Phase
+    quietly describe using `"`source'"'
+    local N = r(N)
+    
+    local start 1
+    frame change `metadata_frame'
+    while `start' <= `N' {
+        local end = min(`start' + `chunksize' - 1, `N')
+        quietly use `"`source'"' in `start'/`end', clear
+        
+        python: dtparquet.StreamManager.write_chunk()
+        
+        local start = `end' + 1
+    }
+    
+    // 4. Finalize
+    python: dtparquet.StreamManager.finalize_export()
+    
+    // Cleanup
     frame change `orig_frame'
-    frame drop `temp_frame'
+    frame drop `metadata_frame'
+    foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
+        capture frame drop `fr'
+    }
 end
 
 capture program drop dtparquet_import
 program dtparquet_import
     _check_python
-    syntax anything(name=dtafile) using/ [, replace nolabel]
-    local cmdline `"`0'"'
-    local is_nolabel = strpos(`"`cmdline'"', "nolabel") > 0
+    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000)]
 
     local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
@@ -183,25 +199,21 @@ program dtparquet_import
     frame change `temp_frame'
 
     python: import dtparquet
-    python: dtparquet.load_atomic("`source'", bool(`is_nolabel'))
+    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize')
     
-    if `is_nolabel' == 0 {
+    if "`nolabel'" == "" {
         _apply_dtmeta
     }
     else {
-        // Remove variable labels if nolabel requested
-        // Using a more robust loop
         foreach v of varlist _all {
             label variable `v' ""
             label values `v' .
         }
     }
     
-    tempfile temp_dta
-    quietly save `"`temp_dta'"', replace
+    quietly save `"`target'"', `replace'
     
     frame change `orig_frame'
-    copy `"`temp_dta'"' `"`target'"', replace
     frame drop `temp_frame'
 end
 

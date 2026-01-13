@@ -251,7 +251,7 @@ and handles standard metadata read/write.
 **Test file:** Updated `dtparquet_test1.do` includes tests for metadata
 preservation (data label, variable notes, value labels).
 
-## Phase 4: Unified streaming architecture (the buffer frame)
+## Phase 4: Unified streaming architecture (the buffer frame) [COMPLETED]
 
 Objective: Solve the "Memory vs. Disk" conflict by using Stata Frames as a
 standardized sliding window.

@@ -294,7 +294,7 @@ local testfiles "`testfiles' test_replace_source.dta test_replace_target.parquet
 local testfiles "`testfiles' test_cleanup_dummy.parquet"
 
 foreach file of local testfiles {
-    // capture erase "`file'"
+    capture erase "`file'"
 }
 
 // Summary

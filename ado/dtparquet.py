@@ -3,8 +3,100 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import json
 import os
+import tempfile
+from typing import Optional, Any
 
 DTMETA_KEY = "dtparquet.dtmeta"
+
+
+class StreamManager:
+    _writer: Any = None
+    _temp_path: Optional[str] = None
+    _target_path: Optional[str] = None
+    _schema: Optional[pa.Schema] = None
+    _nolabel: bool = False
+
+    @classmethod
+    def init_export(cls, filename: str, nolabel: bool = False):
+        cls._target_path = filename
+        cls._nolabel = nolabel
+        target_dir = os.path.dirname(filename) or "."
+        if target_dir and not os.path.exists(target_dir):
+            os.makedirs(target_dir, exist_ok=True)
+
+        fd, cls._temp_path = tempfile.mkstemp(suffix=".parquet.tmp", dir=target_dir)
+        os.close(fd)
+        cls._writer = None
+        cls._schema = None
+
+    @classmethod
+    def write_chunk(cls):
+        var_count = sfi.Data.getVarCount()
+        var_names = [sfi.Data.getVarName(i) for i in range(var_count)]
+        stata_types = [sfi.Data.getVarType(i) for i in range(var_count)]
+
+        if cls._schema is None:
+            schema = build_arrow_schema(var_names, stata_types, cls._nolabel)
+
+            # Extract and add dtmeta to schema metadata on first chunk
+            custom_meta = {}
+            if not cls._nolabel:
+                dtmeta_json = extract_dtmeta()
+                custom_meta[DTMETA_KEY] = dtmeta_json
+
+            if custom_meta:
+                meta = schema.metadata or {}
+                merged_meta = {
+                    **{
+                        k.decode() if isinstance(k, bytes) else k: v
+                        for k, v in meta.items()
+                    },
+                    **{k: v for k, v in custom_meta.items()},
+                }
+                schema = schema.with_metadata(merged_meta)
+
+            cls._schema = schema
+            if cls._temp_path:
+                cls._writer = pq.ParquetWriter(
+                    cls._temp_path, schema, compression="NONE"
+                )
+
+        data_arrays = []
+        missing_val = sfi.Missing.getValue()
+        if cls._schema is not None:
+            for i in range(var_count):
+                arrow_type = cls._schema.field(i).type
+                raw_data = sfi.Data.get(i)
+                # Map Stata missing values to None for Arrow
+                sanitized_data = [None if v == missing_val else v for v in raw_data]
+                data_arrays.append(pa.array(sanitized_data, type=arrow_type))
+
+            writer = cls._writer
+            if writer is not None:
+                table = pa.Table.from_arrays(data_arrays, schema=cls._schema)
+                writer.write_table(table)
+
+    @classmethod
+    def finalize_export(cls):
+        if cls._writer:
+            cls._writer.close()
+            cls._writer = None
+
+        if cls._temp_path and cls._target_path and os.path.exists(cls._temp_path):
+            os.replace(cls._temp_path, cls._target_path)
+            cls._temp_path = None
+
+    @classmethod
+    def abort_export(cls):
+        if cls._writer:
+            cls._writer.close()
+            cls._writer = None
+        if cls._temp_path and os.path.exists(cls._temp_path):
+            try:
+                os.unlink(cls._temp_path)
+            except:
+                pass
+            cls._temp_path = None
 
 
 def stata_to_arrow_type(stata_type):
@@ -168,11 +260,15 @@ def save(filename, nolabel=False):
     var_names = [sfi.Data.getVarName(i) for i in range(var_count)]
     stata_types = [sfi.Data.getVarType(i) for i in range(var_count)]
 
-    data_arrays = []
-    for i in range(var_count):
-        data_arrays.append(pa.array(sfi.Data.get(i)))
-
     schema = build_arrow_schema(var_names, stata_types, nolabel)
+    data_arrays = []
+    missing_val = sfi.Missing.getValue()
+    for i in range(var_count):
+        arrow_type = schema.field(i).type
+        raw_data = sfi.Data.get(i)
+        sanitized_data = [None if v == missing_val else v for v in raw_data]
+        data_arrays.append(pa.array(sanitized_data, type=arrow_type))
+
     table = pa.Table.from_arrays(data_arrays, schema=schema)
 
     # Strictly respect nolabel for file-level metadata
@@ -192,34 +288,33 @@ def save(filename, nolabel=False):
     pq.write_table(table, filename, compression="NONE")
 
 
-def load(filename, varlist=None, nolabel=False):
-    table = pq.read_table(filename, columns=varlist)
+def load(filename, varlist=None, nolabel=False, chunksize=None):
+    """Loads Parquet file into Stata. Supports streaming via chunksize."""
+    parquet_file = pq.ParquetFile(filename)
 
-    if nolabel:
-        clean_fields = [pa.field(f.name, f.type) for f in table.schema]
-        table = table.cast(pa.schema(clean_fields))
+    # Metadata handling
+    dtmeta_types = {}
+    if not nolabel and parquet_file.schema_arrow.metadata:
+        dtmeta_json = parquet_file.schema_arrow.metadata.get(DTMETA_KEY.encode())
+        if dtmeta_json:
+            dtmeta_types = apply_dtmeta(dtmeta_json.decode())
 
+    # Get schema from the first row group if we are streaming, or from the whole file
+    schema = parquet_file.schema_arrow
+    if varlist:
+        indices = [schema.get_field_index(v) for v in varlist]
+        schema = pa.schema([schema.field(i) for i in indices])
+
+    # Clear memory
     vcount = sfi.Data.getVarCount()
     if vcount > 0:
         sfi.Data.dropVar(list(range(vcount)))
 
-    cur_obs = sfi.Data.getObsTotal()
-    target_obs = table.num_rows
-    if cur_obs > target_obs:
-        if target_obs > 0:
-            sfi.Data.keepObs(list(range(target_obs)))
-        else:
-            sfi.SFIToolkit.stata("quietly drop _all")
-    elif cur_obs < target_obs:
-        sfi.Data.addObs(target_obs - cur_obs)
+    total_obs = parquet_file.metadata.num_rows
+    sfi.Data.addObs(total_obs)
 
-    dtmeta_types = {}
-    if not nolabel and table.schema.metadata:
-        dtmeta_json = table.schema.metadata.get(DTMETA_KEY.encode())
-        if dtmeta_json:
-            dtmeta_types = apply_dtmeta(dtmeta_json.decode())
-
-    for i, field in enumerate(table.schema):
+    # Add variables
+    for i, field in enumerate(schema):
         varname = field.name
         if varname in dtmeta_types:
             stata_type = dtmeta_types[varname]
@@ -231,20 +326,39 @@ def load(filename, varlist=None, nolabel=False):
                 stata_type = arrow_to_stata_type(field.type)
         else:
             stata_type = arrow_to_stata_type(field.type)
-        add_stata_var(stata_type, varname)
 
+        add_stata_var(stata_type, varname)
         if nolabel:
             sfi.Data.setVarLabel(i, "")
+        elif field.metadata:
+            vlab = field.metadata.get(b"stata.label")
+            if vlab:
+                sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
 
-        sfi.Data.store(i, None, table.column(i).to_pylist())
+    # Load data in batches
+    current_offset = 0
+    # Use 50k as default chunksize for streaming if not specified
+    actual_chunksize = chunksize or 50000
+    missing_val = sfi.Missing.getValue()
 
-        if not nolabel:
-            if field.metadata:
-                vlab = field.metadata.get(b"stata.label")
-                if vlab:
-                    sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
-        else:
-            sfi.Data.setVarLabel(i, "")
+    for batch in parquet_file.iter_batches(
+        batch_size=actual_chunksize, columns=varlist
+    ):
+        table_chunk = pa.Table.from_batches([batch])
+        for i in range(table_chunk.num_columns):
+            field = table_chunk.schema.field(i)
+            column_data = table_chunk.column(i).to_pylist()
+
+            # Map None back to Stata missing for numeric variables
+            if pa.types.is_integer(field.type) or pa.types.is_floating(field.type):
+                column_data = [missing_val if v is None else v for v in column_data]
+
+            sfi.Data.store(
+                i,
+                range(current_offset, current_offset + table_chunk.num_rows),
+                column_data,
+            )
+        current_offset += table_chunk.num_rows
 
 
 def cleanup_orphaned_tmp_files():
@@ -292,5 +406,5 @@ def save_atomic(filename, nolabel=False):
         raise e
 
 
-def load_atomic(filename, nolabel=False):
-    return load(filename, varlist=None, nolabel=nolabel)
+def load_atomic(filename, nolabel=False, chunksize=None):
+    return load(filename, varlist=None, nolabel=nolabel, chunksize=chunksize)
