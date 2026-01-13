@@ -254,38 +254,50 @@ def build_arrow_schema(var_names, stata_types, nolabel=False):
     return pa.schema(fields)
 
 
-def save(filename, nolabel=False):
-    """Saves current Stata memory to Parquet."""
+def save(filename, nolabel=False, chunksize=50000):
+    """Saves current Stata memory to Parquet using row-major chunking."""
     var_count = sfi.Data.getVarCount()
+    obs_total = sfi.Data.getObsTotal()
     var_names = [sfi.Data.getVarName(i) for i in range(var_count)]
     stata_types = [sfi.Data.getVarType(i) for i in range(var_count)]
 
     schema = build_arrow_schema(var_names, stata_types, nolabel)
-    data_arrays = []
-    missing_val = sfi.Missing.getValue()
-    for i in range(var_count):
-        arrow_type = schema.field(i).type
-        raw_data = sfi.Data.get(i)
-        sanitized_data = [None if v == missing_val else v for v in raw_data]
-        data_arrays.append(pa.array(sanitized_data, type=arrow_type))
 
-    table = pa.Table.from_arrays(data_arrays, schema=schema)
-
-    # Strictly respect nolabel for file-level metadata
+    # Extract and add dtmeta to schema metadata
     custom_meta = {}
     if not nolabel:
         dtmeta_json = extract_dtmeta()
         custom_meta[DTMETA_KEY] = dtmeta_json
 
     if custom_meta:
-        existing_meta = table.schema.metadata or {}
+        meta = schema.metadata or {}
         merged_meta = {
-            **existing_meta,
-            **{k.encode(): v.encode() for k, v in custom_meta.items()},
+            **{k.decode() if isinstance(k, bytes) else k: v for k, v in meta.items()},
+            **{k: v for k, v in custom_meta.items()},
         }
-        table = table.replace_schema_metadata(merged_meta)
+        schema = schema.with_metadata(merged_meta)
 
-    pq.write_table(table, filename, compression="NONE")
+    missing_val = sfi.Missing.getValue()
+    var_indices = list(range(var_count))
+
+    with pq.ParquetWriter(filename, schema, compression="NONE") as writer:
+        for start in range(0, obs_total, chunksize):
+            end = min(start + chunksize, obs_total)
+            # Fetch block of rows: list of lists
+            raw_data = sfi.Data.get(var_indices, range(start, end))
+
+            # Transpose list of lists to list of columns
+            columns = list(zip(*raw_data))
+
+            data_arrays = []
+            for i, col_data in enumerate(columns):
+                arrow_type = schema.field(i).type
+                # Map Stata missing to None for Arrow
+                sanitized = [None if v == missing_val else v for v in col_data]
+                data_arrays.append(pa.array(sanitized, type=arrow_type))
+
+            table_chunk = pa.Table.from_arrays(data_arrays, schema=schema)
+            writer.write_table(table_chunk)
 
 
 def load(filename, varlist=None, nolabel=False, chunksize=None):
@@ -380,7 +392,7 @@ def cleanup_orphaned_tmp_files():
             pass
 
 
-def save_atomic(filename, nolabel=False):
+def save_atomic(filename, nolabel=False, chunksize=50000):
     """Atomic version of save: writes to .tmp file then renames."""
     import tempfile
     import os
@@ -389,13 +401,11 @@ def save_atomic(filename, nolabel=False):
     if target_dir and not os.path.exists(target_dir):
         os.makedirs(target_dir, exist_ok=True)
 
-    with tempfile.NamedTemporaryFile(
-        mode="wb", delete=False, suffix=".tmp", dir=target_dir
-    ) as tmp:
-        temp_path = tmp.name
+    fd, temp_path = tempfile.mkstemp(suffix=".parquet.tmp", dir=target_dir)
+    os.close(fd)
 
     try:
-        save(temp_path, nolabel)
+        save(temp_path, nolabel, chunksize)
         os.replace(temp_path, filename)
     except Exception as e:
         if os.path.exists(temp_path):

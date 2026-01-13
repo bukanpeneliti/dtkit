@@ -23,7 +23,7 @@ end
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, replace nolabel]
+    syntax anything(name=filename) [, replace nolabel chunksize(integer 50000)]
     _check_python
     local is_nolabel = ("`nolabel'" != "")
     local file = subinstr(`"`filename'"', `"""', "", .)
@@ -40,7 +40,7 @@ program dtparquet_save
         }
     }
     python: import dtparquet
-    python: dtparquet.save("`file'", bool(`is_nolabel'))
+    python: dtparquet.save_atomic("`file'", bool(`is_nolabel'), `chunksize')
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
             capture frame drop `fr'

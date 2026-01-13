@@ -299,7 +299,7 @@ buffer frame management, and chunk-based Parquet I/O.
 **Test file:** Updated `dtparquet_test1.do` includes tests for streaming
 export/import of large datasets (100K observations).
 
-## Phase 5: Optimized SFI streaming
+## Phase 5: Optimized SFI streaming [COMPLETED]
 
 Objective: Implement the SFI bridge with row-major chunking to prevent memory
 blowouts on wide data.
