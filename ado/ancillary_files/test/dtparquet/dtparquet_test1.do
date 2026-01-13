@@ -63,6 +63,8 @@ generate strL v_strl = "large string for row " + string(_n)
 generate v_date = td(01jan2020) + _n
 format v_date %td
 
+save "test_case2_source.dta", replace
+
 dtparquet save "test_case2.parquet", replace
 if _rc {
     display as error "Test 2 Save failed with error " _rc
@@ -84,7 +86,26 @@ else {
         if _rc local ++t2_err
         capture assert v_date == td(01jan2020) + _n
         if _rc local ++t2_err
-        
+
+        // Save round-tripped data for datasignature comparison
+        save "test_case2_roundtrip.dta", replace
+
+        // Compare datasignatures
+        use "test_case2_source.dta", clear
+        datasignature
+        local sig_before = r(datasignature)
+
+        use "test_case2_roundtrip.dta", clear
+        datasignature
+        local sig_after = r(datasignature)
+
+        if "`sig_before'" != "`sig_after'" {
+            display as error "Test 2 failed: datasignature mismatch"
+            display as error "  Before: `sig_before'"
+            display as error "  After:  `sig_after'"
+            local ++t2_err
+        }
+
         if `t2_err' == 0 {
             display as result "Test 2 completed successfully"
             local passed_tests "`passed_tests' 2"
@@ -222,6 +243,8 @@ else {
 // Cleanup
 capture erase "test_case1.parquet"
 capture erase "test_case2.parquet"
+capture erase "test_case2_source.dta"
+capture erase "test_case2_roundtrip.dta"
 capture erase "test_case3.parquet"
 capture erase "test_case4.parquet"
 capture erase "test_case5.parquet"
@@ -231,42 +254,20 @@ capture erase "test_orig.dta"
 capture set python_exec ""
 
 // Test Summary
-display _newline(2) "=========================================="
-display "TEST SUMMARY"
+display _newline "=========================================="
+display "Test Suite Summary"
+display "Total tests: `total_tests'"
+display "Passed: " wordcount("`passed_tests'")
+display "Failed: " wordcount("`failed_tests'")
 display "=========================================="
 
-local num_passed: word count `passed_tests'
-local num_failed: word count `failed_tests'
-
-display as text "Total tests run: " as result `total_tests'
-display as text "Tests passed: " as result `num_passed' as text " (" as result %4.1f (`num_passed'/`total_tests'*100) as text "%)"
-display as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f (`num_failed'/`total_tests'*100) as text "%)"
-
-if `num_passed' > 0 {
-    display _newline as text "PASSED TESTS:"
-    foreach test in `passed_tests' {
-        display as result "  Test `test'"
-    }
-}
-
-if `num_failed' > 0 {
-    display _newline as text "FAILED TESTS:"
-    foreach test in `failed_tests' {
-        display as error "  Test `test'"
-    }
-}
-
-display _newline as text "Overall Status: " _continue
-if `num_failed' == 0 {
-    display as result "ALL TESTS PASSED!"
+if wordcount("`failed_tests'") > 0 {
+    display as error "Failed tests: `failed_tests'"
+    log close
+    exit 1
 }
 else {
-    display as error "`num_failed' TEST(S) FAILED"
+    display as result "All tests passed!"
+    log close
+    exit 0
 }
-
-display _newline(2) "=========================================="
-display "dtparquet Test Suite Completed"
-display "Timestamp: " c(current_date) " " c(current_time)
-display "=========================================="
-
-log close
