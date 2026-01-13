@@ -10,22 +10,24 @@ program dtparquet
     }
     else if "`sub'" == "export" {
         // Phase 2
-        di as error "export not implemented in Phase 1"
+        display as error "export not implemented in Phase 1"
         exit 198
     }
     else if "`sub'" == "import" {
         // Phase 2
-        di as error "import not implemented in Phase 1"
+        display as error "import not implemented in Phase 1"
         exit 198
     }
     else {
-        di as error "Unknown subcommand `sub'"
+        display as error "Unknown subcommand `sub'"
         exit 198
     }
 end
 
 program dtparquet_save
     syntax anything(name=filename) [, replace nolabel]
+    
+    _check_python
     
     local is_nolabel = ("`nolabel'" != "")
     
@@ -43,7 +45,7 @@ program dtparquet_save
             dtmeta
         }
         else {
-            di as warn "dtmeta not found, saving without extended metadata."
+            display as warn "dtmeta not found, saving without extended metadata."
             local is_nolabel 1
         }
     }
@@ -64,6 +66,8 @@ program dtparquet_use
     // Manual parsing to handle [varlist] [if] [in] using filename [, clear nolabel]
     // because syntax [if] validates against memory and syntax [anything] 
     // often chokes on 'using'.
+    
+    _check_python
     
     local cmdline `"`0'"'
     
@@ -100,7 +104,7 @@ program dtparquet_use
     }
     
     if `"`filename'"' == "" {
-        di as error "using required"
+        display as error "using required"
         exit 100
     }
     
@@ -130,8 +134,9 @@ program dtparquet_use
         error 4
     }
     
-    // 6. Call Python
-    python: import dtparquet
+    // 6. Call Python (ensure path is set)
+    local ado_dir = c(sysdir_plus)
+    python: import sys; sys.path.insert(0, r"`ado_dir'd"); import dtparquet
     if "`vlist'" != "" {
         local py_varlist "["
         local comma ""
@@ -239,4 +244,54 @@ program _apply_dtmeta
     foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
         capture frame drop `fr'
     }
+end
+
+program _check_python
+    capture python query
+    if _rc != 0 {
+        display as error "Python not found. You need to set up Python integration with Stata."
+        display as text ""
+        display as text "See the Stata blog for detailed instructions:"
+        display as error `"{browse "https://blog.stata.com/2020/08/18/stata-python-integration-part-1-setting-up-stata-to-use-python/":https://blog.stata.com/2020/08/18/stata-python-integration-part-1-setting-up-stata-to-use-python/}"'
+        display as text ""
+        display as text "Recommended option (most compatible with Stata):"
+        display as text "  Open Microsoft Store, search Python Install Manager, install it, then use it to install Python."
+        display as text "  This is the method that works best with Stata's Python integration."
+        display as text ""
+        display as text "Alternative option (may cause issues with Stata integration):"
+        display as text "  Install Anaconda (includes Python + pyarrow):"
+        display as text `"{browse "https://www.anaconda.com/download":https://www.anaconda.com/download}"'
+        display as text "  WARNING: Anaconda installations often break Python-Stata integration due to"
+        display as text "  configuration issues. If you encounter problems with Python integration after"
+        display as text "  installing Anaconda, use Python Install Manager instead."
+        display as text ""
+        display as text "After installation, run {stata python search} in Stata, then use"
+        display as text "{stata set python_exec} to specify your Python installation."
+        exit 198
+    }
+    
+    capture python which pyarrow
+    if _rc != 0 {
+        tempfile pyexec_file
+        python: import sys; open(r"`py_exec_file'", "w").write(sys.executable)
+        file open myfile using "`py_exec_file'", read
+        file read myfile py_exec
+        file close myfile
+        
+        display as error "Python found, but pyarrow package not installed."
+        display as text "Your Python executable:"
+        display as text "  `py_exec'"
+        display as text ""
+        display as text "Install pyarrow for this Python:"
+        display as text `"{stata `"! "`py_exec'" -m pip install pyarrow"'"}''
+        display as text ""
+        display as text "If the installation fails or you encounter issues, try:"
+        display as text `"{stata `"! "`py_exec'" -m pip install pyarrow --user"'"}''
+        exit 198
+    }
+    
+    // Add dtparquet.py directory to Python path and verify
+    local ado_dir = c(sysdir_plus)
+    display as text "Adding Python path: `ado_dir'd"
+    python: import sys, os; sys.path.insert(0, r"`ado_dir'd"); import dtparquet; print(f"Successfully imported dtparquet from: {dtparquet.__file__}")
 end
