@@ -73,7 +73,7 @@ def add_stata_var(vtype, name):
 
 def extract_dtmeta():
     """Serializes _dt* frames into a JSON string."""
-    metadata = {"schema_version": 1, "frames": {}}
+    metadata = {"schema_version": 1, "min_reader_version": 1, "frames": {}}
     target_frames = ["_dtvars", "_dtlabel", "_dtnotes", "_dtinfo"]
 
     # Use c(frame) macro for reliable frame tracking in batch mode
@@ -110,6 +110,12 @@ def apply_dtmeta(metadata_json):
     except:
         return {}
 
+    min_version = metadata.get("min_reader_version", 0)
+    if min_version > 1:
+        raise RuntimeError(
+            f"Parquet file requires dtparquet reader version {min_version} or higher (current version is 1)."
+        )
+
     orig_frame = sfi.Macro.getGlobal("c(frame)") or "default"
 
     type_mapping = {}
@@ -140,6 +146,22 @@ def apply_dtmeta(metadata_json):
     return type_mapping
 
 
+def build_arrow_schema(var_names, stata_types, nolabel=False):
+    """Constructs Parquet schema from Stata variables with dual-layer metadata."""
+    fields = []
+    for i, (name, t) in enumerate(zip(var_names, stata_types)):
+        arrow_type = stata_to_arrow_type(t)
+        field_meta = {}
+        if not nolabel:
+            vlab = sfi.Data.getVarLabel(i)
+            if vlab:
+                field_meta[b"stata.label"] = vlab.encode("utf-8")
+        if t.startswith("str"):
+            field_meta[b"stata.type"] = t.encode("utf-8")
+        fields.append(pa.field(name, arrow_type, metadata=field_meta))
+    return pa.schema(fields)
+
+
 def save(filename, nolabel=False):
     """Saves current Stata memory to Parquet."""
     var_count = sfi.Data.getVarCount()
@@ -150,24 +172,8 @@ def save(filename, nolabel=False):
     for i in range(var_count):
         data_arrays.append(pa.array(sfi.Data.get(i)))
 
-    fields = [
-        pa.field(name, stata_to_arrow_type(t))
-        for name, t in zip(var_names, stata_types)
-    ]
-
-    # Strictly respect nolabel for field-level metadata
-    updated_fields = []
-    for i, field in enumerate(fields):
-        field_meta = field.metadata or {}
-        if not nolabel:
-            vlab = sfi.Data.getVarLabel(i)
-            if vlab:
-                field_meta[b"stata.label"] = vlab.encode("utf-8")
-        if stata_types[i].startswith("str"):
-            field_meta[b"stata.type"] = stata_types[i].encode("utf-8")
-        updated_fields.append(field.with_metadata(field_meta))
-
-    table = pa.Table.from_arrays(data_arrays, schema=pa.schema(updated_fields))
+    schema = build_arrow_schema(var_names, stata_types, nolabel)
+    table = pa.Table.from_arrays(data_arrays, schema=schema)
 
     # Strictly respect nolabel for file-level metadata
     custom_meta = {}
@@ -183,7 +189,7 @@ def save(filename, nolabel=False):
         }
         table = table.replace_schema_metadata(merged_meta)
 
-    pq.write_table(table, filename)
+    pq.write_table(table, filename, compression="NONE")
 
 
 def load(filename, varlist=None, nolabel=False):
