@@ -54,11 +54,12 @@ program dtparquet_use
     local cmdline `"`0'"'
     gettoken everything options : cmdline, parse(",")
     if substr(`"`options'"', 1, 1) == "," local options = substr(`"`options'"', 2, .)
-    
-    // Parse options manually for chunksize
+
+    // Parse options manually for chunksize and int64_as_string
     local is_nolabel = strpos(`"`options'"', "nolabel") > 0
     local is_clear = strpos(`"`options'"', "clear") > 0
-    
+    local is_int64_as_string = strpos(`"`options'"', "int64_as_string") > 0
+
     local chunksize "None"
     if regexm(`"`options'"', "chunksize\(([0-9]+)\)") {
         local chunksize = regexs(1)
@@ -117,7 +118,7 @@ program dtparquet_use
         local py_varlist `"`py_varlist']"'
     }
     else local py_varlist "None"
-    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize')
+    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize', bool(`is_int64_as_string'))
     if `"`if_in'"' != "" quietly keep `if_in'
     if `is_nolabel' == 0 _apply_dtmeta
 end
@@ -183,7 +184,7 @@ end
 capture program drop dtparquet_import
 program dtparquet_import
     _check_python
-    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000)]
+    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000) int64_as_string]
 
     local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
@@ -199,8 +200,8 @@ program dtparquet_import
     frame change `temp_frame'
 
     python: import dtparquet
-    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize')
-    
+    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize', bool("`int64_as_string'" != ""))
+
     if "`nolabel'" == "" {
         _apply_dtmeta
     }
@@ -210,9 +211,9 @@ program dtparquet_import
             label values `v' .
         }
     }
-    
+
     quietly save `"`target'"', `replace'
-    
+
     frame change `orig_frame'
     frame drop `temp_frame'
 end

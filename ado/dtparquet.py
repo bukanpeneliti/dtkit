@@ -119,7 +119,44 @@ def stata_to_arrow_type(stata_type):
         return pa.string()
 
 
-def arrow_to_stata_type(arrow_type):
+def is_foreign_file(schema):
+    """Check if Parquet file was created by dtparquet (has Stata metadata)."""
+    if schema.metadata:
+        if DTMETA_KEY.encode() in schema.metadata:
+            return False
+        for field in schema:
+            if field.metadata and b"stata.type" in field.metadata:
+                return False
+    return True
+
+
+def convert_epoch_date(date_val):
+    """Convert Unix epoch date (days since 1970-01-01) to Stata epoch (days since 1960-01-01)."""
+    if date_val is None:
+        return None
+    import datetime
+
+    if isinstance(date_val, datetime.date):
+        delta = date_val - datetime.date(1970, 1, 1)
+        return delta.days + 3653
+    return date_val + 3653
+
+
+def convert_epoch_timestamp(ts_val):
+    """Convert Unix epoch timestamp (milliseconds since 1970-01-01) to Stata epoch (milliseconds since 1960-01-01)."""
+    if ts_val is None:
+        return None
+    import datetime
+
+    if isinstance(ts_val, datetime.datetime):
+        # Stata tc: milliseconds since 01jan1960 00:00:00
+        # Unix epoch starts 315619200000 ms after Stata epoch
+        unix_ts_ms = ts_val.timestamp() * 1000
+        return unix_ts_ms + 315619200000
+    return ts_val + 315619200000
+
+
+def arrow_to_stata_type(arrow_type, int64_as_string=False):
     """Maps Arrow types back to Stata storage types."""
     if pa.types.is_int8(arrow_type):
         return "byte"
@@ -128,13 +165,35 @@ def arrow_to_stata_type(arrow_type):
     elif pa.types.is_int32(arrow_type):
         return "long"
     elif pa.types.is_int64(arrow_type):
+        if int64_as_string:
+            return "strL"
+        return "double"
+    elif pa.types.is_uint64(arrow_type):
+        if int64_as_string:
+            return "strL"
         return "double"
     elif pa.types.is_float32(arrow_type):
         return "float"
     elif pa.types.is_float64(arrow_type):
         return "double"
-    elif pa.types.is_string(arrow_type) or pa.types.is_binary(arrow_type):
+    elif pa.types.is_string(arrow_type):
         return "strL"
+    elif pa.types.is_binary(arrow_type):
+        return "strL"
+    elif pa.types.is_dictionary(arrow_type):
+        index_type = arrow_type.index_type
+        if pa.types.is_int8(index_type):
+            return "byte"
+        elif pa.types.is_int16(index_type):
+            return "int"
+        elif pa.types.is_int32(index_type):
+            return "long"
+        else:
+            return "long"
+    elif pa.types.is_date(arrow_type):
+        return "long"
+    elif pa.types.is_timestamp(arrow_type):
+        return "double"
     else:
         return "strL"
 
@@ -300,9 +359,12 @@ def save(filename, nolabel=False, chunksize=50000):
             writer.write_table(table_chunk)
 
 
-def load(filename, varlist=None, nolabel=False, chunksize=None):
+def load(filename, varlist=None, nolabel=False, chunksize=None, int64_as_string=False):
     """Loads Parquet file into Stata. Supports streaming via chunksize."""
     parquet_file = pq.ParquetFile(filename)
+
+    # Check if foreign file (no Stata metadata)
+    is_foreign = is_foreign_file(parquet_file.schema_arrow)
 
     # Metadata handling
     dtmeta_types = {}
@@ -325,27 +387,53 @@ def load(filename, varlist=None, nolabel=False, chunksize=None):
     total_obs = parquet_file.metadata.num_rows
     sfi.Data.addObs(total_obs)
 
-    # Add variables
+    # Add variables and track dictionary labels
+    dict_labels = {}
     for i, field in enumerate(schema):
         varname = field.name
-        if varname in dtmeta_types:
-            stata_type = dtmeta_types[varname]
-        elif field.metadata:
-            stored_type = field.metadata.get(b"stata.type")
-            if stored_type:
-                stata_type = stored_type.decode("utf-8")
-            else:
-                stata_type = arrow_to_stata_type(field.type)
-        else:
-            stata_type = arrow_to_stata_type(field.type)
 
-        add_stata_var(stata_type, varname)
-        if nolabel:
-            sfi.Data.setVarLabel(i, "")
-        elif field.metadata:
-            vlab = field.metadata.get(b"stata.label")
-            if vlab:
-                sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
+        # Handle dictionary types
+        if pa.types.is_dictionary(field.type):
+            if varname in dtmeta_types:
+                stata_type = dtmeta_types[varname]
+            else:
+                stata_type = arrow_to_stata_type(field.type, int64_as_string)
+
+            add_stata_var(stata_type, varname)
+
+            # Extract dictionary categories for value labels
+            if not nolabel:
+                # categories are not easily accessible from field.type in some versions
+                # we'll extract them from the first row group/batch later
+                pass
+
+                # Set label if available
+                if field.metadata:
+                    vlab = field.metadata.get(b"stata.label")
+                    if vlab:
+                        sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
+                else:
+                    sfi.Data.setVarLabel(i, "")
+        else:
+            # Non-dictionary types
+            if varname in dtmeta_types:
+                stata_type = dtmeta_types[varname]
+            elif field.metadata:
+                stored_type = field.metadata.get(b"stata.type")
+                if stored_type:
+                    stata_type = stored_type.decode("utf-8")
+                else:
+                    stata_type = arrow_to_stata_type(field.type, int64_as_string)
+            else:
+                stata_type = arrow_to_stata_type(field.type, int64_as_string)
+
+            add_stata_var(stata_type, varname)
+            if nolabel:
+                sfi.Data.setVarLabel(i, "")
+            elif field.metadata:
+                vlab = field.metadata.get(b"stata.label")
+                if vlab:
+                    sfi.Data.setVarLabel(i, vlab.decode("utf-8"))
 
     # Load data in batches
     current_offset = 0
@@ -353,16 +441,96 @@ def load(filename, varlist=None, nolabel=False, chunksize=None):
     actual_chunksize = chunksize or 50000
     missing_val = sfi.Missing.getValue()
 
+    applied_vls = set()
+
     for batch in parquet_file.iter_batches(
         batch_size=actual_chunksize, columns=varlist
     ):
         table_chunk = pa.Table.from_batches([batch])
         for i in range(table_chunk.num_columns):
             field = table_chunk.schema.field(i)
+            varname = field.name
             column_data = table_chunk.column(i).to_pylist()
 
+            # Handle dictionary decoding and value label creation
+            if pa.types.is_dictionary(field.type):
+                # Extract indices and dictionary (categories)
+                chunk_col = table_chunk.column(i)
+                # For chunked columns, we might need to combine or just take the first chunk's dictionary
+                if hasattr(chunk_col, "chunks"):
+                    first_chunk = chunk_col.chunk(0)
+                    categories = first_chunk.dictionary.to_pylist()
+                    indices = first_chunk.indices.to_pylist()
+                else:
+                    categories = chunk_col.dictionary.to_pylist()
+                    indices = chunk_col.to_pylist()  # these are the indices
+
+                if not nolabel and varname not in applied_vls:
+                    label_name = f"_vl_{varname}"
+                    sfi.SFIToolkit.stata(f"capture label drop {label_name}")
+                    for cat_idx, cat_value in enumerate(categories):
+                        if cat_value is not None:
+                            # Escape double quotes for Stata
+                            safe_val = str(cat_value).replace('"', '""')
+                            sfi.SFIToolkit.stata(
+                                f'label define {label_name} {cat_idx} `"{safe_val}"\', modify'
+                            )
+                    sfi.SFIToolkit.stata(f"label values {varname} {label_name}")
+                    applied_vls.add(varname)
+
+                column_data = indices
+
+            # Handle epoch conversion for foreign files
+            if is_foreign:
+                if pa.types.is_date(field.type):
+                    # Cast to int32 to get raw days
+                    raw_values = table_chunk.column(i).cast(pa.int32()).to_pylist()
+                    column_data = [
+                        v + 3653 if v is not None else None for v in raw_values
+                    ]
+                elif pa.types.is_timestamp(field.type):
+                    # Cast to int64 to get raw units
+                    unit = field.type.unit
+                    raw_values = table_chunk.column(i).cast(pa.int64()).to_pylist()
+                    if unit == "s":
+                        column_data = [
+                            v * 1000 + 315619200000 if v is not None else None
+                            for v in raw_values
+                        ]
+                    elif unit == "ms":
+                        column_data = [
+                            v + 315619200000 if v is not None else None
+                            for v in raw_values
+                        ]
+                    elif unit == "us":
+                        column_data = [
+                            v // 1000 + 315619200000 if v is not None else None
+                            for v in raw_values
+                        ]
+                    elif unit == "ns":
+                        column_data = [
+                            v // 1000000 + 315619200000 if v is not None else None
+                            for v in raw_values
+                        ]
+
+            # Handle Int64 as String conversion
+            if int64_as_string and (
+                pa.types.is_int64(field.type) or pa.types.is_uint64(field.type)
+            ):
+                column_data = [str(v) if v is not None else None for v in column_data]
+
+            # Handle Binary to String conversion
+            # Convert bytes to latin-1 strings to prevent SFI from iterating over bytes
+            if pa.types.is_binary(field.type):
+                column_data = [
+                    v.decode("latin-1") if isinstance(v, bytes) else v
+                    for v in column_data
+                ]
+
             # Map None back to Stata missing for numeric variables
-            if pa.types.is_integer(field.type) or pa.types.is_floating(field.type):
+            # Check the actual Stata type assigned
+            stata_type = sfi.Data.getVarType(i)
+            if stata_type not in ["strL"] and not stata_type.startswith("str"):
                 column_data = [missing_val if v is None else v for v in column_data]
 
             sfi.Data.store(
@@ -416,5 +584,11 @@ def save_atomic(filename, nolabel=False, chunksize=50000):
         raise e
 
 
-def load_atomic(filename, nolabel=False, chunksize=None):
-    return load(filename, varlist=None, nolabel=nolabel, chunksize=chunksize)
+def load_atomic(filename, nolabel=False, chunksize=None, int64_as_string=False):
+    return load(
+        filename,
+        varlist=None,
+        nolabel=nolabel,
+        chunksize=chunksize,
+        int64_as_string=int64_as_string,
+    )
