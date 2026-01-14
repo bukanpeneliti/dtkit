@@ -1,10 +1,13 @@
 {smcl}
 {* *! version 1.0.0  14jan2026}{...}
+{vieweralsosee "[D] use" "help use"}{...}
+{vieweralsosee "[D] save" "help save"}{...}
+{vieweralsosee "[D] import" "help import"}{...}
+{vieweralsosee "[D] export" "help export"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
-{vieweralsosee "python" "help python"}{...}
 {vieweralsosee "frames" "help frames"}{...}
+{vieweralsosee "python" "help python"}{...}
 {viewerjumpto "Syntax" "dtparquet##syntax"}{...}
-{viewerjumpto "Menu" "dtparquet##menu"}{...}
 {viewerjumpto "Description" "dtparquet##description"}{...}
 {viewerjumpto "Links to PDF documentation" "dtparquet##linkspdf"}{...}
 {viewerjumpto "Options" "dtparquet##options"}{...}
@@ -23,12 +26,12 @@
 Memory operations
 
 {p 8 16 2}
-{cmd:dtparquet save}
+{cmd:dtparquet} {opt sa:ve}
 {it:{help filename}}
 [{cmd:,} {it:save_options}]
 
 {p 8 16 2}
-{cmd:dtparquet use}
+{cmd:dtparquet} {opt u:se}
 [{varlist}]
 [{ifin}]
 {cmd:using} {it:{help filename}}
@@ -38,26 +41,16 @@ Memory operations
 Disk operations (no data loaded into active memory)
 
 {p 8 16 2}
-{cmd:dtparquet export}
+{cmd:dtparquet} {opt exp:ort}
 {it:{help filename:parquetfile}}
 {cmd:using} {it:{help filename:dtafile}}
 [{cmd:,} {it:export_options}]
 
 {p 8 16 2}
-{cmd:dtparquet import}
+{cmd:dtparquet} {opt imp:ort}
 {it:{help filename:dtafile}}
 {cmd:using} {it:{help filename:parquetfile}}
 [{cmd:,} {it:import_options}]
-
-
-{marker menu}{...}
-{title:Menu}
-
-{phang}
-{bf:File > Import > Parquet data (*.parquet)}
-
-{phang}
-{bf:File > Export > Parquet data (*.parquet)}
 
 
 {marker description}{...}
@@ -119,9 +112,9 @@ Options are presented under the following headings:
 {synoptset 26 tabbed}{...}
 {synopthdr :save_options}
 {synoptline}
-{synopt :{opt rep:lace}}overwrite existing file{p_end}
-{synopt :{opt nolabel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
-{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt re:place}}overwrite existing file{p_end}
+{synopt :{opt nol:abel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
+{synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
 {synoptline}
 
 {marker use_options}{...}
@@ -131,9 +124,9 @@ Options are presented under the following headings:
 {synopthdr :use_options}
 {synoptline}
 {synopt :{opt c:lear}}clear data in memory before loading{p_end}
-{synopt :{opt nolabel}}suppress reading custom Stata metadata{p_end}
-{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synopt :{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
+{synopt :{opt nol:abel}}suppress reading custom Stata metadata{p_end}
+{synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
 {synoptline}
 
 {marker export_options}{...}
@@ -142,9 +135,9 @@ Options are presented under the following headings:
 {synoptset 26 tabbed}{...}
 {synopthdr :export_options}
 {synoptline}
-{synopt :{opt rep:lace}}overwrite existing file{p_end}
-{synopt :{opt nolabel}}suppress writing custom Stata metadata{p_end}
-{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt re:place}}overwrite existing file{p_end}
+{synopt :{opt nol:abel}}suppress writing custom Stata metadata{p_end}
+{synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
 {synoptline}
 
 {marker import_options}{...}
@@ -153,21 +146,21 @@ Options are presented under the following headings:
 {synoptset 26 tabbed}{...}
 {synopthdr :import_options}
 {synoptline}
-{synopt :{opt rep:lace}}overwrite existing file{p_end}
-{synopt :{opt nolabel}}suppress reading custom Stata metadata{p_end}
-{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synopt :{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
+{synopt :{opt re:place}}overwrite existing file{p_end}
+{synopt :{opt nol:abel}}suppress reading custom Stata metadata{p_end}
+{synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
 {synoptline}
 
 
 {marker examples}{...}
 {title:Examples}
 
-{pstd}Save the current dataset to Parquet{p_end}
-{phang2}{cmd:. dtparquet save mydata.parquet, replace}
+{pstd}Save the current dataset to Parquet (abbreviated){p_end}
+{phang2}{cmd:. dtparquet sa mydata.parquet, re}
 
-{pstd}Load specific variables from a Parquet file{p_end}
-{phang2}{cmd:. dtparquet id price mpg using mydata.parquet, clear}
+{pstd}Load specific variables from a Parquet file (abbreviated){p_end}
+{phang2}{cmd:. dtparquet u id price mpg using mydata.parquet, c}
 
 {pstd}Import large IDs from a foreign Parquet file as strings{p_end}
 {phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}
@@ -193,3 +186,12 @@ GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafi
 
 {pstd}
 For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
+
+{marker also_see}{...}
+{title:Also see}
+
+{psee}
+Manual: {manlink D use}, {manlink D save}, {manlink D import}, {manlink D export}
+
+{psee}
+Online: {helpb use}, {helpb save}, {helpb import}, {helpb export}, {helpb dtmeta}, {helpb frames}
