@@ -55,10 +55,10 @@ program dtparquet_use
     gettoken everything options : cmdline, parse(",")
     if substr(`"`options'"', 1, 1) == "," local options = substr(`"`options'"', 2, .)
 
-    // Parse options manually for chunksize and int64_as_string
+    // Parse options manually for chunksize and allstring
     local is_nolabel = strpos(`"`options'"', "nolabel") > 0
     local is_clear = strpos(`"`options'"', "clear") > 0
-    local is_int64_as_string = strpos(`"`options'"', "int64_as_string") > 0
+    local is_int64_as_string = strpos(`"`options'"', "allstring") > 0
 
     local chunksize "None"
     if regexm(`"`options'"', "chunksize\(([0-9]+)\)") {
@@ -184,7 +184,7 @@ end
 capture program drop dtparquet_import
 program dtparquet_import
     _check_python
-    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000) int64_as_string]
+    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000) allstring]
 
     local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
@@ -200,7 +200,7 @@ program dtparquet_import
     frame change `temp_frame'
 
     python: import dtparquet
-    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize', bool("`int64_as_string'" != ""))
+    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize', bool("`allstring'" != ""))
 
     if "`nolabel'" == "" {
         _apply_dtmeta

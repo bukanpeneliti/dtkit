@@ -403,10 +403,6 @@ def load(filename, varlist=None, nolabel=False, chunksize=None, int64_as_string=
 
             # Extract dictionary categories for value labels
             if not nolabel:
-                # categories are not easily accessible from field.type in some versions
-                # we'll extract them from the first row group/batch later
-                pass
-
                 # Set label if available
                 if field.metadata:
                     vlab = field.metadata.get(b"stata.label")
