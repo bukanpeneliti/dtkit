@@ -5,6 +5,36 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v1.1.0] - 2026-01-14
+
+- **Major feature update** introducing Parquet support and centralized package management.
+- Transitioned project identity and contact info to `bukanpeneliti`.
+- Component versions:
+  - **dtkit: v1.1.0 (Updated)**
+  - **dtparquet: v1.0.0 (New)**
+  - dtfreq: v1.0.2 (Doc update)
+  - dtstat: v1.0.2 (Doc update)
+  - dtmeta: v1.0.1 (Doc update)
+
+### Added
+- **dtparquet v1.0.0**: New module for high-performance Parquet file interoperability.
+  - Native Python/pyarrow integration for speed and reliability.
+  - Supports `save`, `use`, `import`, and `export` subcommands.
+  - Preserves Stata metadata (labels, notes) within Parquet schema.
+- **dtkit management**: Added `update`, `upgrade`, `test`, and `showcase` options.
+- **Cleanup Utility**: Added `cleanup_test_logs.do` for automated test artifact management.
+
+### Changed
+- **Project Identity**: Updated all contact info to `bukanpeneliti@gmail.com` and GitHub username to `bukanpeneliti`.
+- **Documentation Style**: Refactored all `.sthlp` files for strict compliance with `guide_sthlp.md`.
+  - Converted all text to active voice and present tense.
+  - Standardized SMCL layout and title banners.
+- **UI Refinement**: Removed emojis and standardized non-ASCII symbols across all commands and test outputs.
+
+### Improved
+- **Test Infrastructure**: Enhanced `run_all_tests.do` with better progress tracking and summary reporting.
+- **Package Metadata**: Synchronized `dtkit.pkg` and `stata.toc` with the new component structure.
+
 ## Package Release [dtkit-v1.0.1] - 2025-06-03
 
 - This update includes an important bug fix for the `dtfreq` and `dtstat` commands.
