@@ -1,7 +1,7 @@
 # dtkit: Data Toolkit for Stata
 
 [![Stata Package](https://img.shields.io/badge/Stata-ado-blue)](https://github.com/bukanpeneliti/dtkit)
-![Version](https://img.shields.io/badge/Version-1.1.0-green)
+![Version](https://img.shields.io/badge/Version-1.1.1-green)
 ![Stata 16+](https://img.shields.io/badge/Stata-16%2B-purple)
 ![GitHub Downloads](https://img.shields.io/github/downloads/bukanpeneliti/dtkit/total)
 ![GitHub Stars](https://img.shields.io/github/stars/bukanpeneliti/dtkit?style=social)
@@ -27,11 +27,19 @@ net install dtkit, from("https://raw.githubusercontent.com/bukanpeneliti/dtkit/m
 ```
 
 ## Updating to Latest Version
-To ensure you have the most recent features and bug fixes:
+To ensure you have the most recent features and bug fixes, use the built-in update command:
 
 ```stata
-net install dtkit, replace from("https://raw.githubusercontent.com/bukanpeneliti/dtkit/main/")
+dtkit, update
 ```
+
+Alternatively, you can use the synonym:
+
+```stata
+dtkit, upgrade
+```
+
+*Note: For versions older than v1.1.0, use `net install dtkit, replace from(...)` one last time to enable the new update system.*
 
 ## Uninstalling
 If you need to remove the package:
@@ -128,7 +136,7 @@ If you use `dtkit` in your research, please cite:
 
 **Plain Text:**
 ```
-Hafiz Arfyanto (2026). dtkit: Data Toolkit for Stata. Version 1.1.0.
+Hafiz Arfyanto (2026). dtkit: Data Toolkit for Stata. Version 1.1.1.
 Retrieved from https://github.com/bukanpeneliti/dtkit
 ```
 
@@ -137,7 +145,7 @@ Retrieved from https://github.com/bukanpeneliti/dtkit
 @misc{arfyanto2026dtkit,
   author = {Hafiz Arfyanto},
   title = {dtkit: Data Toolkit for Stata},
-  version = {1.1.0},
+  version = {1.1.1},
   year = {2026},
   url = {https://github.com/bukanpeneliti/dtkit},
   note = {Stata package for data exploration and analysis}
