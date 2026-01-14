@@ -1,4 +1,4 @@
-*! Version 1.1.0 13Jan2026
+*! Version 1.0.0 14Jan2026
 program dtparquet
     version 16
     _cleanup_orphaned
@@ -16,7 +16,24 @@ program dtparquet
         dtparquet_import `rest'
     }
     else {
-        display as error "Unknown subcommand `sub'"
+        display as error "Unknown subcommand '`sub''"
+        
+        // Inference logic
+        local has_using = strpos(`"`rest'"', " using ") > 0 | substr(trim(`"`rest'"'), 1, 5) == "using"
+        
+        if `has_using' {
+            // If there's a using, it's likely use, export, or import
+            // If the unknown sub looks like a variable or part of a varlist, suggest 'use'
+            display as error "Did you mean 'use', 'export', or 'import'?"
+            display as error "Try, for example: "
+            display as smcl `"{stata dtparquet use `0'}"'
+        }
+        else {
+            // No using, likely 'save' or a typo in a subcommand
+            display as error "Did you mean 'save'?"
+            display as error "Try, for example: "
+            display as smcl `"{stata dtparquet save `0'}"'
+        }
         exit 198
     }
 end
@@ -320,7 +337,7 @@ end
 capture program drop _cleanup_orphaned
 program _cleanup_orphaned
     version 16
-    frame dir
+    quietly frame dir
     foreach frame in `r(frames)' {
         if strpos("`frame'", "_dtparquet_") == 1 capture frame drop `frame'
         if inlist("`frame'", "_dtvars", "_dtlabel", "_dtnotes", "_dtinfo") capture frame drop `frame'

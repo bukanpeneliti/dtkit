@@ -1,150 +1,195 @@
 {smcl}
-{* *! version 1.1.0 13Jan2026}{...}
+{* *! version 1.0.0  14jan2026}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
 {vieweralsosee "python" "help python"}{...}
 {vieweralsosee "frames" "help frames"}{...}
 {viewerjumpto "Syntax" "dtparquet##syntax"}{...}
+{viewerjumpto "Menu" "dtparquet##menu"}{...}
 {viewerjumpto "Description" "dtparquet##description"}{...}
+{viewerjumpto "Links to PDF documentation" "dtparquet##linkspdf"}{...}
 {viewerjumpto "Options" "dtparquet##options"}{...}
 {viewerjumpto "Examples" "dtparquet##examples"}{...}
 {viewerjumpto "Author" "dtparquet##author"}{...}
-{title:Title}
+{p2colset 1 21 23 2}{...}
+{p2col:{bf:[D] dtparquet} {hline 2}}High-performance Parquet I/O using Python/Arrow{p_end}
+{p2col:}({mansection D dtparquet:View complete PDF manual entry}){p_end}
+{p2colreset}{...}
 
-{phang}
-{bf:dtparquet} {hline 2} High-performance Parquet I/O using Python/Arrow
 
 {marker syntax}{...}
 {title:Syntax}
 
-{pstd}Memory operations{p_end}
+{pstd}
+Memory operations
 
-{p 8 17 2}
-{cmdab:dtparquet save}
-{it:filename}
+{p 8 16 2}
+{cmd:dtparquet save}
+{it:{help filename}}
 [{cmd:,} {it:save_options}]
 
-{p 8 17 2}
-{cmdab:dtparquet use}
+{p 8 16 2}
+{cmd:dtparquet use}
 [{varlist}]
 [{ifin}]
-{cmd:using} {it:filename}
+{cmd:using} {it:{help filename}}
 [{cmd:,} {it:use_options}]
 
-{pstd}Disk operations (no data loaded into active memory){p_end}
+{pstd}
+Disk operations (no data loaded into active memory)
 
-{p 8 17 2}
-{cmdab:dtparquet export}
-{it:parquetfile}
-{cmd:using} {it:dtafile}
+{p 8 16 2}
+{cmd:dtparquet export}
+{it:{help filename:parquetfile}}
+{cmd:using} {it:{help filename:dtafile}}
 [{cmd:,} {it:export_options}]
 
-{p 8 17 2}
-{cmdab:dtparquet import}
-{it:dtafile}
-{cmd:using} {it:parquetfile}
+{p 8 16 2}
+{cmd:dtparquet import}
+{it:{help filename:dtafile}}
+{cmd:using} {it:{help filename:parquetfile}}
 [{cmd:,} {it:import_options}]
 
-{synoptset 24 tabbed}{...}
-{synopthdr:save_options}
-{synoptline}
-{synopt:{opt rep:lace}}overwrite existing file{p_end}
-{synopt:{opt nolabel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
-{synopt:{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synoptline}
 
-{synoptset 24 tabbed}{...}
-{synopthdr:use_options}
-{synoptline}
-{synopt:{opt c:lear}}clear data in memory before loading{p_end}
-{synopt:{opt nolabel}}suppress reading custom Stata metadata{p_end}
-{synopt:{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synopt:{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
-{synoptline}
+{marker menu}{...}
+{title:Menu}
 
-{synoptset 24 tabbed}{...}
-{synopthdr:export_options}
-{synoptline}
-{synopt:{opt rep:lace}}overwrite existing file{p_end}
-{synopt:{opt nolabel}}suppress writing custom Stata metadata{p_end}
-{synopt:{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synoptline}
+{phang}
+{bf:File > Import > Parquet data (*.parquet)}
 
-{synoptset 24 tabbed}{...}
-{synopthdr:import_options}
-{synoptline}
-{synopt:{opt rep:lace}}overwrite existing file{p_end}
-{synopt:{opt nolabel}}suppress reading custom Stata metadata{p_end}
-{synopt:{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
-{synopt:{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
-{synoptline}
+{phang}
+{bf:File > Export > Parquet data (*.parquet)}
+
 
 {marker description}{...}
 {title:Description}
 
 {pstd}
-{cmd:dtparquet} provides high-performance reading and writing of Apache Parquet files. It serves as a bridge between 
-Stata and the Parquet ecosystem using Python's {cmd:pyarrow} library and Stata's Generic {help sfi:SFI} (Stata Function Interface).
+{cmd:dtparquet} provides high-performance reading and writing of Apache Parquet
+files.  It serves as a bridge between Stata and the Parquet ecosystem using
+Python's {cmd:pyarrow} library and Stata's {help sfi:Stata Function Interface (SFI)}.
 
 {pstd}
 Key features include:
 
-{phang2}• {bf:Metadata Preservation}: Automatically integrates with {help dtmeta} to store and restore value labels, 
-variable labels, and notes within the Parquet file footer ({it:dtparquet.dtmeta}).{p_end}
-{phang2}• {bf:Memory Efficiency}: Uses a streaming architecture for disk-to-disk operations ({cmd:import} and {cmd:export}), 
-allowing processing of datasets larger than available RAM.{p_end}
-{phang2}• {bf:Atomic Safety}: Disk operations utilize temporary files ({it:.tmp}) to ensure that the target file is 
-only created or updated if the entire operation succeeds.{p_end}
-{phang2}• {bf:Type Safety}: Handles complex Stata types including {it:strL} and provides options to handle precision 
-limits of 64-bit integers.{p_end}
+{phang2}
+o {bf:Metadata Preservation}: Automatically integrates with {help dtmeta} to
+store and restore value labels, variable labels, and notes within the Parquet
+file footer.
+
+{phang2}
+o {bf:Memory Efficiency}: Uses a streaming architecture for disk-to-disk
+operations ({cmd:import} and {cmd:export}), allowing processing of datasets
+larger than available RAM.
+
+{phang2}
+o {bf:Atomic Safety}: Disk operations utilize temporary files ({it:.tmp}) to
+ensure that the target file is only created or updated if the entire operation
+succeeds.
+
+{phang2}
+o {bf:Type Safety}: Handles complex Stata types including {it:strL} and provides
+options to handle precision limits of 64-bit integers.
+
+
+{marker linkspdf}{...}
+{title:Links to PDF documentation}
+
+{pstd}
+No PDF documentation is available for this user-written command.
+
 
 {marker options}{...}
 {title:Options}
 
-{phang}
-{opt replace} permits {cmd:dtparquet} to overwrite an existing file.
+{pstd}
+Options are presented under the following headings:
 
-{phang}
-{opt clear} (for {cmd:use}) clears the data in the current frame before loading the Parquet file.
+{phang2}
+{help dtparquet##save_options:Options for dtparquet save}{p_end}
+{phang2}
+{help dtparquet##use_options:Options for dtparquet use}{p_end}
+{phang2}
+{help dtparquet##export_options:Options for dtparquet export}{p_end}
+{phang2}
+{help dtparquet##import_options:Options for dtparquet import}{p_end}
 
-{phang}
-{opt nolabel} suppresses the processing of Stata-specific metadata. When saving, value labels and notes are 
-not written to the Parquet file. When loading, any existing metadata in the file is ignored. Use this for 
-maximum interoperability with other tools (e.g., Spark, Pandas) that do not support Stata metadata.
+{marker save_options}{...}
+{dlgtab:Options for dtparquet save}
 
-{phang}
-{opt chunksize(#)} specifies the number of observations processed in each batch. The default is 50,000. 
-For very wide datasets or low-memory environments, lowering this value can prevent memory exhaustion.
+{synoptset 26 tabbed}{...}
+{synopthdr :save_options}
+{synoptline}
+{synopt :{opt rep:lace}}overwrite existing file{p_end}
+{synopt :{opt nolabel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
+{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synoptline}
 
-{phang}
-{opt allstring} (for {cmd:use} and {cmd:import}) forces 64-bit integers ({it:Int64} and {it:UInt64}) to be imported 
-as strings. Stata's {it:double} storage type uses 53 bits for the significand, meaning integers larger than 
-9,007,199,254,740,991 (2^53) cannot be represented exactly. Use {opt allstring} to preserve exact digits 
-for large ID variables.
+{marker use_options}{...}
+{dlgtab:Options for dtparquet use}
+
+{synoptset 26 tabbed}{...}
+{synopthdr :use_options}
+{synoptline}
+{synopt :{opt c:lear}}clear data in memory before loading{p_end}
+{synopt :{opt nolabel}}suppress reading custom Stata metadata{p_end}
+{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
+{synoptline}
+
+{marker export_options}{...}
+{dlgtab:Options for dtparquet export}
+
+{synoptset 26 tabbed}{...}
+{synopthdr :export_options}
+{synoptline}
+{synopt :{opt rep:lace}}overwrite existing file{p_end}
+{synopt :{opt nolabel}}suppress writing custom Stata metadata{p_end}
+{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synoptline}
+
+{marker import_options}{...}
+{dlgtab:Options for dtparquet import}
+
+{synoptset 26 tabbed}{...}
+{synopthdr :import_options}
+{synoptline}
+{synopt :{opt rep:lace}}overwrite existing file{p_end}
+{synopt :{opt nolabel}}suppress reading custom Stata metadata{p_end}
+{synopt :{opt chunk:size(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt allstring}}import 64-bit integers as strings to preserve precision{p_end}
+{synoptline}
+
 
 {marker examples}{...}
 {title:Examples}
 
-{pstd}1. Save the current dataset to Parquet:{p_end}
-{phang2}{cmd:. dtparquet save mydata.parquet, replace}{p_end}
+{pstd}Save the current dataset to Parquet{p_end}
+{phang2}{cmd:. dtparquet save mydata.parquet, replace}
 
-{pstd}2. Load specific variables from a Parquet file:{p_end}
-{phang2}{cmd:. dtparquet use id price mpg using mydata.parquet, clear}{p_end}
+{pstd}Load specific variables from a Parquet file{p_end}
+{phang2}{cmd:. dtparquet id price mpg using mydata.parquet, clear}
 
-{pstd}3. Import large IDs from a foreign Parquet file as strings:{p_end}
-{phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}{p_end}
+{pstd}Import large IDs from a foreign Parquet file as strings{p_end}
+{phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}
 
-{pstd}4. Export a large .dta file to Parquet without loading it into memory:{p_end}
-{phang2}{cmd:. dtparquet export results.parquet using raw_data.dta, replace}{p_end}
+{pstd}Export a large .dta file to Parquet without loading it into memory{p_end}
+{phang2}{cmd:. dtparquet export results.parquet using raw_data.dta, replace}
 
-{pstd}5. Convert a Parquet file to Stata format on disk:{p_end}
-{phang2}{cmd:. dtparquet import final.dta using results.parquet, replace allstring}{p_end}
+{pstd}Convert a Parquet file to Stata format on disk{p_end}
+{phang2}{cmd:. dtparquet import final.dta using results.parquet, replace allstring}
+
 
 {marker author}{...}
 {title:Author}
 
-{pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafizarfyanto/dtkit}{p_end}
+{pstd}
+Hafiz Arfyanto
+{p_end}
+{pstd}
+Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}
+{p_end}
+{pstd}
+GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafizarfyanto/dtkit}
 
 {pstd}
 For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
