@@ -1,4 +1,5 @@
-v 1.0.2
-d Data analysis packages
+v 1.1.1
+d dtkit: Data Toolkit for Stata
+d Package for data analysis and interoperability
 d
 p dtkit Data Toolkit for Stata
