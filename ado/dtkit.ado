@@ -1,4 +1,4 @@
-*! version 1.1.0 28Jun2025
+*! version 1.1.1 14Jan2026
 *! Program for managing the dtkit package installation
 
 capture program drop dtkit
@@ -8,11 +8,16 @@ program dtkit
     syntax, [          ///
         LICENSEs       ///
         Verbose        ///
-        Update         ///
+        UPdate         ///
+        UPgrade        ///
         examples       ///
         test           ///
+        tests(str)     ///
         branch(str)    ///
     ]
+
+    // Consolidate update/upgrade
+    local do_update = ("`update'" != "" | "`upgrade'" != "")
 
     if ( `"`branch'"' == "" ) local branch main
     if !inlist(`"`branch'"', "main", "develop") {
@@ -32,12 +37,12 @@ program dtkit
             dtkit_licenses
         }
 
-        if ( `"`update'`examples'`test'`tests'"' == `""' ) {
+        if ( `"`do_update'`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
     }
 
-    if ("`update'" == "update") {
+    if (`do_update') {
         capture net uninstall dtkit
         net install dtkit, from(`github') replace
         if ( `"`examples'`test'`tests'"' == `""' ) {

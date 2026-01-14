@@ -29,8 +29,8 @@
 {synopthdr}
 {synoptline}
 {syntab:Package Management}
-{synopt :{opt upgrade}}upgrade dtkit to latest version{p_end}
-{synopt :{opt install_latest}}install latest version of dtkit{p_end}
+{synopt :{opt update}}update dtkit to latest version{p_end}
+{synopt :{opt upgrade}}same as update{p_end}
 {synopt :{opt branch(string)}}specify GitHub branch (default: main){p_end}
 
 {syntab:Information}
@@ -83,11 +83,11 @@ No PDF documentation is available for this user-written command.
 {dlgtab:Package Management}
 
 {phang}
-{opt upgrade} upgrades dtkit to the latest version available on GitHub.
+{opt update} updates dtkit to the latest version available on GitHub.
 It uninstalls the current version and installs the latest version from the main branch.
 
 {phang}
-{opt install_latest} performs the same action as {opt upgrade}.
+{opt upgrade} performs the same action as {opt update}.
 It ensures the package matches the latest GitHub release.
 
 {phang}
