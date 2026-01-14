@@ -283,11 +283,11 @@ else {
     local failed_tests "`failed_tests' 9a"
 }
 
-display _newline "=== TEST CASE 9b: Int64 Precision (int64_as_string option) ==="
+display _newline "=== TEST CASE 9b: Int64 Precision (allstring option) ==="
 local ++total_tests
 capture noisily {
     clear
-    dtparquet use huge_int64 using "test_foreign.parquet", int64_as_string clear
+    dtparquet use huge_int64 using "test_foreign.parquet", allstring clear
     local t : type huge_int64
     assert "`t'" == "strL"
     assert huge_int64 == "9223372036854775807" in 1
@@ -300,7 +300,7 @@ if _rc == 0 {
     local passed_tests "`passed_tests' 9b"
 }
 else {
-    display as error "Test 9b failed: int64_as_string error"
+    display as error "Test 9b failed: allstring error"
     local failed_tests "`failed_tests' 9b"
 }
 

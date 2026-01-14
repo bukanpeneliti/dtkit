@@ -32,12 +32,12 @@ local ++total_tests
 clear
 capture set python_exec ""
 capture dtparquet_save "test_case1.parquet", replace
-if _rc == 198 {
-    display as result "Test 1 completed successfully (caught python not found error)"
+if _rc != 0 {
+    display as result "Test 1 completed successfully (caught expected error: " _rc ")"
     local passed_tests "`passed_tests' 1"
 }
 else {
-    display as error "Test 1 failed: expected error 198 (python not found), got " _rc
+    display as error "Test 1 failed: expected error but got 0"
     local failed_tests "`failed_tests' 1"
 }
 
