@@ -71,11 +71,11 @@ foreach test_file in `test_files' {
     local test_rc = _rc
     
     if `test_rc' == 0 {
-        di _n as result "✓ TEST PASSED: `test_name'"
+        di _n as result "TEST PASSED: `test_name'"
         local passed_files "`passed_files' `test_name'"
     }
     else {
-        di _n as error "✗ TEST FAILED: `test_name' (return code: `test_rc')"
+        di _n as error "TEST FAILED: `test_name' (return code: `test_rc')"
         local failed_files "`failed_files' `test_name'"
         local ++failed_count
     }
@@ -97,29 +97,30 @@ di "Failed: `failed_count' (" %4.1f (`failed_count'/`total_files'*100) "%)"
 if `passed_count' > 0 {
     di _n as result "PASSED TESTS:"
     foreach test in `passed_files' {
-        di as result "  ✓ `test'"
+        di as result "   `test'"
     }
 }
 
 if `failed_count' > 0 {
     di _n as error "FAILED TESTS:"
     foreach test in `failed_files' {
-        di as error "  ✗ `test'"
+        di as error "   `test'"
     }
     di _n as error "Check individual log files for detailed error information."
 }
 else {
-    di _n as result "🎉 ALL TESTS PASSED SUCCESSFULLY!"
+    di _n as result "ALL TESTS PASSED SUCCESSFULLY!"
 }
 
 // Performance summary
 di _n "=========================================="
 di "PERFORMANCE SUMMARY"
 di "=========================================="
-di "Expected total individual tests: 106"
+di "Expected total individual tests: 112"
 di "  - dtfreq: 46 tests (dtfreq_test1: 25, dtfreq_test2: 21)"
 di "  - dtmeta: 18 tests (dtmeta_test1: 7, dtmeta_test2: 11)"
 di "  - dtstat: 42 tests (dtstat_test1: 23, dtstat_test2: 19)"
+di "  - dtparquet: 6 tests (dtparquet_test1 to dtparquet_test6)"
 
 // Cleanup instructions
 di _n "=========================================="

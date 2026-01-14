@@ -6,6 +6,8 @@
 Thumbs.db
 *.xlsx
 *.do 
+!run_all_tests.do
+!cleanup_test_logs.do
 
 # Reference files
 ref/

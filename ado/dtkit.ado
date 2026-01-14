@@ -53,8 +53,8 @@ program dtkit
     }
 
     if ( `"`test'`tests'"' != "" ) {
-        local t_basic dtfreq dtstat dtmeta
-        local t_known basic dtfreq dtstat dtmeta
+        local t_basic dtfreq dtstat dtmeta dtparquet
+        local t_known basic dtfreq dtstat dtmeta dtparquet
         local t_extra: list tests - t_known
 
         if ( `:list sizeof t_extra' ) {
@@ -80,7 +80,7 @@ program dtkit
     }
 
     display "dtkit: Data Toolkit for Stata"
-    display "Available commands: dtfreq, dtstat, dtmeta"
+    display "Available commands: dtfreq, dtstat, dtmeta, dtparquet"
     display ""
     display as smcl "Usage examples: {stata dtkit, examples}"
     display as smcl "Package update: {stata dtkit, update}"
@@ -97,6 +97,9 @@ program dtkit
     capture which dtmeta
     if !_rc display "  dtmeta: available" 
     else display "  dtmeta: not found"
+    capture which dtparquet
+    if !_rc display "  dtparquet: available"
+    else display "  dtparquet: not found"
 end
 
 capture program drop dtkit_licenses
@@ -176,6 +179,21 @@ program dtkit_showcase
         capture do "examples/dtmeta_examples.do"
         if _rc != 0 display as error "Could not run dtmeta examples"
     }
+
+    display _n(1) "{hline 40}"
+    display "dtparquet: Parquet file interoperability"
+    display "{hline 40}"
+    
+    capture confirm file "`examples_dir'/dtparquet_examples.do"
+    if _rc == 0 {
+        display "Running dtparquet examples..."
+        quietly do "`examples_dir'/dtparquet_examples.do"
+    }
+    else {
+        display "dtparquet examples not found, trying relative path..."
+        capture do "examples/dtparquet_examples.do"
+        if _rc != 0 display as error "Could not run dtparquet examples"
+    }
     
     display _n(1) "{hline 60}"
     display "Examples completed. See output above for results."
@@ -195,7 +213,7 @@ program dtkit_run_tests
             display _n(1) "Running basic functionality tests..."
             dtkit_test_basic
         }
-        else if inlist("`component'", "dtfreq", "dtstat", "dtmeta") {
+        else if inlist("`component'", "dtfreq", "dtstat", "dtmeta", "dtparquet") {
             display _n(1) "Running `component' tests..."
             local test_dir "test/`component'"
             capture confirm file "`test_dir'/`component'_test1.do"
@@ -208,6 +226,11 @@ program dtkit_run_tests
                 quietly do "`test_dir'/`component'_test2.do"
                 display "`component' test 2: completed"
             }
+            capture confirm file "`test_dir'/`component'_test3.do"
+            if _rc == 0 {
+                quietly do "`test_dir'/`component'_test3.do"
+                display "`component' test 3: completed"
+            }
         }
         else {
             display as error "Unknown test component: `component'"
@@ -219,7 +242,7 @@ capture program drop dtkit_test_basic
 program dtkit_test_basic
     display "Testing dtkit components availability..."
     
-    local commands dtfreq dtstat dtmeta
+    local commands dtfreq dtstat dtmeta dtparquet
     foreach cmd in `commands' {
         capture which `cmd'
         if _rc == 0 {
