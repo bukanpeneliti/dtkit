@@ -11,23 +11,13 @@ Thumbs.db
 ref/
 
 # Private configuration files
-# Memory bank documentation (private)
-memory-bank/
-
-# CLI configuration rules (private)
-.clinerules
-
 # Claude Code instructions (keep private)
 CLAUDE.md
 
 # Claude folder
 .claude/
-
-# Cursor configuration (keep private)
-.cursor/
-
-# Roo Code configuration (keep private)
-.roorules
+.ruff_cache/
+.gemini/
 
 # project setup files (keep private)
 project_setup_templates/
