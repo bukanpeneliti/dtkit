@@ -5,8 +5,10 @@
 .DS_Store
 Thumbs.db
 *.xlsx
-package_maintenance_guide.*
 *.do 
+
+# Reference files
+ref/
 
 # Private configuration files
 # Memory bank documentation (private)

@@ -4,7 +4,7 @@ d
 d Author: Hafiz Arfyanto
 d Support: email hafizarfyanto@gmail.com
 d
-d Distribution-Date: 28Jun2025
+d Distribution-Date: 14Jan2026
 d
 d This package provides utilities for data analysis in Stata
 d
@@ -16,6 +16,10 @@ f ado/dtstat.ado
 f ado/dtstat.sthlp
 f ado/dtkit.ado
 f ado/dtkit.sthlp
-f examples/dtfreq_examples.do
-f examples/dtmeta_examples.do
-f examples/dtstat_examples.do
+f ado/dtparquet.ado
+f ado/dtparquet.sthlp
+f ado/dtparquet.py
+f ado/ancillary_files/examples/dtfreq_examples.do
+f ado/ancillary_files/examples/dtmeta_examples.do
+f ado/ancillary_files/examples/dtstat_examples.do
+f ado/ancillary_files/examples/dtparquet_examples.do

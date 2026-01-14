@@ -3,16 +3,22 @@ program dtparquet
     version 16
     _cleanup_orphaned
     gettoken sub rest : 0
-    if "`sub'" == "save" {
+    local len = length("`sub'")
+    if `len' == 0 {
+        display as error "Subcommand required: save, use, export, or import"
+        exit 198
+    }
+
+    if "`sub'" == substr("save", 1, max(2, `len')) {
         dtparquet_save `rest'
     }
-    else if "`sub'" == "use" {
+    else if "`sub'" == substr("use", 1, max(1, `len')) {
         dtparquet_use `rest'
     }
-    else if "`sub'" == "export" {
+    else if "`sub'" == substr("export", 1, max(3, `len')) {
         dtparquet_export `rest'
     }
-    else if "`sub'" == "import" {
+    else if "`sub'" == substr("import", 1, max(3, `len')) {
         dtparquet_import `rest'
     }
     else {
@@ -40,7 +46,7 @@ end
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, replace nolabel chunksize(integer 50000)]
+    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000)]
     _check_python
     local is_nolabel = ("`nolabel'" != "")
     local file = subinstr(`"`filename'"', `"""', "", .)
@@ -68,62 +74,27 @@ end
 capture program drop dtparquet_use
 program dtparquet_use
     _check_python
-    local cmdline `"`0'"'
-    gettoken everything options : cmdline, parse(",")
-    if substr(`"`options'"', 1, 1) == "," local options = substr(`"`options'"', 2, .)
-
-    // Parse options manually for chunksize and allstring
-    local is_nolabel = strpos(`"`options'"', "nolabel") > 0
-    local is_clear = strpos(`"`options'"', "clear") > 0
-    local is_int64_as_string = strpos(`"`options'"', "allstring") > 0
-
-    local chunksize "None"
-    if regexm(`"`options'"', "chunksize\(([0-9]+)\)") {
-        local chunksize = regexs(1)
-    }
-
-    local upos = strpos(`"`everything'"', " using ")
-    if `upos' == 0 {
-        if substr(trim(`"`everything'"'), 1, 5) == "using" {
-            local prefix ""
-            local remainder `"`everything'"'
-        }
-        else {
-            gettoken filename if_in : everything
-            local prefix ""
-            local remainder ""
-        }
+    
+    local has_using = strpos(`"`0'"', " using ") > 0 | substr(trim(`"`0'"'), 1, 6) == "using " | trim(`"`0'"') == "using"
+    
+    if `has_using' {
+        syntax [anything(name=vlist)] [if] [in] using/ [, Clear NOLabel CHunksize(string) ALLstring]
+        local filename `"`using'"'
     }
     else {
-        local prefix = substr(`"`everything'"', 1, `upos'-1)
-        local remainder = substr(`"`everything'"', `upos'+1, .)
+        syntax anything(name=filename) [if] [in] [, Clear NOLabel CHunksize(string) ALLstring]
+        local vlist ""
     }
-    if `"`remainder'"' != "" {
-        gettoken using_kw remainder : remainder
-        gettoken filename if_in_after : remainder
-    }
-    if `"`filename'"' == "" {
-        display as error "using required"
-        exit 100
-    }
-    local vlist ""
-    local if_in_before ""
-    gettoken tok prefix : prefix
-    while `"`tok'"' != "" {
-        if inlist(`"`tok'"', "if", "in") {
-            local if_in_before `"`tok' `prefix'"'
-            local prefix ""
-            local tok ""
-        }
-        else {
-            local vlist `"`vlist' `tok'"'
-            gettoken tok prefix : prefix
-        }
-    }
-    local if_in = trim(`"`if_in_before' `if_in_after' `if_in'"')
+
+    local chunksize_val = cond("`chunksize'" == "", "None", "`chunksize'")
+    local is_nolabel = ("`nolabel'" != "")
+    local is_clear = ("`clear'" != "")
+    local is_int64_as_string = ("`allstring'" != "")
+
     local file = subinstr(trim(`"`filename'"'), `"""', "", .)
     local file : subinstr local file "\" "/", all
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
+    if `is_clear' == 1 quietly clear
     python: import dtparquet
     if "`vlist'" != "" {
         local py_varlist "["
@@ -135,7 +106,9 @@ program dtparquet_use
         local py_varlist `"`py_varlist']"'
     }
     else local py_varlist "None"
-    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize', bool(`is_int64_as_string'))
+    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize_val', bool(`is_int64_as_string'))
+    
+    local if_in = trim("`if' `in'")
     if `"`if_in'"' != "" quietly keep `if_in'
     if `is_nolabel' == 0 _apply_dtmeta
 end
@@ -143,7 +116,7 @@ end
 capture program drop dtparquet_export
 program dtparquet_export
     _check_python
-    syntax anything(name=pqfile) using/ [, replace nolabel chunksize(integer 50000)]
+    syntax anything(name=pqfile) using/ [, REplace NOLabel CHunksize(integer 50000)]
     local is_nolabel = ("`nolabel'" != "")
     
     local target = subinstr(trim(`"`pqfile'"'), `"""', "", .)
@@ -201,7 +174,7 @@ end
 capture program drop dtparquet_import
 program dtparquet_import
     _check_python
-    syntax anything(name=dtafile) using/ [, replace nolabel chunksize(integer 50000) allstring]
+    syntax anything(name=dtafile) using/ [, REplace NOLabel CHunksize(integer 50000) ALLstring]
 
     local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
