@@ -426,23 +426,23 @@ di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f 
 if `num_passed' > 0 {
     di _n as text "PASSED TESTS:"
     foreach test in `passed_tests' {
-        di as result "  ✓ Test `test'"
+        di as result "  PASSED: Test `test'"
     }
 }
 
 if `num_failed' > 0 {
     di _n as text "FAILED TESTS:"
     foreach test in `failed_tests' {
-        di as error "  ✗ Test `test'"
+        di as error "  FAILED: Test `test'"
     }
 }
 
 di _n as text "Overall Status: " _continue
 if `num_failed' == 0 {
-    di as result "ALL TESTS PASSED! ✓"
+    di as result "ALL TESTS PASSED!"
 }
 else {
-    di as error "`num_failed' TEST(S) FAILED ✗"
+    di as error "`num_failed' TEST(S) FAILED"
 }
 
 di _n(2) "=========================================="

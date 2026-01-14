@@ -20,10 +20,10 @@ program dtkit
     }
 
     local cwd `c(pwd)'
-    local github https://raw.githubusercontent.com/hafizarfyanto/dtkit/`branch'
+    local github https://raw.githubusercontent.com/bukanpeneliti/dtkit/`branch'
 
     if ( "`licenses'" == "licenses" ) {
-        display `"dtkit is {browse "https://github.com/hafizarfyanto/dtkit/blob/main/LICENSE":MIT-licensed}"'
+        display `"dtkit is {browse "https://github.com/bukanpeneliti/dtkit/blob/main/LICENSE":MIT-licensed}"'
         display ""
         display "This package provides data analysis utilities for Stata."
         display ""

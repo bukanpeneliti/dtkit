@@ -233,10 +233,10 @@ This option is only valid when {cmd:save(excelname)} is also specified.
 The structure of the output dataset is as follows:
 {p_end}
 {pstd}
-• If {opt by(varlist)} is {ul:not} specified, the dataset contains one observation for each variable in the input {varlist}. Each row represents the summary statistics for one variable.
+o If {opt by(varlist)} is {ul:not} specified, the dataset contains one observation for each variable in the input {varlist}. Each row represents the summary statistics for one variable.
 {p_end}
 {pstd}
-• If {opt by(varlist)} {ul:is} specified, the dataset contains one observation for each variable in the input {varlist} {it:for each combination} of the values of the {it:by_variables}. Additional observations are included for overall totals across all groups for each variable in the input {varlist}.
+o If {opt by(varlist)} {ul:is} specified, the dataset contains one observation for each variable in the input {varlist} {it:for each combination} of the values of the {it:by_variables}. Additional observations are included for overall totals across all groups for each variable in the input {varlist}.
 For example, if statistics are calculated for variables {cmd:v1} and {cmd:v2}, and the option {cmd:by(groupvar)} is specified where {cmd:groupvar} has two unique values (A and B), the output dataset will typically have rows for:
 {p_end}
 {phang2}- {cmd:v1} for group A{p_end}
@@ -250,11 +250,11 @@ For example, if statistics are calculated for variables {cmd:v1} and {cmd:v2}, a
 {title:Author}
 
 {pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafizarfyanto/dtkit}{p_end}
+{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
+{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
 
 {pstd}
-For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
+For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues}.
 
 {title:Dependencies}
 

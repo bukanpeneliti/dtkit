@@ -22,7 +22,7 @@
 ### Minimal Structure (for overview files)
 
 ```text
-Header → Title → Description → Links to PDF → Summary → Video
+Header -> Title -> Description -> Links to PDF -> Summary -> Video
 ```
 
 ---
@@ -141,8 +141,8 @@ Describe contents
 
 ### Abbreviation Notation
 
-- `{cmdab:exc:el}` → Minimum abbrev: `exc`, full: `excel`
-- `{opt rowr:ange}` → Minimum abbrev: `rowr`, full: `rowrange`
+- `{cmdab:exc:el}` -> Minimum abbrev: `exc`, full: `excel`
+- `{opt rowr:ange}` -> Minimum abbrev: `rowr`, full: `rowrange`
 
 ---
 

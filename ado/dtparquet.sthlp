@@ -179,13 +179,13 @@ Options are presented under the following headings:
 Hafiz Arfyanto
 {p_end}
 {pstd}
-Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}
 {p_end}
 {pstd}
-GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafizarfyanto/dtkit}
+GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
-For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
+For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues}.
 
 {marker also_see}{...}
 {title:Also see}

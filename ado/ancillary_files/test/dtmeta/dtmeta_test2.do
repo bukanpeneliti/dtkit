@@ -42,7 +42,7 @@ program define dtrace
 end
 
 *******************************************************
-* Test 1: dtmeta with no data loaded — should error
+* Test 1: dtmeta with no data loaded - should error
 *******************************************************
 display as text "Test 1: dtmeta without data"
 local ++total_tests
@@ -57,9 +57,9 @@ else {
 }
 
 *******************************************************
-* Test 2: dtmeta on in‐memory auto.dta
+* Test 2: dtmeta on in-memory auto.dta
 *******************************************************
-display as text "Test 2: dtmeta on in‐memory auto"
+display as text "Test 2: dtmeta on in-memory auto"
 local ++total_tests
 sysuse auto, clear
 dtmeta
@@ -144,7 +144,7 @@ else {
 capture erase "`xfile2'"
 
 *******************************************************
-* Test 6: clear without using — should error
+* Test 6: clear without using - should error
 *******************************************************
 display as text "Test 6a: dtmeta , clear"
 local ++total_tests
@@ -276,24 +276,24 @@ di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f 
 if `num_passed' > 0 {
     di _n as text "PASSED TESTS:"
     foreach test in `passed_tests' {
-        di as result "  ✓ Test `test'"
+        di as result "  PASSED: Test `test'"
     }
 }
 
 if `num_failed' > 0 {
     di _n as text "FAILED TESTS:"
     foreach test in `failed_tests' {
-        di as error "  ✗ Test `test'"
+        di as error "  FAILED: Test `test'"
     }
 }
 
 di _n as text "Overall Status: " _continue
 if `num_failed' == 0 {
-    di as result "ALL TESTS PASSED! ✓"
+    di as result "ALL TESTS PASSED!"
 }
 else {
-    di as error "`num_failed' TEST(S) FAILED ✗"
+    di as error "`num_failed' TEST(S) FAILED"
 }
 
 log close
-display as text "All tests completed — see dtmeta_test.log for details."
+display as text "All tests completed - see dtmeta_test.log for details."

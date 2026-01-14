@@ -87,7 +87,7 @@ else {
 * 3.  Two-way (cross-tab) tests
 *------------------------------------------------------------------------
 
-* 3.1 Two-way frequency: rep78 × foreign
+* 3.1 Two-way frequency: rep78 x foreign
 local ++total_tests
 sysuse auto, clear
 dtrace dtfreq rep78, cross(foreign)
@@ -96,7 +96,7 @@ if _rc {
     local failed_tests "`failed_tests' 4"
 }
 else {
-    di as result "[Test 4] PASS: Two-way frequency rep78 × foreign"
+    di as result "[Test 4] PASS: Two-way frequency rep78 x foreign"
     local passed_tests "`passed_tests' 4"
 }
 
@@ -126,7 +126,7 @@ else {
     local passed_tests "`passed_tests' 6"
 }
 
-* 3.4 Two-way with STATs and TYpe: rep78 × foreign, request row & col stats and prop & pct
+* 3.4 Two-way with STATs and TYpe: rep78 x foreign, request row & col stats and prop & pct
 local ++total_tests
 sysuse auto, clear
 dtrace dtfreq rep78, cross(foreign) stats(row col) type(prop pct)
@@ -160,7 +160,7 @@ else {
 * 4.  Binary option domain tests
 *------------------------------------------------------------------------
 
-* 4.1 Binary on binary variable (foreign) – should pass
+* 4.1 Binary on binary variable (foreign) - should pass
 local ++total_tests
 sysuse auto, clear
 dtrace dtfreq foreign, binary
@@ -173,7 +173,7 @@ else {
     local passed_tests "`passed_tests' 9"
 }
 
-* 4.2 Binary on non-binary variable (rep78) – should return error
+* 4.2 Binary on non-binary variable (rep78) - should return error
 local ++total_tests
 sysuse auto, clear
 dtrace dtfreq rep78, binary
@@ -218,7 +218,7 @@ else {
     local passed_tests "`passed_tests' 11"
 }
 
-* 5.3 Test dtfreq using temp_dtfreq (without clear) – should use in-memory data
+* 5.3 Test dtfreq using temp_dtfreq (without clear) - should use in-memory data
 local ++total_tests
 sysuse auto, clear
 dtrace dtfreq var1 using temp_dtfreq.dta

@@ -41,44 +41,10 @@ Program Version: {bf:1.0.1} (25 Jun 2025){vieweralsosee "[R] notes" "help notes"
 separate {help frame:frames} for easy analysis and documentation. The command creates up to four frames,
 each containing different aspects of the dataset's metadata:
 
-{phang2}• Variable metadata ({cmd:_dtvars}){p_end}
-{phang2}• Value label metadata ({cmd:_dtlabel}){p_end}
-{phang2}• Variable notes ({cmd:_dtnotes}){p_end}
-{phang2}• Dataset information and characteristics ({cmd:_dtinfo}){p_end}
-
-{pstd}
-{cmd:dtmeta} can process the dataset currently in Stata's memory or read metadata from an
-external Stata data file ({cmd:.dta} file) specified using the {cmd:using} qualifier.
-When {cmd:using} is specified, the dataset in memory remains unchanged unless the {cmd:clear}
-option is also specified. If {cmd:clear} is specified with {cmd:using}, the dataset currently
-in memory will be dropped and replaced by the data from the specified file before metadata extraction.
-If {cmd:dtmeta} is used without {cmd:using}, it processes the active dataset in memory.
-
-{marker options}{...}
-{title:Options}
-
-{dlgtab:Main}
-
-{phang}
-{opt clear} may only be specified with {cmd:using}. It specifies that the data from
-{it:filename} be loaded into memory, replacing the data currently in memory.
-Using {cmd:dtmeta} with {cmd:using} without {opt clear} processes the metadata from
-{it:filename} while leaving the data in memory unchanged.
-
-{phang}
-{opt replace} allows {cmd:dtmeta} to overwrite an existing Excel file when the
-{cmd:save()} option is specified. If {cmd:save()} is specified and an Excel file
-with the same name already exists, {opt replace} is required to overwrite it.
-Without {opt replace}, {cmd:dtmeta} will modify if the file exists.
-This option is only valid when {cmd:save()} is also specified.
-
-{phang}
-{opt report} displays a summary report in the Stata console after metadata extraction.
-This report includes:
-{p_end}
-{phang2}• Information about the source dataset (e.g., filename, number of variables, number of observations).{p_end}
-{phang2}• A summary of the metadata frames created, including the number of rows in each.{p_end}
-{phang2}• Clickable links to view each created frame (e.g., {stata "frame _dtvars: list"}).{p_end}
+{phang2}o Variable metadata ({cmd:_dtvars}){p_end}
+{phang2}o Value label metadata ({cmd:_dtlabel}){p_end}
+{phang2}o Variable notes ({cmd:_dtnotes}){p_end}
+{phang2}o Dataset information and characteristics ({cmd:_dtinfo}){p_end}
 {pstd}This option provides immediate feedback on the metadata extraction process.
 
 {phang}
@@ -297,11 +263,11 @@ the data in memory is replaced by the data from the specified file before metada
 {title:Author}
 
 {pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:hafizarfyanto@gmail.com":hafizarfyanto@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/hafizarfyanto/dtkit":https://github.com/hafizarfyanto/dtkit}{p_end}
+{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
+{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
 
 {pstd}
-For questions and suggestions, visit {browse "https://github.com/hafizarfyanto/dtkit/issues":GitHub Issues}.
+For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues}.
 
 {marker also_see}{...}
 {title:Also see}
