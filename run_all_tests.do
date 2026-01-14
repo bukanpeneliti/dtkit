@@ -17,8 +17,8 @@ else {
 }
 
 // Create master log
-capture log close _all
-log using ado/ancillary_files/test/log/run_all_tests.log, replace
+capture log close master
+log using ado/ancillary_files/test/log/run_all_tests.log, replace name(master)
 
 // Display header
 di _n(2) "=========================================="
@@ -37,6 +37,12 @@ local test_files `test_files' "ado/ancillary_files/test/dtmeta/dtmeta_test1.do"
 local test_files `test_files' "ado/ancillary_files/test/dtmeta/dtmeta_test2.do"
 local test_files `test_files' "ado/ancillary_files/test/dtstat/dtstat_test1.do"
 local test_files `test_files' "ado/ancillary_files/test/dtstat/dtstat_test2.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test1.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test2.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test3.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test4.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test5.do"
+local test_files `test_files' "ado/ancillary_files/test/dtparquet/dtparquet_test6.do"
 
 local total_files: word count `test_files'
 local completed_files 0
@@ -134,8 +140,8 @@ else {
     di as error "Review failed tests before proceeding with development."
 }
 di "=========================================="
+log close master
 
-log close
 
 // Return appropriate exit code
 if `failed_count' > 0 {
