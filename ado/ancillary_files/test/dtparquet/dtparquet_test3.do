@@ -34,6 +34,8 @@ parquet_file = pq.ParquetFile("test_compression.parquet")
 # Check compression of the first row group, first column
 compression = parquet_file.metadata.row_group(0).column(0).compression
 print(f"DEBUG: Compression is {compression}")
+# Explicitly close or delete to release handle
+del parquet_file
 if compression != "UNCOMPRESSED":
     raise ValueError(f"Expected UNCOMPRESSED, got {compression}")
 end
@@ -69,6 +71,8 @@ new_meta[b"dtparquet.dtmeta"] = json.dumps(dtmeta).encode()
 table = table.replace_schema_metadata(new_meta)
 
 pq.write_table(table, "test_version_gate.parquet")
+# Release handles
+del table
 end
 
 capture dtparquet use using "test_version_gate.parquet", clear

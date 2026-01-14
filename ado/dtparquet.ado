@@ -75,14 +75,48 @@ capture program drop dtparquet_use
 program dtparquet_use
     _check_python
     
-    local has_using = strpos(`"`0'"', " using ") > 0 | substr(trim(`"`0'"'), 1, 6) == "using " | trim(`"`0'"') == "using"
+    syntax [anything(everything)] [, Clear NOLabel CHunksize(string) ALLstring]
     
-    if `has_using' {
-        syntax [anything(name=vlist)] [if] [in] using/ [, Clear NOLabel CHunksize(string) ALLstring]
-        local filename `"`using'"'
+    local vlist ""
+    local if_exp ""
+    local in_exp ""
+    local filename ""
+    
+    local rest `"`anything'"'
+    while `"`rest'"' != "" {
+        gettoken tok rest : rest
+        
+        if `"`tok'"' == "if" {
+            local if_exp "if "
+            gettoken tok rest : rest
+            while `"`tok'"' != "" & !inlist(`"`tok'"', "in", "using") {
+                local if_exp `"`if_exp'`tok' "'
+                gettoken tok rest : rest
+            }
+            if inlist(`"`tok'"', "in", "using") local rest `"`tok' `rest'"'
+        }
+        else if `"`tok'"' == "in" {
+            local in_exp "in "
+            gettoken tok rest : rest
+            while `"`tok'"' != "" & !inlist(`"`tok'"', "if", "using") {
+                local in_exp `"`in_exp'`tok' "'
+                gettoken tok rest : rest
+            }
+            if inlist(`"`tok'"', "if", "using") local rest `"`tok' `rest'"'
+        }
+        else if `"`tok'"' == "using" {
+            gettoken filename rest : rest
+        }
+        else {
+            if `"`filename'"' == "" {
+                local vlist `"`vlist'`tok' "'
+            }
+        }
     }
-    else {
-        syntax anything(name=filename) [if] [in] [, Clear NOLabel CHunksize(string) ALLstring]
+    
+    local vlist = trim(`"`vlist'"')
+    if `"`filename'"' == "" {
+        local filename `"`vlist'"'
         local vlist ""
     }
 
@@ -108,7 +142,7 @@ program dtparquet_use
     else local py_varlist "None"
     python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize_val', bool(`is_int64_as_string'))
     
-    local if_in = trim("`if' `in'")
+    local if_in = trim("`if_exp' `in_exp'")
     if `"`if_in'"' != "" quietly keep `if_in'
     if `is_nolabel' == 0 _apply_dtmeta
 end
