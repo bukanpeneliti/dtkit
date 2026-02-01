@@ -1,4 +1,4 @@
-*! Version 1.0.0 14Jan2026
+*! Version 1.1.0 01Feb2026
 program dtparquet
     version 16
     _cleanup_orphaned
@@ -51,6 +51,12 @@ program dtparquet_save
     local is_nolabel = ("`nolabel'" != "")
     local file = subinstr(`"`filename'"', `"""', "", .)
     local file : subinstr local file "\" "/", all
+
+    if lower(substr("`file'", -8, .)) == ".parquet" {
+        local file = substr("`file'", 1, length("`file'") - 8)
+    }
+    local file "`file'.parquet"
+
     if "`replace'" == "" confirm new file `"`file'"'
     if `is_nolabel' == 0 {
         capture which dtmeta
@@ -127,6 +133,12 @@ program dtparquet_use
 
     local file = subinstr(trim(`"`filename'"'), `"""', "", .)
     local file : subinstr local file "\" "/", all
+
+    if lower(substr("`file'", -8, .)) == ".parquet" {
+        local file = substr("`file'", 1, length("`file'") - 8)
+    }
+    local file "`file'.parquet"
+
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
     python: import dtparquet
@@ -157,6 +169,11 @@ program dtparquet_export
     local target : subinstr local target "\" "/", all
     local source = subinstr(trim(`"`using'"'), `"""', "", .)
     local source : subinstr local source "\" "/", all
+
+    if lower(substr("`target'", -8, .)) == ".parquet" {
+        local target = substr("`target'", 1, length("`target'") - 8)
+    }
+    local target "`target'.parquet"
     
     confirm file `"`source'"'
     if "`replace'" == "" confirm new file `"`target'"'
@@ -214,6 +231,11 @@ program dtparquet_import
     local target : subinstr local target "\" "/", all
     local source = subinstr(trim(`"`using'"'), `"""', "", .)
     local source : subinstr local source "\" "/", all
+
+    if lower(substr("`source'", -8, .)) == ".parquet" {
+        local source = substr("`source'", 1, length("`source'") - 8)
+    }
+    local source "`source'.parquet"
 
     confirm file `"`source'"'
     if "`replace'" == "" confirm new file `"`target'"'

@@ -240,6 +240,56 @@ else {
     local failed_tests "`failed_tests' 7"
 }
 
+// Test Case 8: Extension Handling
+display _newline "=== TEST CASE 8: Extension Handling ==="
+local ++total_tests
+clear
+set obs 1
+gen x = 1
+
+// 8a: Save without extension
+dtparquet save "test_case8_noext", replace
+capture confirm file "test_case8_noext.parquet"
+local rc8a = _rc
+
+// 8b: Save with uppercase extension
+dtparquet save "test_case8_upper.PARQUET", replace
+capture confirm file "test_case8_upper.parquet"
+local rc8b = _rc
+
+// On Windows, confirm is case-insensitive. Use Python to verify actual case on disk
+python:
+import os, sfi
+files = os.listdir(".")
+is_lower = "test_case8_upper.parquet" in files
+is_upper = "test_case8_upper.PARQUET" in files
+# On Windows, both might be true in terms of matching, but listdir returns the actual one
+# Actually on Windows "a.txt" in ["A.txt"] is False if we do exact string match
+sfi.Scalar.setValue("py_is_lower", 1 if "test_case8_upper.parquet" in files else 0)
+sfi.Scalar.setValue("py_is_upper", 1 if "test_case8_upper.PARQUET" in files else 0)
+end
+local rc8b_is_lower = py_is_lower
+local rc8b_is_upper = py_is_upper
+
+// 8c: Use without extension
+clear
+dtparquet use using "test_case8_noext"
+local rc8c = (_rc == 0 & c(N) == 1)
+
+if `rc8a' == 0 & `rc8b' == 0 & `rc8b_is_lower' == 1 & `rc8b_is_upper' == 0 & `rc8c' == 1 {
+    display as result "Test 8 completed successfully"
+    local passed_tests "`passed_tests' 8"
+}
+else {
+    display as error "Test 8 failed: extension handling incorrect"
+    display as error "  8a (no ext save) rc: `rc8a'"
+    display as error "  8b (upper ext save) rc: `rc8b'"
+    display as error "  8b actual case (lower): `rc8b_is_lower'"
+    display as error "  8b actual case (upper): `rc8b_is_upper'"
+    display as error "  8c (no ext use) success: `rc8c'"
+    local failed_tests "`failed_tests' 8"
+}
+
 // Cleanup
 capture erase "test_case1.parquet"
 capture erase "test_case2.parquet"
@@ -249,6 +299,8 @@ capture erase "test_case3.parquet"
 capture erase "test_case4.parquet"
 capture erase "test_case5.parquet"
 capture erase "test_case6.parquet"
+capture erase "test_case8_noext.parquet"
+capture erase "test_case8_upper.parquet"
 capture erase "test.parquet"
 capture erase "test_orig.dta"
 capture set python_exec ""
