@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.1.0  28jun2025}{...}
+{* *! version 1.2.1  02Feb2026}{...}
 {vieweralsosee "dtfreq" "help dtfreq"}{...}
 {vieweralsosee "dtstat" "help dtstat"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
