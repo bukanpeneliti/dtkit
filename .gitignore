@@ -30,3 +30,7 @@ ado/ancillary_files/**/*.xlsx
 ado/ancillary_files/**/*.xls
 ado/ancillary_files/**/*.zip
 !ado/ancillary_files/**/*.do
+.ignore
+guide_sthlp.md
+package_maintenance_guide.md
+run_all_tests.do
