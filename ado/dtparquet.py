@@ -1,4 +1,4 @@
-import sfi # type: ignore
+import sfi  # type: ignore
 import pyarrow as pa
 import pyarrow.parquet as pq
 import json
@@ -531,6 +531,10 @@ def load(filename, varlist=None, nolabel=False, chunksize=None, int64_as_string=
                 stata_type = sfi.Data.getVarType(i)
                 if stata_type not in ["strL"] and not stata_type.startswith("str"):
                     column_data = [missing_val if v is None else v for v in column_data]
+                else:
+                    # For string variables, convert all values to strings
+                    # None becomes empty string, booleans become "True"/"False"
+                    column_data = [str(v) if v is not None else "" for v in column_data]
 
                 sfi.Data.store(
                     i,

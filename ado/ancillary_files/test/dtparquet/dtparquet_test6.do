@@ -152,12 +152,87 @@ else {
     local failed_tests "`failed_tests' 7"
 }
 
+// Test Case 8: String columns with null values (None in Python)
+display _newline "=== TEST CASE 8: String columns with null values ==="
+local ++total_tests
+python:
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
+import os
+try:
+    # Create a dataframe with various types including null type and long strings
+    schema = pa.schema([
+        ("id", pa.int64()),
+        ("str_col", pa.string()),
+        ("null_col", pa.null()),
+        ("long_str", pa.string()),
+        ("bool_col", pa.bool_())
+    ])
+    
+    data = [
+        pa.array([1, 2, 3]),
+        pa.array(["a", None, "c"]),
+        pa.array([None, None, None], type=pa.null()),
+        pa.array(["Short", "A" * 3000, None]),
+        pa.array([True, False, None])
+    ]
+    table = pa.Table.from_arrays(data, schema=schema)
+    pq.write_table(table, 'test_complex.parquet')
+    print("Created test_complex.parquet")
+except Exception as e:
+    print(f"Error creating test parquet: {e}")
+end
+
+dtparquet u "test_complex.parquet", cle
+display _rc
+if _rc == 0 {
+    describe
+    list
+    if long_str[2] == "A" * 3000 & null_col[1] == "" {
+        display as result "Test 8/9 complex completed successfully"
+        local passed_tests "`passed_tests' 8"
+    }
+    else {
+        display as error "Test 8/9 failed: data mismatch"
+        local failed_tests "`failed_tests' 8"
+    }
+}
+else {
+    display as error "Test 8/9 failed: rc=" _rc
+    local failed_tests "`failed_tests' 8"
+}
+
+// Test Case 9: Real-world complex file (BPOM)
+display _newline "=== TEST CASE 9: BPOM real-world file ==="
+local ++total_tests
+dtparquet u "ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", cle
+display _rc
+
+if _rc == 0 {
+    count
+    if r(N) > 0 {
+        display as result "Test 9 completed successfully: Loaded " r(N) " observations"
+        local passed_tests "`passed_tests' 9"
+    }
+    else {
+        display as error "Test 9 failed: No observations loaded"
+        local failed_tests "`failed_tests' 9"
+    }
+}
+else {
+    display as error "Test 9 failed: rc=" _rc
+    local failed_tests "`failed_tests' 9"
+}
+
 // Cleanup
 capture erase "test_base.dta"
 capture erase "test_abbr.parquet"
 capture erase "test_exp.parquet"
 capture erase "test_imp.dta"
 capture erase "test_opts.parquet"
+capture erase "test_null_str.parquet"
+capture erase "test_complex.parquet"
 
 // Summary
 display _newline "=========================================="

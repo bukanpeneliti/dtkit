@@ -74,6 +74,7 @@ program dtparquet_save
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
             capture frame drop `fr'
         }
+        capture error 0
     }
 end
 
@@ -156,7 +157,15 @@ program dtparquet_use
     
     local if_in = trim("`if_exp' `in_exp'")
     if `"`if_in'"' != "" quietly keep `if_in'
-    if `is_nolabel' == 0 _apply_dtmeta
+    if `is_nolabel' == 0 {
+        capture confirm frame _dtvars
+        if _rc == 0 {
+            _apply_dtmeta
+        }
+        else {
+            capture error 0
+        }
+    }
 end
 
 capture program drop dtparquet_export
@@ -220,6 +229,7 @@ program dtparquet_export
     foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
         capture frame drop `fr'
     }
+    capture error 0
 end
 
 capture program drop dtparquet_import
@@ -249,7 +259,13 @@ program dtparquet_import
     python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize', bool("`allstring'" != ""))
 
     if "`nolabel'" == "" {
-        _apply_dtmeta
+        capture confirm frame _dtvars
+        if _rc == 0 {
+            _apply_dtmeta
+        }
+        else {
+            capture error 0
+        }
     }
     else {
         foreach v of varlist _all {
@@ -257,7 +273,6 @@ program dtparquet_import
             label values `v' .
         }
     }
-
     quietly save `"`target'"', `replace'
 
     frame change `orig_frame'
