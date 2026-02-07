@@ -6,6 +6,7 @@
 Thumbs.db
 *.xlsx
 *.do 
+**/*.dta
 !run_all_tests.do
 !cleanup_test_logs.do
 
@@ -36,3 +37,9 @@ guide_sthlp.md
 package_maintenance_guide.md
 run_all_tests.do
 cleanup_test_logs.do
+
+temp_repos/
+
+# Rust local artifacts/config
+rust/target/
+rust/.cargo/config.toml

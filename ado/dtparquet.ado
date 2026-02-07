@@ -44,6 +44,9 @@ program dtparquet
     }
 end
 
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("ado/ancillary_files/dtparquet.dll")
+
 capture program drop dtparquet_save
 program dtparquet_save
     syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000)]
@@ -80,8 +83,8 @@ end
 
 capture program drop dtparquet_use
 program dtparquet_use
-    _check_python
-    
+    version 16
+
     syntax [anything(everything)] [, Clear NOLabel CHunksize(string) ALLstring]
     
     local vlist ""
@@ -127,7 +130,6 @@ program dtparquet_use
         local vlist ""
     }
 
-    local chunksize_val = cond("`chunksize'" == "", "None", "`chunksize'")
     local is_nolabel = ("`nolabel'" != "")
     local is_clear = ("`clear'" != "")
     local is_int64_as_string = ("`allstring'" != "")
@@ -140,20 +142,106 @@ program dtparquet_use
     }
     local file "`file'.parquet"
 
+    confirm file `"`file'"'
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
-    python: import dtparquet
-    if "`vlist'" != "" {
-        local py_varlist "["
-        local comma ""
-        foreach v of local vlist {
-            local py_varlist `"`py_varlist'`comma'"`v'""'
-            local comma ","
-        }
-        local py_varlist `"`py_varlist']"'
+
+    plugin call dtparquet_plugin, "describe" "`file'" "1" "0" "" "" "0" "0"
+
+    local n_rows = `n_rows'
+    local n_columns = `n_columns'
+    local vars_in_file
+    forvalues i = 1/`n_columns' {
+        local vars_in_file `vars_in_file' `name_`i''
     }
-    else local py_varlist "None"
-    python: dtparquet.load("`file'", `py_varlist', bool(`is_nolabel'), `chunksize_val', bool(`is_int64_as_string'))
+
+    if "`vlist'" == "" | "`vlist'" == "*" {
+        local matched_vars `vars_in_file'
+    }
+    else {
+        dtparquet_match_variables `vlist', against(`vars_in_file')
+        local matched_vars `r(matched_vars)'
+    }
+
+    local offset 0
+    local last_n 0
+    if "`in_exp'" != "" {
+        local in_clean = trim(subinstr(`"`in_exp'"', "in", "", 1))
+        local slash = strpos("`in_clean'", "/")
+        if `slash' > 0 {
+            local offset = real(substr("`in_clean'", 1, `slash' - 1))
+            local last_n = real(substr("`in_clean'", `slash' + 1, .))
+        }
+    }
+
+    if (`last_n' == 0) local last_n = `n_rows'
+    local row_to_read = max(0, min(`n_rows', `last_n') - `offset' + (`offset' > 0))
+    local n_obs_already = _N
+    local n_obs_after = `n_obs_already' + `row_to_read'
+    quietly set obs `n_obs_after'
+
+    local match_vars_non_binary
+    local cast_string_vars
+    foreach vari in `matched_vars' {
+        local var_number: list posof "`vari'" in vars_in_file
+        local type `type_`var_number''
+        local p_type `polars_type_`var_number''
+        local string_length `string_length_`var_number''
+
+        if (`is_int64_as_string' & inlist("`p_type'", "int64", "uint64")) {
+            local type strl
+            local cast_string_vars `cast_string_vars' `vari'
+        }
+        local load_type_`var_number' `type'
+
+        dtparquet_gen_or_recast,  name(`vari')        ///
+                                type_new(`type')     ///
+                                str_length(`string_length')
+
+        if ("`type'" == "datetime") {
+            format `vari' %tc
+        }
+        else if ("`type'" == "date") {
+            format `vari' %td
+        }
+        else if ("`type'" == "time") {
+            format `vari' %tchh:mm:ss
+        }
+        else if ("`type'" == "binary") {
+            continue
+        }
+
+        local match_vars_non_binary `match_vars_non_binary' `vari'
+    }
+
+    local matched_vars `match_vars_non_binary'
+    local n_matched_vars: word count `matched_vars'
+
+    local i = 0
+    foreach vari of varlist * {
+        local i = `i' + 1
+        local i_matched : list posof "`vari'" in matched_vars
+        if (`i_matched' > 0) {
+            local i_original : list posof "`vari'" in vars_in_file
+            local v_to_read_index_`i_matched' `i'
+            local v_to_read_name_`i_matched' `vari'
+            local v_to_read_type_`i_matched' `load_type_`i_original''
+            local v_to_read_p_type_`i_matched' `polars_type_`i_original''
+        }
+    }
+
+    local cast_json ""
+
+    local mapping from_macros
+    local parallelize ""
+    local vertical_relaxed 0
+    local asterisk_to_variable ""
+    local sort ""
+    local sql_if ""
+    local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
+    local plugin_offset = max(0, `offset' - 1)
+
+    plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
     
     local if_in = trim("`if_exp' `in_exp'")
     if `"`if_in'"' != "" quietly keep `if_in'
@@ -359,6 +447,155 @@ program _apply_dtmeta
     // Cleanup
     foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
         capture frame drop `fr'
+    }
+end
+
+capture program drop dtparquet_match_variables
+program dtparquet_match_variables, rclass
+    syntax [anything(name=namelist)], against(string)
+
+    local matched
+    local unmatched
+
+    foreach name in `namelist' {
+        local found = 0
+
+        if strpos("`name'", "*") | strpos("`name'", "?") {
+            foreach v of local against {
+                if match("`v'", "`name'") {
+                    if strpos(" `matched' ", " `v' ") == 0 {
+                        local matched = `" `matched' `v' "'
+                    }
+                    local found = 1
+                }
+            }
+        }
+        else {
+            foreach v of local against {
+                if "`v'" == "`name'" {
+                    if strpos(" `matched' ", " `v' ") == 0 {
+                        local matched = `" `matched' `v' "'
+                    }
+                    local found = 1
+                }
+            }
+        }
+
+        if `found' == 0 {
+            local unmatched `unmatched' `name'
+        }
+    }
+
+    if "`unmatched'" != "" {
+        di as error "The following variable(s) were not found: `unmatched'"
+        error 111
+    }
+
+    return local matched_vars = `"`matched'"'
+end
+
+capture program drop dtparquet_gen_or_recast
+program dtparquet_gen_or_recast
+    version 16
+    syntax  ,   name(string)             ///
+                type_new(string)         ///
+                str_length(integer)
+
+    local string_length = max(1,`str_length')
+    if ("`type_new'" == "datetime")      local type_new double
+    else if ("`type_new'" == "time")     local type_new double
+    else if ("`type_new'" == "date")     local type_new long
+    else if ("`type_new'" == "string")   local type_str str`string_length'
+
+    capture confirm variable `name', exact
+    local b_gen = _rc > 0
+
+    local vartype
+    if (!`b_gen') local vartype: type `name'
+
+    if ("`type_new'" == "string") {
+        if `b_gen' {
+            quietly gen `type_str' `name' = ""
+        }
+        else {
+            if regexm("`vartype'", "^str([0-9]+)$") {
+                local current_length = regexs(1)
+                if `string_length' > `current_length' {
+                    recast str`string_length' `name'
+                }
+            }
+            else if inlist("`vartype'", "byte", "int", "long", "float", "double") {
+                tostring `name', replace force
+            }
+        }
+    }
+    else if ("`type_new'" == "strl") {
+        if `b_gen' {
+            quietly gen strL `name' = ""
+        }
+        else {
+            if regexm("`vartype'", "^str([0-9]+)$") {
+                recast strL `name'
+            }
+            else if inlist("`vartype'", "byte", "int", "long", "float", "double") {
+                tostring `name', replace force
+                recast strL `name'
+            }
+        }
+    }
+    else if ("`type_new'" == "float") {
+        if `b_gen' {
+            quietly gen float `name' = .
+        }
+        else {
+            if inlist("`vartype'", "long", "double") {
+                recast double `name'
+            }
+            else if inlist("`vartype'", "byte", "int") {
+                recast float `name'
+            }
+        }
+    }
+    else if ("`type_new'" == "long") {
+        if `b_gen' {
+            quietly gen long `name' = .
+        }
+        else {
+            if inlist("`vartype'", "byte", "int") {
+                recast long `name'
+            }
+            else if inlist("`vartype'", "float") {
+                recast double `name'
+            }
+        }
+    }
+    else if ("`type_new'" == "int") {
+        if `b_gen' {
+            quietly gen int `name' = .
+        }
+        else {
+            if inlist("`vartype'", "byte") {
+                recast int `name'
+            }
+        }
+    }
+    else if ("`type_new'" == "byte") {
+        if `b_gen' {
+            quietly gen byte `name' = .
+        }
+    }
+    else if ("`type_new'" == "binary") {
+        di "Dropping `name' as cannot process binary columns"
+    }
+    else {
+        if `b_gen' {
+            quietly gen double `name' = .
+        }
+        else {
+            if inlist("`vartype'", "byte", "int", "long", "float") {
+                recast double `name'
+            }
+        }
     }
 end
 
