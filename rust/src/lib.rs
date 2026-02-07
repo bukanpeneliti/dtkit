@@ -119,9 +119,41 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                 }
             }
             "save" => {
-                display(&format!("Save called with {} args", subfunction_args.len()));
-                // TODO: Implement save
-                0
+                if subfunction_args.len() < 12 {
+                    display("Error: save requires 12 arguments");
+                    return 198;
+                }
+
+                let compression_level_raw = subfunction_args[8].parse::<isize>().unwrap_or(-1);
+                let compression_level = if compression_level_raw < 0 {
+                    None
+                } else {
+                    Some(compression_level_raw as usize)
+                };
+
+                let save_result = write::write_from_stata(
+                    subfunction_args[0],
+                    subfunction_args[1],
+                    subfunction_args[2].parse::<usize>().unwrap_or(0),
+                    subfunction_args[3].parse::<usize>().unwrap_or(0),
+                    Some(subfunction_args[4]),
+                    subfunction_args[5],
+                    None,
+                    subfunction_args[6],
+                    subfunction_args[7],
+                    compression_level,
+                    subfunction_args[9] == "1",
+                    subfunction_args[10] == "1",
+                    subfunction_args[11] == "1",
+                );
+
+                match save_result {
+                    Ok(code) => code,
+                    Err(e) => {
+                        display(&format!("Error writing parquet file = {:?}", e));
+                        198
+                    }
+                }
             }
             "describe" => {
                 if subfunction_args.len() < 7 {

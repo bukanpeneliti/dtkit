@@ -49,10 +49,27 @@ assert "`id_type'" == "strL"
 assert "`year_type'" == "strL"
 display as result "Test 6 PASSED: allstring int64 cast works"
 
-* Test 7: Call save subcommand (placeholder)
-plugin call dtparquet_plugin, "save" "test.parquet" "var1 var2" "100" "0" "" "{}" "" "zstd" "-1" "1" "0" "0"
-display as result "Test 7 COMPLETED: Save placeholder called"
+* Test 7: Save and read back through dtparquet
+local roundtrip_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
+capture erase "`roundtrip_file'"
+
+dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
+local id_first = ID[1]
+local id_last = ID[_N]
+local year_first = year[1]
+
+dtparquet save "`roundtrip_file'", replace
+assert fileexists("`roundtrip_file'")
+
+dtparquet use using "`roundtrip_file'", clear
+count
+assert r(N) == 1000
+assert c(k) == 3
+assert ID[1] == `id_first'
+assert ID[_N] == `id_last'
+assert year[1] == `year_first'
+display as result "Test 7 PASSED: save and read-back roundtrip works"
 
 display _newline(2)
 display as result "All tests completed!"
-display as text "The Rust plugin is working. Next: implement actual read/write logic."
+display as text "The Rust plugin read and save paths are both validated in batch mode."

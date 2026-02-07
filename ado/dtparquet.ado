@@ -50,7 +50,6 @@ program dtparquet_plugin, plugin using("ado/ancillary_files/dtparquet.dll")
 capture program drop dtparquet_save
 program dtparquet_save
     syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000)]
-    _check_python
     local is_nolabel = ("`nolabel'" != "")
     local file = subinstr(`"`filename'"', `"""', "", .)
     local file : subinstr local file "\" "/", all
@@ -71,8 +70,31 @@ program dtparquet_save
             local is_nolabel 1
         }
     }
-    python: import dtparquet
-    python: dtparquet.save_atomic("`file'", bool(`is_nolabel'), `chunksize')
+
+    quietly ds
+    local varlist `r(varlist)'
+    local var_count: word count `varlist'
+
+    local i = 0
+    foreach vari of local varlist {
+        local i = `i' + 1
+        local typei: type `vari'
+        local formati: format `vari'
+        local str_length 0
+
+        if ((substr("`typei'", 1, 3) == "str") & ("`typei'" != "strl")) {
+            local str_length = substr("`typei'", 4, .)
+            local typei string
+        }
+
+        local name_`i' `vari'
+        local dtype_`i' `typei'
+        local format_`i' `formati'
+        local str_length_`i' `str_length'
+    }
+
+    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "" "zstd" "-1" "1" "0" "0"
+
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
             capture frame drop `fr'
