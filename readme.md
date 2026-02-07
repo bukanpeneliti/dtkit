@@ -119,7 +119,7 @@ frame _dtvars: list varname type format
 ## Compatibility
 - Requires Stata 16 or newer
 - Windows 11 compatible
-- **Python requirement**: `dtparquet` requires Python with `pyarrow` installed
+- `dtparquet` runtime is plugin-native and does not require Python/pyarrow
 - Optional: [`gtools`](https://github.com/mcaceresb/stata-gtools) for speed boost
 
 ## Support

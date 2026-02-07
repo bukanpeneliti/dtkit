@@ -1,0 +1,158 @@
+# dtparquet Rust Refactor - Handoff
+
+## Branch
+
+`refactor/rust-dtparquet`
+
+## Current State (as of commit `51f8447`)
+
+- `dtparquet use` is plugin-first and stable through batch regression.
+- Ado pre-read macro contract is wired and consumed by Rust read path.
+- `dtparquet save` is now plugin-first end-to-end (no Python save bridge).
+- Rust save path (`rust/src/write.rs`) now:
+  - reads Stata data via plugin API (`read_numeric`, `read_string`, `read_string_strl`)
+  - builds Polars columns/DataFrame
+  - applies save-time `sql_if` filtering when provided
+  - supports `partition_by` write path
+  - enforces safe overwrite behavior for single-file and partitioned outputs
+  - writes parquet with compression mapping (`lz4`, `uncompressed`, `snappy`,
+    `gzip`, `lzo`, `brotli`, `zstd`)
+  - embeds initial parquet metadata scaffold key `dtparquet.dtmeta`
+  - writes atomically via `*.tmp` then rename
+- Ado save path (`ado/dtparquet.ado`) now prepares macro contract for Rust save:
+  - `varlist`, `var_count`
+  - `name_*`, `dtype_*`, `format_*`, `str_length_*`
+- Save/read-back regression is added in:
+  - `ado/ancillary_files/test/dtparquet/dtparquet_test7.do`
+- Targeted regression coverage added for:
+  - partitioned save + overwrite guard behavior
+  - save-time filter behavior
+  - metadata key scaffold presence
+- Build warning cleanup done:
+  - bindgen callback API updated (`CargoCallbacks::new()`)
+  - `ST_retcode` warning handled intentionally
+  - unused metadata stub param warning removed
+
+## Validated Behavior
+
+Batch command used:
+
+`"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Passing checks in `dtparquet_test7.log`:
+
+- setup check passes
+- describe macro contract checks pass
+- read materializes rows/vars
+- varlist subset path passes
+- in-range path passes
+- allstring path passes
+- save then read-back roundtrip assertions pass
+- final line: `All tests completed!`
+
+## Known Gaps (Next Priority)
+
+- Primary next objective: remove all Python runtime dependency from dtparquet.
+- Remaining Python touchpoints:
+  - `dtparquet_export` in `ado/dtparquet.ado` uses `python: import dtparquet`
+    stream manager.
+  - `dtparquet_import` in `ado/dtparquet.ado` uses `python: dtparquet.load_atomic(...)`.
+  - `_check_python` enforces `python query` and `pyarrow`.
+  - `_cleanup_orphaned` uses Python cleanup hook.
+  - one regression assertion checks metadata key via Python/pyarrow.
+- Rust parity still deferred:
+  - `compress` / `compress_string_to_numeric` parity behavior on save.
+  - full metadata embedding/restoration parity (`_dtvars`, `_dtlabel`,
+    `_dtnotes`, `_dtinfo`, value-label fidelity).
+- Save path is currently full in-memory DataFrame materialization (not chunked
+  streaming write).
+
+## Important Notes
+
+- Build target dir is configured in `rust/.cargo/config.toml` (machine-local, ignored):
+  - `D:/OneDrive/tmp/rust/dtparquet-target`
+- `rust/target/` is ignored.
+- Large/untracked repo content still exists (fixtures, dll binaries, rust crate
+  files, etc.).
+- Keep edits minimal and scoped; do not normalize unrelated untracked files.
+
+## Lock-safe DLL promotion flow
+
+Use this deterministic promotion flow for `ado/ancillary_files/dtparquet.new.dll`
+to `ado/ancillary_files/dtparquet.dll`:
+
+1. Keep `dtparquet.dll` as the default plugin target.
+2. Attempt direct promotion by replacing `dtparquet.dll` with
+   `dtparquet.new.dll`.
+3. If replacement succeeds, continue with normal batch validation.
+4. If replacement fails because `dtparquet.dll` is locked, keep
+   `dtparquet.dll` unchanged and temporarily run tests with
+   `dtparquet.new.dll` only for that locked window.
+5. After lock release, promote again and restore all plugin references back to
+   `dtparquet.dll`.
+
+This preserves a stable primary DLL path while allowing deterministic fallback
+only when lock contention blocks promotion.
+
+## Files To Read First
+
+1. `HANDOFF.md`
+2. `rust/src/lib.rs`
+3. `rust/src/read.rs`
+4. `rust/src/write.rs`
+5. `rust/src/metadata.rs`
+6. `ado/dtparquet.ado`
+7. `ado/ancillary_files/test/dtparquet/dtparquet_test7.do`
+8. reference: `temp_repos/stata_parquet_io-main/src/write.rs`
+
+## Constraints
+
+- Keep pq-compatible read contract unchanged.
+- Keep existing dtparquet user syntax unchanged.
+- Preserve atomic write for single-file save path.
+- Prefer minimal targeted edits.
+- Use Stata batch mode for validation.
+- Do not switch to `dtparquet.new.dll` unless `dtparquet.dll` is locked.
+
+## Prompt For Next Agent
+
+Execute these tasks in one cohesive patch set.
+
+1) Add lock-safe DLL promotion documentation that defines a deterministic
+   promotion flow from `ado/ancillary_files/dtparquet.new.dll` to
+   `ado/ancillary_files/dtparquet.dll`.
+
+2) Extend
+   `ado/ancillary_files/test/dtparquet/dtparquet_test7.do` with focused
+   coverage for `dtparquet export` and `dtparquet import` command paths,
+   including:
+   - normal export/import roundtrip
+   - `replace`
+   - `nolabel`
+   - `allstring`
+   - quoted paths containing spaces
+
+3) Harden parsing in `ado/dtparquet.ado` for `dtparquet_export` and
+   `dtparquet_import` so user-facing syntax handling remains stable across
+   option combinations and quoted arguments.
+
+Constraints for this agent:
+
+- Keep command syntax unchanged.
+- Keep edits minimal, localized, and reversible.
+- Keep tests deterministic and clean up generated artifacts.
+- Do not weaken existing assertions.
+- Do not add external tooling dependencies.
+
+Validation required:
+
+- Run batch regression until green.
+- Use `dtparquet.new.dll` only when `dtparquet.dll` is locked.
+
+Batch validation command:
+
+```bash
+cd "D:\OneDrive\MyWork\00personal\stata\dtkit" && \
+"C:\Program Files\StataNow19\StataMP-64.exe" /e \
+"D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"
+```

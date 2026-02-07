@@ -2,10 +2,18 @@
 
 discard
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
+capture log close _all
+log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
 * Load the plugin
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+if _rc != 0 {
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+}
+
 cap program drop dtparquet_plugin
-program dtparquet_plugin, plugin using("D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll")
+program dtparquet_plugin, plugin using("`plugin_dll'")
 
 * Test 1: Check plugin loads
 plugin call dtparquet_plugin, "setup_check"
@@ -24,7 +32,7 @@ display as result "Test 2 PASSED: describe macro contract available"
 * Test 3: Call read through ado against real parquet fixture
 run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
 cap program drop dtparquet_plugin
-program dtparquet_plugin, plugin using("D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll")
+program dtparquet_plugin, plugin using("`plugin_dll'")
 dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear
 display as result "Test 3 PASSED: Read path executed with ado pre-read setup"
 count
@@ -132,6 +140,87 @@ plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/
 assert "`has_metadata_key'" == "1"
 display as result "Test 10 PASSED: metadata key scaffold present"
 
+* Test 11: dtparquet export/import command paths
+local export_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/export import tmp"
+capture mkdir "`export_dir'"
+
+local source_dta "`export_dir'/source labels.dta"
+local export_parquet "`export_dir'/quoted path.parquet"
+local import_default_dta "`export_dir'/import default.dta"
+local import_allstring_dta "`export_dir'/import allstring fixture.dta"
+
+capture erase "`source_dta'"
+capture erase "`export_parquet'"
+capture erase "`import_default_dta'"
+capture erase "`import_allstring_dta'"
+
+clear
+set obs 3
+gen long id = _n
+gen double code = 1234567890120 + _n
+gen str8 grp = cond(mod(_n, 2) == 0, "beta", "alpha")
+label define grp_lbl 1 "alpha" 2 "beta", replace
+gen byte grp_code = cond(grp == "alpha", 1, 2)
+label values grp_code grp_lbl
+label variable grp_code "group code"
+quietly save "`source_dta'", replace
+
+dtparquet export "`export_parquet'" using "`source_dta'"
+confirm file "`export_parquet'"
+
+capture dtparquet export "`export_parquet'" using "`source_dta'"
+assert _rc != 0
+
+dtparquet import "`import_default_dta'" using "`export_parquet'"
+quietly use "`import_default_dta'", clear
+count
+assert r(N) == 3
+assert c(k) == 4
+assert id[1] == 1
+assert code[3] == 1234567890123
+
+dtparquet export "`export_parquet'" using "`source_dta'", replace nolabel
+dtparquet import "`import_allstring_dta'" using "`export_parquet'", replace nolabel
+quietly use "`import_allstring_dta'", clear
+count
+assert r(N) == 3
+assert c(k) == 4
+
+dtparquet import "`import_allstring_dta'" using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
+quietly use "`import_allstring_dta'", clear
+local id_type: type ID
+local year_type: type year
+assert "`id_type'" == "strL"
+assert "`year_type'" == "strL"
+display as result "Test 11 PASSED: export/import supports replace nolabel allstring and quoted paths"
+
+* Test 12: parser edge-case failures for export/import
+capture dtparquet export "`export_parquet'" "`source_dta'"
+assert _rc == 198
+
+capture dtparquet export using "`source_dta'"
+assert _rc == 198
+
+capture dtparquet export "`export_parquet'" using
+assert _rc == 198
+
+capture dtparquet import "`import_default_dta'" "`export_parquet'"
+assert _rc == 198
+
+capture dtparquet import using "`export_parquet'"
+assert _rc == 198
+
+capture dtparquet import "`import_default_dta'" using
+assert _rc == 198
+display as result "Test 12 PASSED: export/import parser failure paths are stable"
+
+capture erase "`source_dta'"
+capture erase "`export_parquet'"
+capture erase "`import_default_dta'"
+capture erase "`import_allstring_dta'"
+capture rmdir "`export_dir'"
+
 display _newline(2)
 display as result "All tests completed!"
 display as text "The Rust plugin read and save paths are both validated in batch mode."
+log close

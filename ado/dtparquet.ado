@@ -280,9 +280,10 @@ end
 
 capture program drop dtparquet_export
 program dtparquet_export
-    gettoken pqfile rest : 0
-    gettoken using_kw rest : rest
-    gettoken dtafile rest : rest
+    local rest `"`0'"'
+    gettoken pqfile rest : rest, bind
+    gettoken using_kw rest : rest, bind
+    gettoken dtafile rest : rest, bind
     local 0 `"`rest'"'
     syntax [, REplace NOLabel CHunksize(integer 50000)]
     local is_nolabel = ("`nolabel'" != "")
@@ -292,9 +293,11 @@ program dtparquet_export
         exit 198
     }
     
-    local target = subinstr(trim(`"`pqfile'"'), `"""', "", .)
+    local target `"`pqfile'"'
+    local target : subinstr local target `"""' "", all
     local target : subinstr local target "\" "/", all
-    local source = subinstr(trim(`"`dtafile'"'), `"""', "", .)
+    local source `"`dtafile'"'
+    local source : subinstr local source `"""' "", all
     local source : subinstr local source "\" "/", all
 
     if lower(substr("`target'", -8, .)) == ".parquet" {
@@ -316,10 +319,10 @@ program dtparquet_export
     if `is_nolabel' local save_opts `save_opts' nolabel
 
     if `"`save_opts'"' == "" {
-        dtparquet_save `"`target'"'
+        dtparquet_save "`target'"
     }
     else {
-        dtparquet_save `"`target'"', `save_opts'
+        dtparquet_save "`target'", `save_opts'
     }
 
     frame change `orig_frame'
@@ -328,9 +331,10 @@ end
 
 capture program drop dtparquet_import
 program dtparquet_import
-    gettoken dtafile rest : 0
-    gettoken using_kw rest : rest
-    gettoken pqfile rest : rest
+    local rest `"`0'"'
+    gettoken dtafile rest : rest, bind
+    gettoken using_kw rest : rest, bind
+    gettoken pqfile rest : rest, bind
     local 0 `"`rest'"'
     syntax [, REplace NOLabel CHunksize(integer 50000) ALLstring]
 
@@ -339,9 +343,11 @@ program dtparquet_import
         exit 198
     }
 
-    local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
+    local target `"`dtafile'"'
+    local target : subinstr local target `"""' "", all
     local target : subinstr local target "\" "/", all
-    local source = subinstr(trim(`"`pqfile'"'), `"""', "", .)
+    local source `"`pqfile'"'
+    local source : subinstr local source `"""' "", all
     local source : subinstr local source "\" "/", all
 
     if lower(substr("`source'", -8, .)) == ".parquet" {
