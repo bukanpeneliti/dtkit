@@ -15,7 +15,6 @@ log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
 discard
 local ado_plus = c(sysdir_plus)
 copy "ado/dtparquet.ado" "`ado_plus'd/dtparquet.ado", replace
-copy "ado/dtparquet.py"  "`ado_plus'd/dtparquet.py", replace
 
 // Initialize test tracking
 local passed_tests ""

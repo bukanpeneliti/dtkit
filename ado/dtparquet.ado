@@ -284,6 +284,10 @@ program dtparquet_export
     gettoken pqfile rest : rest, bind
     gettoken using_kw rest : rest, bind
     gettoken dtafile rest : rest, bind
+    if substr(`"`dtafile'"', -1, 1) == "," {
+        local dtafile = substr(`"`dtafile'"', 1, length(`"`dtafile'"') - 1)
+        local rest `", `rest'"'
+    }
     local 0 `"`rest'"'
     syntax [, REplace NOLabel CHunksize(integer 50000)]
     local is_nolabel = ("`nolabel'" != "")
@@ -335,6 +339,10 @@ program dtparquet_import
     gettoken dtafile rest : rest, bind
     gettoken using_kw rest : rest, bind
     gettoken pqfile rest : rest, bind
+    if substr(`"`pqfile'"', -1, 1) == "," {
+        local pqfile = substr(`"`pqfile'"', 1, length(`"`pqfile'"') - 1)
+        local rest `", `rest'"'
+    }
     local 0 `"`rest'"'
     syntax [, REplace NOLabel CHunksize(integer 50000) ALLstring]
 

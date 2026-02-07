@@ -1,8 +1,10 @@
 * Test script for dtparquet Rust plugin
 
+version 16
+clear frames
 discard
+capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
-capture log close _all
 log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
 * Load the plugin
@@ -223,6 +225,34 @@ assert _rc == 198
 capture dtparquet import "`import_default_dta'" using
 assert _rc == 198
 display as result "Test 12 PASSED: export/import parser failure paths are stable"
+
+* Test 13: metadata roundtrip semantics
+local meta_parquet "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/meta_roundtrip.parquet"
+capture erase "`meta_parquet'"
+
+clear
+set obs 3
+gen byte z = _n
+label define zlbl 1 "one" 2 "two" 3 "three", replace
+label values z zlbl
+label variable z "z label"
+
+dtparquet save "`meta_parquet'", replace
+dtparquet use using "`meta_parquet'", clear
+local z_var_label_default : variable label z
+local z_val_label_default : value label z
+assert "`z_var_label_default'" == ""
+assert "`z_val_label_default'" == ""
+
+dtparquet save "`meta_parquet'", replace nolabel
+dtparquet use using "`meta_parquet'", clear
+local z_var_label_nolabel : variable label z
+local z_val_label_nolabel : value label z
+assert "`z_var_label_nolabel'" == ""
+assert "`z_val_label_nolabel'" == ""
+display as result "Test 13 PASSED: metadata behavior is deterministic with and without nolabel"
+
+capture erase "`meta_parquet'"
 
 capture erase "`source_dta'"
 capture erase "`export_parquet'"

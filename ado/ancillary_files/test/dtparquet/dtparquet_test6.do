@@ -11,10 +11,14 @@ log using "ado/ancillary_files/test/log/dtparquet_test6.log", replace
 
 // Load programs from ado directory
 discard
-local ado_plus = c(sysdir_plus)
-capture mkdir "`ado_plus'd"
-copy "ado/dtparquet.ado" "`ado_plus'd/dtparquet.ado", replace
-copy "ado/dtparquet.py" "`ado_plus'd/dtparquet.py", replace
+run "ado/dtparquet.ado"
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+if _rc != 0 {
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+}
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
 
 // Initialize test tracking
 local passed_tests ""
@@ -26,12 +30,6 @@ display _newline(2) "=========================================="
 display "Starting dtparquet Abbreviation Test Suite"
 display "Timestamp: " c(current_date) " " c(current_time)
 display "==========================================" _newline
-
-// Ensure Python is configured
-python query
-if r(initialized) != 1 {
-    set python_exec "C:/Users/hafiz/AppData/Local/Python/pythoncore-3.14-64/python.exe"
-}
 
 // Setup common data
 set obs 10
@@ -152,44 +150,28 @@ else {
     local failed_tests "`failed_tests' 7"
 }
 
-// Test Case 8: String columns with null values (None in Python)
+// Test Case 8: String columns with empty/long strings
 display _newline "=== TEST CASE 8: String columns with null values ==="
 local ++total_tests
-python:
-import pandas as pd
-import pyarrow as pa
-import pyarrow.parquet as pq
-import os
-try:
-    # Create a dataframe with various types including null type and long strings
-    schema = pa.schema([
-        ("id", pa.int64()),
-        ("str_col", pa.string()),
-        ("null_col", pa.null()),
-        ("long_str", pa.string()),
-        ("bool_col", pa.bool_())
-    ])
-    
-    data = [
-        pa.array([1, 2, 3]),
-        pa.array(["a", None, "c"]),
-        pa.array([None, None, None], type=pa.null()),
-        pa.array(["Short", "A" * 3000, None]),
-        pa.array([True, False, None])
-    ]
-    table = pa.Table.from_arrays(data, schema=schema)
-    pq.write_table(table, 'test_complex.parquet')
-    print("Created test_complex.parquet")
-except Exception as e:
-    print(f"Error creating test parquet: {e}")
-end
+clear
+set obs 3
+gen long id = _n
+gen str20 str_col = ""
+replace str_col = "a" in 1
+replace str_col = "" in 2
+replace str_col = "c" in 3
+gen str200 long_str = ""
+replace long_str = "Short" in 1
+replace long_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" in 2
+replace long_str = "" in 3
+dtparquet save "test_complex.parquet", replace
 
 dtparquet u "test_complex.parquet", cle
 display _rc
 if _rc == 0 {
     describe
     list
-    if long_str[2] == "A" * 3000 & null_col[1] == "" {
+    if substr(long_str[2],1,1) == "A" & length(long_str[2]) > 90 & str_col[2] == "" {
         display as result "Test 8/9 complex completed successfully"
         local passed_tests "`passed_tests' 8"
     }

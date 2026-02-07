@@ -67,6 +67,43 @@ Passing checks in `dtparquet_test7.log`:
 - Save path is currently full in-memory DataFrame materialization (not chunked
   streaming write).
 
+### Parity triage (next actions)
+
+<!-- markdownlint-disable MD013 -->
+| Item | Decision | Next action |
+| :--- | :--- | :--- |
+| `compress` save option parity | test now | Add deterministic checks for accepted values and defaults. |
+| `compress_string_to_numeric` parity | defer | Keep in backlog until plugin contract is finalized. |
+| Full `_dt*` metadata parity | implement now | Prioritize labels/notes/dataset label roundtrip assertions. |
+<!-- markdownlint-enable MD013 -->
+
+### Refactored runtime limitations observed in legacy suite
+
+- `dtparquet_test1.do`
+  - Test 2: full datasignature roundtrip parity fails.
+  - Test 3: metadata preservation parity (labels/notes) fails.
+- `dtparquet_test5.do`
+  - Test 3: UTF-8 special-character value fidelity check fails.
+  - Test 5: datasignature fidelity check fails.
+  - Test 11: native date/time roundtrip fidelity check fails.
+  - Test 5b is currently skipped because the strL signature stress path is unstable.
+- `dtparquet_test6.do`
+  - Test 8: string payload fidelity with empty/long string combinations fails
+    (values load as empty after roundtrip).
+
+### Immediate next tasks
+
+1. Fix `dtparquet_test6.do` Test 8 string payload fidelity (empty + long string)
+   to restore non-empty values on roundtrip.
+2. Fix `dtparquet_test5.do` Test 3 UTF-8 value fidelity mismatch.
+3. Fix `dtparquet_test5.do` Test 11 native date/time roundtrip mismatch.
+4. Fix datasignature parity failures in `dtparquet_test1.do` Test 2 and
+   `dtparquet_test5.do` Test 5.
+5. Resolve metadata parity mismatch in `dtparquet_test1.do` Test 3
+   (labels/notes/dataset label contract).
+6. Re-run `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in batch
+   and record final pass/fail per file.
+
 ## Important Notes
 
 - Build target dir is configured in `rust/.cargo/config.toml` (machine-local, ignored):
