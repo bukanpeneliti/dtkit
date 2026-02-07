@@ -6,7 +6,6 @@
 {vieweralsosee "[D] export" "help export"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
 {vieweralsosee "frames" "help frames"}{...}
-{vieweralsosee "python" "help python"}{...}
 {viewerjumpto "Syntax" "dtparquet##syntax"}{...}
 {viewerjumpto "Description" "dtparquet##description"}{...}
 {viewerjumpto "Links to PDF documentation" "dtparquet##linkspdf"}{...}
@@ -14,7 +13,7 @@
 {viewerjumpto "Examples" "dtparquet##examples"}{...}
 {viewerjumpto "Author" "dtparquet##author"}{...}
 {p2colset 1 21 23 2}{...}
-{p2col:{bf:[D] dtparquet} {hline 2}}High-performance Parquet I/O using Python/Arrow{p_end}
+{p2col:{bf:[D] dtparquet} {hline 2}}High-performance Parquet I/O via native plugin paths{p_end}
 {p2col:}({mansection D dtparquet:View complete PDF manual entry}){p_end}
 {p2colreset}{...}
 
@@ -58,8 +57,8 @@ Disk operations (no data loaded into active memory)
 
 {pstd}
 {cmd:dtparquet} provides high-performance reading and writing of Apache Parquet
-files.  It serves as a bridge between Stata and the Parquet ecosystem using
-Python's {cmd:pyarrow} library and Stata's {help sfi:Stata Function Interface (SFI)}.
+files.  It serves as a bridge between Stata and the Parquet ecosystem through
+native plugin execution and Stata's {help sfi:Stata Function Interface (SFI)}.
 
 {pstd}
 Key features include:

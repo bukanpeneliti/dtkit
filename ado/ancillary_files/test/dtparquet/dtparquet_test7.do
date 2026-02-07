@@ -8,8 +8,16 @@ log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/lo
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+local promote_rc = _rc
 if _rc != 0 {
     local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+}
+
+if `promote_rc' == 0 {
+    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+}
+else {
+    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
 }
 
 cap program drop dtparquet_plugin
@@ -185,6 +193,8 @@ quietly use "`import_allstring_dta'", clear
 count
 assert r(N) == 3
 assert c(k) == 4
+assert id[1] == 1
+assert code[3] == 1234567890123
 
 dtparquet import "`import_allstring_dta'" using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
 quietly use "`import_allstring_dta'", clear

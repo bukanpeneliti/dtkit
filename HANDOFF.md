@@ -53,13 +53,13 @@ Passing checks in `dtparquet_test7.log`:
 ## Known Gaps (Next Priority)
 
 - Primary next objective: remove all Python runtime dependency from dtparquet.
-- Remaining Python touchpoints:
-  - `dtparquet_export` in `ado/dtparquet.ado` uses `python: import dtparquet`
-    stream manager.
-  - `dtparquet_import` in `ado/dtparquet.ado` uses `python: dtparquet.load_atomic(...)`.
-  - `_check_python` enforces `python query` and `pyarrow`.
-  - `_cleanup_orphaned` uses Python cleanup hook.
-  - one regression assertion checks metadata key via Python/pyarrow.
+- Active runtime touchpoints are plugin/Stata-native in `ado/dtparquet.ado`:
+  - `dtparquet_export` and `dtparquet_import` no longer call Python bridges.
+  - `_check_python` is a no-op for the active runtime path.
+  - `_cleanup_orphaned` is Stata-frame cleanup only.
+  - metadata key regression uses plugin call `has_metadata_key`.
+- Legacy Python-based tests/scripts still exist in `ado/ancillary_files/test/dtparquet`
+  and can be cleaned separately if no longer needed.
 - Rust parity still deferred:
   - `compress` / `compress_string_to_numeric` parity behavior on save.
   - full metadata embedding/restoration parity (`_dtvars`, `_dtlabel`,
