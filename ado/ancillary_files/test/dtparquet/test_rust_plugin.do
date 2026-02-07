@@ -1,6 +1,7 @@
 * Test script for dtparquet Rust plugin
 
 discard
+cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 * Load the plugin
 cap program drop dtparquet_plugin
@@ -21,7 +22,9 @@ assert real("`string_length_1'") >= 0
 display as result "Test 2 PASSED: describe macro contract available"
 
 * Test 3: Call read through ado against real parquet fixture
-run "ado/dtparquet.ado"
+run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll")
 dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear
 display as result "Test 3 PASSED: Read path executed with ado pre-read setup"
 count
@@ -69,6 +72,69 @@ assert ID[1] == `id_first'
 assert ID[_N] == `id_last'
 assert year[1] == `year_first'
 display as result "Test 7 PASSED: save and read-back roundtrip works"
+
+* Test 8: Plugin save with partition_by + overwrite behavior
+local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
+capture rmdir "`partition_dir'", all
+
+dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
+quietly ds
+local varlist `r(varlist)'
+local var_count: word count `varlist'
+
+local i = 0
+foreach vari of local varlist {
+    local i = `i' + 1
+    local typei: type `vari'
+    local formati: format `vari'
+    local str_length 0
+
+    if ((substr("`typei'", 1, 3) == "str") & ("`typei'" != "strl")) {
+        local str_length = substr("`typei'", 4, .)
+        local typei string
+    }
+
+    local name_`i' `vari'
+    local dtype_`i' `typei'
+    local format_`i' `formati'
+    local str_length_`i' `str_length'
+}
+
+plugin call dtparquet_plugin, "save" "`partition_dir'" "from_macro" "0" "0" "" "from_macros" "year" "zstd" "-1" "1" "0" "0"
+assert _rc == 0
+
+local partition_dirs : dir "`partition_dir'" dirs "year=*"
+local partition_dir_n : word count `partition_dirs'
+assert `partition_dir_n' > 0
+
+capture plugin call dtparquet_plugin, "save" "`partition_dir'" "from_macro" "0" "0" "" "from_macros" "year" "zstd" "-1" "0" "0" "0"
+assert _rc != 0
+display as result "Test 8 PASSED: partition_by save + overwrite guard works"
+
+* Test 9: Plugin save sql_if filter semantics
+local filtered_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
+capture erase "`filtered_file'"
+
+plugin call dtparquet_plugin, "save" "`filtered_file'" "from_macro" "0" "0" "year > 2015" "from_macros" "" "zstd" "-1" "1" "0" "0"
+assert _rc == 0
+assert fileexists("`filtered_file'")
+
+dtparquet use using "`filtered_file'", clear
+count
+assert r(N) > 0
+assert year[1] > 2015
+summ year, meanonly
+assert r(min) > 2015
+display as result "Test 9 PASSED: save sql_if filtering works"
+
+* Test 10: Metadata key scaffold is embedded
+python:
+import pyarrow.parquet as pq
+md = pq.read_metadata(r"D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet")
+assert md.metadata is not None
+assert b"dtparquet.dtmeta" in md.metadata
+end
+display as result "Test 10 PASSED: metadata key scaffold present"
 
 display _newline(2)
 display as result "All tests completed!"

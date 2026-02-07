@@ -1,9 +1,11 @@
 use polars::prelude::*;
+use polars_sql::SQLContext;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{create_dir_all, File};
 use std::path::Path;
 
+use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
 use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
 
@@ -20,13 +22,13 @@ pub fn write_from_stata(
     varlist: &str,
     n_rows: usize,
     offset: usize,
-    _sql_if: Option<&str>,
+    sql_if: Option<&str>,
     mapping: &str,
     _parallel_strategy: Option<crate::utilities::ParallelizationStrategy>,
-    _partition_by: &str,
+    partition_by: &str,
     compression: &str,
     compression_level: Option<usize>,
-    _overwrite_partition: bool,
+    overwrite_partition: bool,
     _compress: bool,
     _compress_string: bool,
 ) -> Result<i32, Box<dyn Error>> {
@@ -85,29 +87,116 @@ pub fn write_from_stata(
     }
 
     let mut df = DataFrame::from_iter(columns);
-    write_dataframe(path, &mut df, compression, compression_level)?;
+
+    if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
+        let mut ctx = SQLContext::new();
+        ctx.register("df", df.lazy());
+        df = ctx
+            .execute(&format!("select * from df where {}", sql))?
+            .collect()?;
+    }
+
+    let partition_cols: Vec<PlSmallStr> = partition_by
+        .split_whitespace()
+        .map(PlSmallStr::from)
+        .collect();
+
+    if partition_cols.is_empty() {
+        write_single_dataframe(
+            path,
+            &mut df,
+            compression,
+            compression_level,
+            overwrite_partition,
+        )?;
+    } else {
+        write_partitioned_dataframe(
+            path,
+            &mut df,
+            compression,
+            compression_level,
+            &partition_cols,
+            overwrite_partition,
+        )?;
+    }
+
     Ok(0)
 }
 
-fn write_dataframe(
+fn write_single_dataframe(
     path: &str,
     df: &mut DataFrame,
     compression: &str,
     compression_level: Option<usize>,
+    overwrite_partition: bool,
 ) -> Result<(), Box<dyn Error>> {
+    let out_path = Path::new(path);
+
+    if out_path.exists() && !overwrite_partition {
+        return Err(format!("Output path exists and overwrite is disabled: {}", path).into());
+    }
+
     if let Some(parent) = Path::new(path).parent() {
         if !parent.as_os_str().is_empty() {
             create_dir_all(parent)?;
         }
     }
 
+    if out_path.exists() && overwrite_partition {
+        std::fs::remove_file(out_path)?;
+    }
+
     let tmp_path = format!("{}.tmp", path);
     let mut file = File::create(&tmp_path)?;
+
+    let key_value_metadata =
+        KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), extract_dtmeta())]);
+
     let writer = ParquetWriter::new(&mut file)
-        .with_compression(parquet_compression(compression, compression_level));
+        .with_compression(parquet_compression(compression, compression_level))
+        .with_key_value_metadata(Some(key_value_metadata));
     writer.finish(df)?;
 
     std::fs::rename(&tmp_path, path)?;
+    Ok(())
+}
+
+fn write_partitioned_dataframe(
+    path: &str,
+    df: &mut DataFrame,
+    compression: &str,
+    compression_level: Option<usize>,
+    partition_by: &[PlSmallStr],
+    overwrite_partition: bool,
+) -> Result<(), Box<dyn Error>> {
+    let out_path = Path::new(path);
+
+    if out_path.exists() {
+        if !overwrite_partition {
+            return Err(format!("Output path exists and overwrite is disabled: {}", path).into());
+        }
+
+        if out_path.is_file() {
+            std::fs::remove_file(out_path)?;
+        } else {
+            std::fs::remove_dir_all(out_path)?;
+        }
+    }
+
+    create_dir_all(out_path)?;
+
+    let mut write_options = ParquetWriteOptions::default();
+    write_options.compression = parquet_compression(compression, compression_level);
+
+    write_partitioned_dataset(
+        df,
+        out_path,
+        partition_by.to_vec(),
+        &write_options,
+        None,
+        100_000,
+    )?;
+
     Ok(())
 }
 
