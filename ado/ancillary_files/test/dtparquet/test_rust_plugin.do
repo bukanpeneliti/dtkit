@@ -128,12 +128,8 @@ assert r(min) > 2015
 display as result "Test 9 PASSED: save sql_if filtering works"
 
 * Test 10: Metadata key scaffold is embedded
-python:
-import pyarrow.parquet as pq
-md = pq.read_metadata(r"D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet")
-assert md.metadata is not None
-assert b"dtparquet.dtmeta" in md.metadata
-end
+plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
+assert "`has_metadata_key'" == "1"
 display as result "Test 10 PASSED: metadata key scaffold present"
 
 display _newline(2)

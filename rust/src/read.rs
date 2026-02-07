@@ -71,6 +71,13 @@ fn is_valid_glob_pattern(glob_path: &str) -> bool {
     }
 }
 
+pub fn has_metadata_key(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
+    let bytes = std::fs::read(path)?;
+    Ok(bytes
+        .windows(key.len())
+        .any(|window| window == key.as_bytes()))
+}
+
 pub fn scan_lazyframe(
     path: &str,
     safe_relaxed: bool,

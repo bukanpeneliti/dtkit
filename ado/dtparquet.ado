@@ -280,13 +280,21 @@ end
 
 capture program drop dtparquet_export
 program dtparquet_export
-    _check_python
-    syntax anything(name=pqfile) using/ [, REplace NOLabel CHunksize(integer 50000)]
+    gettoken pqfile rest : 0
+    gettoken using_kw rest : rest
+    gettoken dtafile rest : rest
+    local 0 `"`rest'"'
+    syntax [, REplace NOLabel CHunksize(integer 50000)]
     local is_nolabel = ("`nolabel'" != "")
+
+    if `"`pqfile'"' == "" | `"`dtafile'"' == "" | `"`using_kw'"' != "using" {
+        display as error "Syntax: dtparquet export parquet_file using dta_file"
+        exit 198
+    }
     
     local target = subinstr(trim(`"`pqfile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
-    local source = subinstr(trim(`"`using'"'), `"""', "", .)
+    local source = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local source : subinstr local source "\" "/", all
 
     if lower(substr("`target'", -8, .)) == ".parquet" {
@@ -296,60 +304,44 @@ program dtparquet_export
     
     confirm file `"`source'"'
     if "`replace'" == "" confirm new file `"`target'"'
-    
+
+    tempname export_frame
     local orig_frame = c(frame)
-    
-    // 1. Initialize Stream
-    python: import dtparquet
-    python: dtparquet.StreamManager.init_export("`target'", bool(`is_nolabel'))
-    
-    // 2. Metadata Phase (using first observation)
-    tempname metadata_frame
-    frame create `metadata_frame'
-    quietly frame `metadata_frame': use `"`source'"' in 1/1, clear
-    
-    if `is_nolabel' == 0 {
-        frame `metadata_frame': capture which dtmeta
-        if _rc == 0 {
-            quietly frame `metadata_frame': dtmeta
-        }
+    frame create `export_frame'
+    frame change `export_frame'
+    quietly use `"`source'"', clear
+
+    local save_opts
+    if "`replace'" != "" local save_opts `save_opts' replace
+    if `is_nolabel' local save_opts `save_opts' nolabel
+
+    if `"`save_opts'"' == "" {
+        dtparquet_save `"`target'"'
     }
-    
-    // 3. Streaming Phase
-    quietly describe using `"`source'"'
-    local N = r(N)
-    
-    local start 1
-    frame change `metadata_frame'
-    while `start' <= `N' {
-        local end = min(`start' + `chunksize' - 1, `N')
-        quietly use `"`source'"' in `start'/`end', clear
-        
-        python: dtparquet.StreamManager.write_chunk()
-        
-        local start = `end' + 1
+    else {
+        dtparquet_save `"`target'"', `save_opts'
     }
-    
-    // 4. Finalize
-    python: dtparquet.StreamManager.finalize_export()
-    
-    // Cleanup
+
     frame change `orig_frame'
-    frame drop `metadata_frame'
-    foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
-        capture frame drop `fr'
-    }
-    capture error 0
+    frame drop `export_frame'
 end
 
 capture program drop dtparquet_import
 program dtparquet_import
-    _check_python
-    syntax anything(name=dtafile) using/ [, REplace NOLabel CHunksize(integer 50000) ALLstring]
+    gettoken dtafile rest : 0
+    gettoken using_kw rest : rest
+    gettoken pqfile rest : rest
+    local 0 `"`rest'"'
+    syntax [, REplace NOLabel CHunksize(integer 50000) ALLstring]
+
+    if `"`dtafile'"' == "" | `"`pqfile'"' == "" | `"`using_kw'"' != "using" {
+        display as error "Syntax: dtparquet import dta_file using parquet_file"
+        exit 198
+    }
 
     local target = subinstr(trim(`"`dtafile'"'), `"""', "", .)
     local target : subinstr local target "\" "/", all
-    local source = subinstr(trim(`"`using'"'), `"""', "", .)
+    local source = subinstr(trim(`"`pqfile'"'), `"""', "", .)
     local source : subinstr local source "\" "/", all
 
     if lower(substr("`source'", -8, .)) == ".parquet" {
@@ -360,33 +352,33 @@ program dtparquet_import
     confirm file `"`source'"'
     if "`replace'" == "" confirm new file `"`target'"'
 
-    tempname temp_frame
+    tempname import_frame
     local orig_frame = c(frame)
-    frame create `temp_frame'
-    frame change `temp_frame'
+    frame create `import_frame'
+    frame change `import_frame'
 
-    python: import dtparquet
-    python: dtparquet.load_atomic("`source'", bool("`nolabel'" != ""), `chunksize', bool("`allstring'" != ""))
-
-    if "`nolabel'" == "" {
-        capture confirm frame _dtvars
-        if _rc == 0 {
-            _apply_dtmeta
-        }
-        else {
-            capture error 0
-        }
+    if "`nolabel'" == "" & "`allstring'" == "" {
+        dtparquet_use using `"`source'"', clear
+    }
+    else if "`nolabel'" != "" & "`allstring'" == "" {
+        dtparquet_use using `"`source'"', clear nolabel
+    }
+    else if "`nolabel'" == "" & "`allstring'" != "" {
+        dtparquet_use using `"`source'"', clear allstring
     }
     else {
-        foreach v of varlist _all {
-            label variable `v' ""
-            label values `v' .
-        }
+        dtparquet_use using `"`source'"', clear nolabel allstring
     }
-    quietly save `"`target'"', `replace'
+
+    if "`replace'" == "" {
+        quietly save `"`target'"'
+    }
+    else {
+        quietly save `"`target'"', `replace'
+    }
 
     frame change `orig_frame'
-    frame drop `temp_frame'
+    frame drop `import_frame'
 end
 
 capture program drop _apply_dtmeta
@@ -623,18 +615,7 @@ end
 
 capture program drop _check_python
 program _check_python
-    capture python query
-    if _rc != 0 {
-        display as error "Python not found."
-        exit 198
-    }
-    capture python which pyarrow
-    if _rc != 0 {
-        display as error "pyarrow not found."
-        exit 198
-    }
-    local ado_dir = c(sysdir_plus)
-    python: import sys, os; sys.path.insert(0, r"`ado_dir'd"); import dtparquet
+    exit 0
 end
 
 capture program drop _cleanup_orphaned
@@ -645,5 +626,4 @@ program _cleanup_orphaned
         if strpos("`frame'", "_dtparquet_") == 1 capture frame drop `frame'
         if inlist("`frame'", "_dtvars", "_dtlabel", "_dtnotes", "_dtinfo") capture frame drop `frame'
     }
-    capture python: import dtparquet; dtparquet.cleanup_orphaned_tmp_files()
 end

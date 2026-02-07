@@ -11,7 +11,7 @@ pub mod stata_interface;
 pub mod utilities;
 pub mod write;
 
-use stata_interface::{display, ST_retcode};
+use stata_interface::{display, set_macro, ST_retcode};
 use utilities::ParallelizationStrategy;
 
 #[no_mangle]
@@ -182,6 +182,28 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     subfunction_args[5] == "1",
                     subfunction_args[6] == "1",
                 )
+            }
+            "has_metadata_key" => {
+                if subfunction_args.len() < 2 {
+                    display("Error: has_metadata_key requires 2 arguments");
+                    return 198;
+                }
+
+                if !read::data_exists(subfunction_args[0]) {
+                    display(&format!("File does not exist ({})", subfunction_args[0]));
+                    return 601;
+                }
+
+                match read::has_metadata_key(subfunction_args[0], subfunction_args[1]) {
+                    Ok(found) => {
+                        set_macro("has_metadata_key", if found { "1" } else { "0" }, false);
+                        0
+                    }
+                    Err(e) => {
+                        display(&format!("Error checking metadata key = {:?}", e));
+                        198
+                    }
+                }
             }
             _ => {
                 display(&format!(
