@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File};
 use std::path::Path;
 
-use crate::metadata::{extract_dtmeta, write_dtmeta_sidecar, DTMETA_KEY};
+use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
 use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
 
@@ -112,7 +112,6 @@ pub fn write_from_stata(
             overwrite_partition,
             &dtmeta_json,
         )?;
-        let _ = write_dtmeta_sidecar(path, &dtmeta_json);
     } else {
         write_partitioned_dataframe(
             path,

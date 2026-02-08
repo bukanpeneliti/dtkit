@@ -211,7 +211,7 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     return 198;
                 }
 
-                if let Some(meta) = metadata::load_dtmeta_sidecar(subfunction_args[0]) {
+                if let Some(meta) = metadata::load_dtmeta_from_parquet(subfunction_args[0]) {
                     metadata::expose_dtmeta_to_macros(&meta);
                     set_macro("dtmeta_loaded", "1", false);
                 } else {

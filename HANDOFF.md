@@ -41,9 +41,9 @@
   - `dtparquet_gen_or_recast` now materializes `date` as `float` storage while
     keeping `%td` formatting, which restored native date/time roundtrip in
     `dtparquet_test5.do` Test 11.
-  - metadata sidecar flow added for save/use restoration (`*.parquet.dtmeta.json`):
-    Rust save writes sidecar JSON from save-time macro contract, and use-path
-    loads type/label metadata through plugin `load_meta`.
+  - metadata restore now uses in-parquet metadata key only
+    (`dtparquet.dtmeta`); plugin `load_meta` reads metadata directly from the
+    parquet bytes and repopulates macro contract for `dtparquet use`.
 
 ## Validated Behavior
 
@@ -112,18 +112,31 @@ Executed one-by-one in batch mode:
 | `dtparquet_test7.do` | pass | none |
 <!-- markdownlint-enable MD013 -->
 
+Revalidated one-by-one again after switching metadata restore to
+in-parquet-only (no sidecar file reads/writes):
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass in this rerun.
+
 ### Explicit unsupported behavior (current)
 
 - None currently recorded.
 
 ### Immediate next tasks
 
-1. Decide whether to keep sidecar metadata persistence (`*.parquet.dtmeta.json`) as
-   product behavior or migrate to in-parquet-only metadata restoration.
-2. Add deterministic cleanup of sidecar artifacts in test scripts if sidecar
-   behavior remains enabled.
-3. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
+1. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta` key); do not
+   reintroduce sidecar metadata files.
+2. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
    batch after each metadata/save-path change.
+3. Optional hardening: replace byte-window metadata key checks with strict
+   parquet footer parsing for metadata lookup.
 
 ## Important Notes
 
