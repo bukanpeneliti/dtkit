@@ -36,6 +36,12 @@
   - compression-level contract is now deterministic on plugin save path:
     any explicit compression level (anything other than `-1`) is rejected with
     `r(198)`; no implicit fallback is applied.
+  - Stata `if` expression translation is now wired in Rust read/save SQL filter
+    path (`stata_to_sql` conversion before SQL execution).
+  - ado `dtparquet use` now passes parsed `if` to plugin `sql_if` and no longer
+    applies post-read `keep if/in` fallback.
+  - `dtparquet_test7.do` now includes Test 5b to lock `if` qualifier pushdown
+    behavior (`year > 2015` predicate assertions).
   - `dtparquet_use` now calls plugin `describe` with `detailed=1` to populate
     observed string lengths in `string_length_*` macros.
   - plugin schema mapping now defaults string-like columns to Stata `string`
@@ -217,6 +223,17 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 5. Keep `compress_string_to_numeric` intentionally unsupported unless the
    plugin/runtime contract is explicitly redesigned and approved.
 
+### Planned implementation sequence (next feature phase)
+
+1. Port Stata-to-SQL expression translator (`sql_from_if.rs`) to convert
+   Stata-style `if` predicates to the Polars-side filter expression contract.
+2. Implement `if` condition pushdown on read path so filtering occurs before
+   full materialization into Stata memory.
+3. Enhance type mapping for foreign Parquet dictionary/categorical columns so
+   value-label semantics are preserved for non-dtparquet-produced files.
+4. Tune parallelization and batching strategy (ByColumn/ByRow and related
+   chunking decisions) after functional stability is locked.
+
 ## Important Notes
 
 - Build target dir is configured in `rust/.cargo/config.toml` (machine-local, ignored):
@@ -309,3 +326,10 @@ deterministic compression behavior for `compress()` codecs/default and rejects
 explicit plugin compression levels (`zstd` level `3`, `snappy` level `1`) with
 `r(198)`. Deterministic cleanup was rechecked for `rust_roundtrip.parquet`,
 `rust_filtered_save.parquet`, `rust_partitioned_out`, and `*.tmp` remnants.
+
+Incremental rerun after wiring `if` pushdown and adding Test 5b assertion:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: pass. `dtparquet_test7.log` includes `Test 5b PASSED: if qualifier
+filtering is pushed down`.

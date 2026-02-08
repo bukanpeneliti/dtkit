@@ -344,14 +344,13 @@ program dtparquet_use
     local vertical_relaxed 0
     local asterisk_to_variable ""
     local sort ""
-    local sql_if ""
+    local sql_if "`if_exp'"
+    local sql_if = trim(subinstr(`"`sql_if'"', "if", "", 1))
     local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
     local plugin_offset = max(0, `offset' - 1)
 
     plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
-    
-    local if_in = trim("`if_exp' `in_exp'")
-    if `"`if_in'"' != "" quietly keep `if_in'
+
     if `is_nolabel' == 0 {
         if "`dtmeta_loaded'" == "1" {
             local apply_labels = (`"`dtmeta_dta_label'"' != "")

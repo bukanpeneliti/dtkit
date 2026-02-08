@@ -7,6 +7,7 @@ pub mod downcast;
 pub mod mapping;
 pub mod metadata;
 pub mod read;
+pub mod sql_from_if;
 pub mod stata_interface;
 pub mod utilities;
 pub mod write;

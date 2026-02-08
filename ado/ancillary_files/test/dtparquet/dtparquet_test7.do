@@ -69,6 +69,15 @@ count
 assert r(N) == 100
 display as result "Test 5 PASSED: in-range read works"
 
+* Test 5b: if-qualifier pushdown path
+dtparquet use year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" if year > 2015 in 1/2000, clear
+count
+assert r(N) > 0
+assert r(N) <= 2000
+summ year, meanonly
+assert r(min) > 2015
+display as result "Test 5b PASSED: if qualifier filtering is pushed down"
+
 * Test 6: allstring path for int64->string cast
 dtparquet use ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear allstring
 local id_type: type ID

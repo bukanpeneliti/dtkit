@@ -7,6 +7,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
+use crate::sql_from_if::stata_to_sql;
 use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
 use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
 
@@ -92,8 +93,9 @@ pub fn write_from_stata(
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
         ctx.register("df", df.lazy());
+        let translated = stata_to_sql(sql);
         df = ctx
-            .execute(&format!("select * from df where {}", sql))?
+            .execute(&format!("select * from df where {}", translated))?
             .collect()?;
     }
 

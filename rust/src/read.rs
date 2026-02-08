@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 
 use crate::downcast::apply_cast;
 use crate::mapping::ColumnInfo;
+use crate::sql_from_if::stata_to_sql;
 use crate::stata_interface::{get_macro, replace_number, replace_string, set_macro, ST_retcode};
 use crate::utilities::{
     determine_parallelization_strategy, ParallelizationStrategy, DAY_SHIFT_SAS_STATA,
@@ -381,7 +382,8 @@ pub fn read_to_stata(
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
         ctx.register("df", lf);
-        lf = ctx.execute(&format!("select * from df where {}", sql))?;
+        let translated = stata_to_sql(sql);
+        lf = ctx.execute(&format!("select * from df where {}", translated))?;
     }
 
     if random_share > 0.0 {
