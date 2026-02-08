@@ -171,7 +171,7 @@ capture program drop dtparquet_use
 program dtparquet_use
     version 16
 
-    syntax [anything(everything)] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string)]
+    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string)]
     
     local vlist ""
     local if_exp ""
@@ -214,6 +214,13 @@ program dtparquet_use
     if `"`filename'"' == "" {
         local filename `"`vlist'"'
         local vlist ""
+    }
+
+    if `"`if'"' != "" {
+        local if_exp `"`if'"'
+    }
+    if `"`in'"' != "" {
+        local in_exp `"`in'"'
     }
 
     local is_nolabel = ("`nolabel'" != "")
@@ -358,6 +365,10 @@ program dtparquet_use
     local plugin_offset = max(0, `offset' - 1)
 
     plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+
+    if "`if_exp'" != "" {
+        quietly keep `if_exp'
+    }
 
     if `is_nolabel' == 0 {
         if "`dtmeta_loaded'" == "1" {

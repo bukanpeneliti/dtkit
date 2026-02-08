@@ -148,6 +148,55 @@ capture dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtki
 assert _rc == 198
 display as result "Test 6e PASSED: catmode invalid value is rejected deterministically"
 
+* Test 6f: fixture-backed pandas categorical in catmode(encode)
+local foreign_pandas "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/fixtures/foreign/foreign_cat_pandas.parquet"
+dtparquet use cat using "`foreign_pandas'", clear catmode(encode)
+count
+assert r(N) == 4
+capture confirm numeric variable cat
+assert _rc == 0
+local cat_vallab_foreign: value label cat
+assert "`cat_vallab_foreign'" == "dtpq_cat_1"
+tempvar cat_foreign_text
+decode cat, gen(`cat_foreign_text')
+count if missing(`cat_foreign_text')
+assert r(N) == 0
+display as result "Test 6f PASSED: fixture-backed pandas categorical encode is deterministic"
+
+* Test 6g: fixture-backed dictionary parquet in catmode(raw)
+local foreign_arrow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/fixtures/foreign/foreign_cat_arrow_dict.parquet"
+dtparquet use cat using "`foreign_arrow'", clear catmode(raw)
+count
+assert r(N) == 4
+local cat_type_raw_fixture: type cat
+assert substr("`cat_type_raw_fixture'", 1, 3) == "str"
+local cat_vallab_raw_fixture: value label cat
+assert "`cat_vallab_raw_fixture'" == ""
+count if missing(cat)
+assert r(N) == 0
+levelsof cat, local(cat_raw_fixture_levels)
+local cat_raw_fixture_level_n : word count `cat_raw_fixture_levels'
+assert `cat_raw_fixture_level_n' == 3
+display as result "Test 6g PASSED: fixture-backed dictionary raw mode preserves strings"
+
+* Test 6h: fixture-backed dictionary parquet in catmode(both)
+dtparquet use cat using "`foreign_arrow'", clear catmode(both)
+count
+assert r(N) == 4
+capture confirm variable cat_id
+assert _rc == 0
+capture confirm numeric variable cat_id
+assert _rc == 0
+local cat_id_vallab_fixture: value label cat_id
+assert "`cat_id_vallab_fixture'" == "dtpq_cat_1"
+tempvar cat_id_fixture_text
+decode cat_id, gen(`cat_id_fixture_text')
+assert `cat_id_fixture_text'[1] == cat[1]
+assert `cat_id_fixture_text'[2] == cat[2]
+assert `cat_id_fixture_text'[3] == cat[3]
+assert `cat_id_fixture_text'[4] == cat[4]
+display as result "Test 6h PASSED: fixture-backed dictionary both mode is deterministic"
+
 * Test 7: Save and read back through dtparquet
 local roundtrip_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "`roundtrip_file'"

@@ -15,8 +15,8 @@ use crate::mapping::ColumnInfo;
 use crate::sql_from_if::stata_to_sql;
 use crate::stata_interface::{get_macro, replace_number, replace_string, set_macro, ST_retcode};
 use crate::utilities::{
-    determine_parallelization_strategy, ParallelizationStrategy, DAY_SHIFT_SAS_STATA,
-    SEC_MICROSECOND, SEC_MILLISECOND, SEC_NANOSECOND, SEC_SHIFT_SAS_STATA,
+    determine_parallelization_strategy, get_thread_count, ParallelizationStrategy,
+    DAY_SHIFT_SAS_STATA, SEC_MICROSECOND, SEC_MILLISECOND, SEC_NANOSECOND, SEC_SHIFT_SAS_STATA,
 };
 
 pub fn data_exists(path: &str) -> bool {
@@ -336,6 +336,21 @@ pub fn read_to_stata(
             }
         }
 
+        let cat_like_cols: Vec<String> = df
+            .schema()
+            .iter()
+            .filter_map(|(name, dtype)| {
+                if matches!(dtype, DataType::Categorical(_, _) | DataType::Enum(_, _)) {
+                    Some(name.to_string())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for col_name in cat_like_cols {
+            df.try_apply(&col_name, |s| s.cast(&DataType::String))?;
+        }
+
         let columns_vec: Vec<PlSmallStr> = selected_column_list
             .iter()
             .map(|s| PlSmallStr::from(*s))
@@ -343,17 +358,22 @@ pub fn read_to_stata(
         df = df.select(columns_vec)?;
 
         let sliced = df.slice(offset as i64, n_rows);
-        let n_threads = 1;
+        let n_threads = get_thread_count();
         let strategy = parallel_strategy.unwrap_or_else(|| {
-            determine_parallelization_strategy(selected_column_list.len(), n_rows, n_threads)
+            determine_parallelization_strategy(
+                selected_column_list.len(),
+                sliced.height(),
+                n_threads,
+            )
         });
-        let n_batches = (n_rows as f64 / batch_size as f64).ceil() as usize;
+        let total_rows = sliced.height();
+        let n_batches = (total_rows as f64 / batch_size as f64).ceil() as usize;
         set_macro("n_batches", &n_batches.to_string(), false);
 
         for batch_i in 0..n_batches {
             let batch_offset = batch_i * batch_size;
-            let batch_length = if (batch_i + 1) * batch_size > n_rows {
-                n_rows - batch_i * batch_size
+            let batch_length = if (batch_i + 1) * batch_size > total_rows {
+                total_rows - batch_i * batch_size
             } else {
                 batch_size
             };
@@ -378,6 +398,12 @@ pub fn read_to_stata(
         lf = apply_cast(lf, &cast_json)?;
     }
     lf = cast_catenum_to_string(&lf)?;
+
+    let mut batch_source_offset = offset;
+    if sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false) {
+        lf = lf.slice(offset as i64, n_rows as u32);
+        batch_source_offset = 0;
+    }
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
@@ -420,14 +446,14 @@ pub fn read_to_stata(
 
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
     let n_batches = (n_rows as f64 / batch_size as f64).ceil() as usize;
-    let n_threads = 1;
+    let n_threads = get_thread_count();
     let strategy = parallel_strategy
         .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), n_rows, n_threads));
     set_macro("n_batches", &n_batches.to_string(), false);
 
     for batch_i in 0..n_batches {
         let mut lf_batch = lf.clone().select(&columns);
-        let batch_offset = offset + batch_i * batch_size;
+        let batch_offset = batch_source_offset + batch_i * batch_size;
         let batch_length = if (batch_i + 1) * batch_size > n_rows {
             n_rows - batch_i * batch_size
         } else {
@@ -435,9 +461,12 @@ pub fn read_to_stata(
         } as u32;
         lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
         let batch_df = lf_batch.collect()?;
+        if batch_df.height() == 0 {
+            break;
+        }
         process_batch_with_strategy(
             &batch_df,
-            batch_offset - offset,
+            batch_offset - batch_source_offset,
             &all_columns,
             strategy,
             n_threads,
@@ -669,7 +698,7 @@ fn process_batch_with_strategy(
     stata_offset: usize,
 ) -> PolarsResult<()> {
     let row_count = batch.height();
-    if n_threads <= 1 || row_count < 10_000 {
+    if n_threads <= 1 || row_count < 4_096 {
         return process_row_range(batch, start_index, 0, row_count, all_columns, stata_offset);
     }
 
@@ -685,7 +714,8 @@ fn process_batch_with_strategy(
 
     pool.install(|| match strategy {
         ParallelizationStrategy::ByRow => {
-            let chunk_size = std::cmp::max(100, row_count / (rayon::current_num_threads() * 4));
+            let n_workers = rayon::current_num_threads().max(1);
+            let chunk_size = std::cmp::max(512, row_count.div_ceil(n_workers * 8));
             (0..row_count)
                 .into_par_iter()
                 .chunks(chunk_size)
