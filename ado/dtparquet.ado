@@ -49,8 +49,14 @@ program dtparquet_plugin, plugin using("ado/ancillary_files/dtparquet.dll")
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000)]
+    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000) COMPress(string)]
     local is_nolabel = ("`nolabel'" != "")
+    local compression = lower(trim("`compress'"))
+    if "`compression'" == "" local compression zstd
+    if !inlist("`compression'", "lz4", "uncompressed", "snappy", "gzip", "lzo", "brotli", "zstd") {
+        display as error "invalid compress() value: `compress'"
+        exit 198
+    }
     local file = subinstr(`"`filename'"', `"""', "", .)
     local file : subinstr local file "\" "/", all
 
@@ -151,7 +157,7 @@ program dtparquet_save
         }
     }
 
-    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "" "zstd" "-1" "1" "0" "0"
+    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "" "`compression'" "-1" "1" "0" "0"
 
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {

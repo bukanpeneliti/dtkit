@@ -158,6 +158,45 @@ summ year, meanonly
 assert r(min) > 2015
 display as result "Test 9 PASSED: save sql_if filtering works"
 
+* Test 9b: Plugin save compression accepted values + default fallback
+local compress_zstd "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet"
+local compress_uncompressed "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet"
+local compress_default "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet"
+local compress_bad "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_bad.parquet"
+
+capture erase "`compress_zstd'"
+capture erase "`compress_uncompressed'"
+capture erase "`compress_default'"
+capture erase "`compress_bad'"
+
+dtparquet save "`compress_zstd'", replace compress(zstd)
+assert _rc == 0
+assert fileexists("`compress_zstd'")
+
+dtparquet save "`compress_uncompressed'", replace compress(uncompressed)
+assert _rc == 0
+assert fileexists("`compress_uncompressed'")
+
+dtparquet save "`compress_default'", replace
+assert _rc == 0
+assert fileexists("`compress_default'")
+
+capture dtparquet save "`compress_bad'", replace compress(invalid_codec)
+assert _rc == 198
+
+dtparquet use using "`compress_zstd'", clear
+count
+assert r(N) > 0
+
+dtparquet use using "`compress_uncompressed'", clear
+count
+assert r(N) > 0
+
+dtparquet use using "`compress_default'", clear
+count
+assert r(N) > 0
+display as result "Test 9b PASSED: compress() accepted values/defaults are deterministic"
+
 * Test 10: Metadata key scaffold is embedded
 plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
 assert "`has_metadata_key'" == "1"
@@ -297,8 +336,16 @@ display as result "Test 13 PASSED: metadata behavior is deterministic with and w
 capture erase "`meta_parquet'"
 capture erase "`roundtrip_file'"
 capture erase "`filtered_file'"
+capture erase "`compress_zstd'"
+capture erase "`compress_uncompressed'"
+capture erase "`compress_default'"
+capture erase "`compress_bad'"
 capture erase "`roundtrip_file'.tmp"
 capture erase "`filtered_file'.tmp"
+capture erase "`compress_zstd'.tmp"
+capture erase "`compress_uncompressed'.tmp"
+capture erase "`compress_default'.tmp"
+capture erase "`compress_bad'.tmp"
 capture rmdir "`partition_dir'", all
 
 capture erase "`source_dta'"

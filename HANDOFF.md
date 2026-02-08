@@ -163,6 +163,21 @@ fields (`dta_obs`, `dta_vars`, `dta_ts`) and adding explicit Test 13 asserts:
 Result: all seven test files pass; metadata macros loaded from parquet now
 include deterministic `_dtinfo` core fields in addition to label/notes.
 
+Latest rerun after adding deterministic `compress()` save parity checks
+(`zstd`, `uncompressed`, default behavior, invalid-value rejection):
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass; `dtparquet_test7.do` now validates
+`compress()` accepted values/default behavior and deterministic invalid input
+handling (`r(198)`).
+
 ### Explicit unsupported behavior (current)
 
 - `dtparquet_test5.do` intentionally skips legacy pyarrow-fixture-dependent
