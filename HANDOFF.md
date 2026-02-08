@@ -208,6 +208,27 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 - `compress_string_to_numeric` is intentionally unsupported in dtparquet
   command syntax and is guarded by deterministic regression assertion (`r(198)`).
 
+### Foreign categorical compatibility contract (current)
+
+- For non-dtparquet parquet files where a column is observed as Polars
+  `categorical`/`enum` and no `dtparquet.dtmeta` payload is loaded,
+  `dtparquet use` converts the imported string values to numeric Stata variables
+  with value labels via deterministic `encode` mapping.
+- Label-set naming is deterministic per load (`dtpq_cat_1`, `dtpq_cat_2`, ... in
+  matched variable order).
+- Code-to-text mapping follows Stata `encode` semantics (sorted text order) and is
+  stable for a fixed set of category strings.
+- Existing in-parquet metadata restoration behavior remains unchanged and takes
+  precedence whenever `dtparquet.dtmeta` is present (`dtmeta_loaded == 1`).
+- No broad silent fallback was introduced: mapping is only applied to detected
+  `categorical`/`enum` columns and still fails fast on invalid operations.
+- `dtparquet use` now supports `catmode(encode|raw|both)` for foreign
+  categorical handling when `dtparquet.dtmeta` is absent:
+  - `encode` (default): replace variable with encoded numeric + value labels.
+  - `raw`: keep string values unchanged, no generated label mapping.
+  - `both`: keep string variable and add `<var>_id` (or `<var>_catid` on name
+    collision) with deterministic value labels.
+
 ### Immediate next tasks
 
 1. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta` key); do not
@@ -222,6 +243,9 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
    behavior remain unchanged.
 5. Keep `compress_string_to_numeric` intentionally unsupported unless the
    plugin/runtime contract is explicitly redesigned and approved.
+6. Keep foreign categorical compatibility coverage in
+   `dtparquet_test7.do` (Test 6b) and extend only with fixture-based cases when
+   adding new foreign producers.
 
 ### Planned implementation sequence (next feature phase)
 
@@ -229,9 +253,7 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
    Stata-style `if` predicates to the Polars-side filter expression contract.
 2. Implement `if` condition pushdown on read path so filtering occurs before
    full materialization into Stata memory.
-3. Enhance type mapping for foreign Parquet dictionary/categorical columns so
-   value-label semantics are preserved for non-dtparquet-produced files.
-4. Tune parallelization and batching strategy (ByColumn/ByRow and related
+3. Tune parallelization and batching strategy (ByColumn/ByRow and related
    chunking decisions) after functional stability is locked.
 
 ## Important Notes
@@ -326,6 +348,36 @@ deterministic compression behavior for `compress()` codecs/default and rejects
 explicit plugin compression levels (`zstd` level `3`, `snappy` level `1`) with
 `r(198)`. Deterministic cleanup was rechecked for `rust_roundtrip.parquet`,
 `rust_filtered_save.parquet`, `rust_partitioned_out`, and `*.tmp` remnants.
+
+Latest rerun after implementing foreign parquet categorical/dictionary
+compatibility on read path and adding Test 6b assertions:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass; Test 6b verifies deterministic numeric
+value-label restoration for foreign categorical columns while metadata-backed
+`dtparquet.dtmeta` restore behavior remains unchanged.
+
+Latest rerun after adding `catmode()` foreign categorical modes and assertions
+in `dtparquet_test7.do` (Tests 6c/6d/6e):
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass; Test 6c verifies `catmode(raw)`, Test 6d
+verifies `catmode(both)` companion id behavior, and Test 6e verifies invalid
+`catmode()` is rejected with deterministic `r(198)`.
 
 Incremental rerun after wiring `if` pushdown and adding Test 5b assertion:
 

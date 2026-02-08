@@ -86,6 +86,68 @@ assert "`id_type'" == "strL"
 assert "`year_type'" == "strL"
 display as result "Test 6 PASSED: allstring int64 cast works"
 
+* Test 6b: foreign categorical compatibility mapping is deterministic
+clear
+set obs 4
+gen str5 cat = ""
+replace cat = "red" in 1
+replace cat = "blue" in 2
+replace cat = "red" in 3
+replace cat = "green" in 4
+_apply_foreign_cat_labels cat, mode(encode)
+local cat_type: type cat
+local cat_vallab: value label cat
+capture confirm numeric variable cat
+assert _rc == 0
+assert "`cat_vallab'" == "dtpq_cat_1"
+assert cat[1] == 3
+assert cat[2] == 1
+assert cat[3] == 3
+assert cat[4] == 2
+tempvar cat_text
+decode cat, gen(`cat_text')
+assert `cat_text'[1] == "red"
+assert `cat_text'[2] == "blue"
+assert `cat_text'[3] == "red"
+assert `cat_text'[4] == "green"
+display as result "Test 6b PASSED: foreign categorical value-label mapping is deterministic"
+
+* Test 6c: catmode(raw) keeps foreign categorical as string
+dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/500, clear catmode(raw)
+local product_id_type_raw: type PRODUCT_ID
+assert substr("`product_id_type_raw'", 1, 3) == "str"
+local product_id_vallab_raw: value label PRODUCT_ID
+assert "`product_id_vallab_raw'" == ""
+display as result "Test 6c PASSED: catmode(raw) preserves string categorical values"
+
+* Test 6d: catmode(both) keeps string and adds deterministic id labels
+clear
+set obs 4
+gen str5 cat = ""
+replace cat = "red" in 1
+replace cat = "blue" in 2
+replace cat = "red" in 3
+replace cat = "green" in 4
+_apply_foreign_cat_labels cat, mode(both)
+capture confirm variable cat_id
+assert _rc == 0
+capture confirm numeric variable cat_id
+assert _rc == 0
+local cat_id_vallab: value label cat_id
+assert "`cat_id_vallab'" == "dtpq_cat_1"
+tempvar cat_id_text
+decode cat_id, gen(`cat_id_text')
+assert `cat_id_text'[1] == cat[1]
+assert `cat_id_text'[2] == cat[2]
+assert `cat_id_text'[3] == cat[3]
+assert `cat_id_text'[4] == cat[4]
+display as result "Test 6d PASSED: catmode(both) adds labeled id companion"
+
+* Test 6e: catmode() validation is deterministic
+capture dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear catmode(invalid)
+assert _rc == 198
+display as result "Test 6e PASSED: catmode invalid value is rejected deterministically"
+
 * Test 7: Save and read back through dtparquet
 local roundtrip_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "`roundtrip_file'"
@@ -377,6 +439,9 @@ capture erase "`export_parquet'"
 capture erase "`import_default_dta'"
 capture erase "`import_allstring_dta'"
 capture rmdir "`export_dir'"
+
+* Cleanup parity with CLI artifact cleanup command
+capture noisily shell powershell -NoProfile -Command "Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet' -Force -ErrorAction SilentlyContinue; Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet' -Force -ErrorAction SilentlyContinue; Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out' -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data' -Filter '*.tmp' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
 
 display _newline(2)
 display as result "All tests completed!"

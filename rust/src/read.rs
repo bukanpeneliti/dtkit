@@ -479,7 +479,9 @@ fn set_schema_macros(
             DataType::Date => "int32",
             DataType::Time => "int64",
             DataType::Datetime(_, _) => "int64",
-            DataType::String | DataType::Categorical(_, _) | DataType::Enum(_, _) => "string",
+            DataType::String => "string",
+            DataType::Categorical(_, _) => "categorical",
+            DataType::Enum(_, _) => "enum",
             DataType::Binary => "binary",
             _ => "string",
         };

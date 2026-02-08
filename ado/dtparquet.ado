@@ -171,7 +171,7 @@ capture program drop dtparquet_use
 program dtparquet_use
     version 16
 
-    syntax [anything(everything)] [, Clear NOLabel CHunksize(string) ALLstring]
+    syntax [anything(everything)] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string)]
     
     local vlist ""
     local if_exp ""
@@ -219,6 +219,14 @@ program dtparquet_use
     local is_nolabel = ("`nolabel'" != "")
     local is_clear = ("`clear'" != "")
     local is_int64_as_string = ("`allstring'" != "")
+    local catmode_norm = lower(trim("`catmode'"))
+    if "`catmode_norm'" == "" {
+        local catmode_norm "encode"
+    }
+    if !inlist("`catmode_norm'", "encode", "raw", "both") {
+        display as error "catmode() must be one of: encode, raw, both"
+        exit 198
+    }
 
     local file = subinstr(trim(`"`filename'"'), `"""', "", .)
     local file : subinstr local file "\" "/", all
@@ -415,6 +423,61 @@ program dtparquet_use
         }
         else {
             _apply_dtmeta
+            if `is_int64_as_string' == 0 {
+                local foreign_cat_vars
+                foreach vari in `matched_vars' {
+                    local i_original : list posof "`vari'" in vars_in_file
+                    if (`i_original' > 0) {
+                        local p_type `polars_type_`i_original''
+                        if inlist("`p_type'", "categorical", "enum") {
+                            local foreign_cat_vars `foreign_cat_vars' `vari'
+                        }
+                    }
+                }
+                if `"`foreign_cat_vars'"' != "" {
+                    _apply_foreign_cat_labels `foreign_cat_vars', mode(`catmode_norm')
+                }
+            }
+        }
+    }
+end
+
+capture program drop _apply_foreign_cat_labels
+program _apply_foreign_cat_labels
+    version 16
+    syntax varlist, mode(string)
+
+    local i = 0
+    foreach vari of local varlist {
+        local i = `i' + 1
+        if "`mode'" == "raw" {
+            continue
+        }
+
+        tempvar dtpq_encoded
+        quietly encode `vari', gen(`dtpq_encoded')
+        local tmp_label : value label `dtpq_encoded'
+        local stable_label = "dtpq_cat_`i'"
+        capture label drop `stable_label'
+        label copy `tmp_label' `stable_label', replace
+        label values `dtpq_encoded' `stable_label'
+
+        if "`mode'" == "both" {
+            local id_name `vari'_id
+            capture confirm variable `id_name'
+            if _rc == 0 {
+                local id_name `vari'_catid
+                capture confirm variable `id_name'
+                if _rc == 0 {
+                    display as error "Cannot create categorical id variable for `vari' (name collision)"
+                    exit 198
+                }
+            }
+            rename `dtpq_encoded' `id_name'
+        }
+        else {
+            drop `vari'
+            rename `dtpq_encoded' `vari'
         }
     }
 end
