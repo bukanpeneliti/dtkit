@@ -105,6 +105,8 @@ program dtparquet_save
     local dtmeta_var_count `var_count'
     local dtmeta_label_count 0
     local dtmeta_dta_label ""
+    local dtmeta_dta_note_count 0
+    local dtmeta_var_note_count 0
 
     if `is_nolabel' == 0 {
         capture frame _dtinfo: local dtmeta_dta_label = dta_label[1]
@@ -116,6 +118,29 @@ program dtparquet_save
                 frame _dtlabel: local dtmeta_label_name_`j' = vallab[`j']
                 frame _dtlabel: local dtmeta_label_value_`j' = value[`j']
                 frame _dtlabel: local dtmeta_label_text_`j' = label[`j']
+            }
+        }
+
+        capture frame _dtinfo: count
+        if _rc == 0 {
+            local n_dta_note = r(N)
+            local dtmeta_dta_note_count 0
+            forvalues j = 1/`n_dta_note' {
+                frame _dtinfo: local dta_note_j = dta_note[`j']
+                if `"`dta_note_j'"' != "" {
+                    local dtmeta_dta_note_count = `dtmeta_dta_note_count' + 1
+                    local dtmeta_dta_note_`dtmeta_dta_note_count' `dta_note_j'
+                }
+            }
+        }
+
+        capture frame _dtnotes: count
+        if _rc == 0 {
+            local n_var_note = r(N)
+            local dtmeta_var_note_count `n_var_note'
+            forvalues j = 1/`n_var_note' {
+                frame _dtnotes: local dtmeta_var_note_var_`j' = varname[`j']
+                frame _dtnotes: local dtmeta_var_note_text_`j' = _note_text[`j']
             }
         }
     }
@@ -352,6 +377,29 @@ program dtparquet_use
             if (`apply_labels') {
                 if `"`dtmeta_dta_label'"' != "" label data `"`dtmeta_dta_label'"'
             }
+
+            local ndta = real("`dtmeta_dta_note_count'")
+            if (`ndta' > 0) {
+                capture notes drop _dta
+                forvalues j = 1/`ndta' {
+                    local dnote `dtmeta_dta_note_`j''
+                    if `"`dnote'"' != "" notes: `"`dnote'"'
+                }
+            }
+
+            local nvarnote = real("`dtmeta_var_note_count'")
+            if (`nvarnote' > 0) {
+                forvalues j = 1/`nvarnote' {
+                    local vn `dtmeta_var_note_var_`j''
+                    local vt `dtmeta_var_note_text_`j''
+                    capture confirm variable `vn'
+                    if (_rc == 0 & `"`vt'"' != "") {
+                        capture notes drop `vn'
+                        notes `vn': `"`vt'"'
+                    }
+                }
+            }
+
             capture error 0
         }
         else {

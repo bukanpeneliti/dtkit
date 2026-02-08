@@ -14,6 +14,10 @@ pub struct DtMeta {
     pub vars: Vec<VarMeta>,
     pub value_labels: Vec<ValueLabelMeta>,
     pub dta_label: String,
+    #[serde(default)]
+    pub dta_notes: Vec<String>,
+    #[serde(default)]
+    pub var_notes: Vec<VarNoteMeta>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -29,6 +33,12 @@ pub struct VarMeta {
 pub struct ValueLabelMeta {
     pub name: String,
     pub value: i64,
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VarNoteMeta {
+    pub varname: String,
     pub text: String,
 }
 
@@ -65,6 +75,25 @@ pub fn extract_dtmeta() -> String {
         vars,
         value_labels,
         dta_label: get_macro("dtmeta_dta_label", false, Some(65_536)),
+        dta_notes: {
+            let count = get_macro("dtmeta_dta_note_count", false, None)
+                .parse::<usize>()
+                .unwrap_or(0);
+            (1..=count)
+                .map(|i| get_macro(&format!("dtmeta_dta_note_{}", i), false, Some(65_536)))
+                .collect::<Vec<_>>()
+        },
+        var_notes: {
+            let count = get_macro("dtmeta_var_note_count", false, None)
+                .parse::<usize>()
+                .unwrap_or(0);
+            (1..=count)
+                .map(|i| VarNoteMeta {
+                    varname: get_macro(&format!("dtmeta_var_note_var_{}", i), false, None),
+                    text: get_macro(&format!("dtmeta_var_note_text_{}", i), false, Some(65_536)),
+                })
+                .collect::<Vec<_>>()
+        },
     };
 
     serde_json::to_string(&meta).unwrap_or_default()
@@ -110,4 +139,28 @@ pub fn expose_dtmeta_to_macros(meta: &DtMeta) {
     }
 
     set_macro("dtmeta_dta_label", &meta.dta_label, false);
+    set_macro(
+        "dtmeta_dta_note_count",
+        &meta.dta_notes.len().to_string(),
+        false,
+    );
+    for (i, note) in meta.dta_notes.iter().enumerate() {
+        let idx = i + 1;
+        set_macro(&format!("dtmeta_dta_note_{}", idx), note, false);
+    }
+
+    set_macro(
+        "dtmeta_var_note_count",
+        &meta.var_notes.len().to_string(),
+        false,
+    );
+    for (i, note) in meta.var_notes.iter().enumerate() {
+        let idx = i + 1;
+        set_macro(
+            &format!("dtmeta_var_note_var_{}", idx),
+            &note.varname,
+            false,
+        );
+        set_macro(&format!("dtmeta_var_note_text_{}", idx), &note.text, false);
+    }
 }

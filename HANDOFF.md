@@ -44,6 +44,9 @@
   - metadata restore now uses in-parquet metadata key only
     (`dtparquet.dtmeta`); plugin `load_meta` reads metadata directly from the
     parquet bytes and repopulates macro contract for `dtparquet use`.
+  - embedded `dtparquet.dtmeta` payload now also carries dataset notes and
+    variable notes from `_dtinfo`/`_dtnotes` and reapplies them on
+    `dtparquet use` when metadata is loaded.
 
 ## Validated Behavior
 
@@ -127,6 +130,22 @@ Latest rerun details after crate alias rename (`parquet2` ->
 Result: all seven test files pass in this rerun. Deterministic cleanup was
 rechecked for `rust_roundtrip.parquet`, `rust_filtered_save.parquet`,
 `rust_partitioned_out`, and `*.tmp` remnants.
+
+Latest rerun after extending embedded metadata payload for notes
+(`_dtinfo`/`_dtnotes`) and adding deterministic assertions in
+`dtparquet_test7.do` Test 13:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass; Test 13 confirms dataset label/notes and
+variable notes restore from in-parquet metadata, while `nolabel` remains
+deterministically metadata-suppressed.
 
 ### Explicit unsupported behavior (current)
 

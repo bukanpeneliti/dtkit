@@ -249,20 +249,35 @@ gen byte z = _n
 label define zlbl 1 "one" 2 "two" 3 "three", replace
 label values z zlbl
 label variable z "z label"
+label data "meta roundtrip"
+notes: "dataset note one"
+notes z: "z var note one"
 
 dtparquet save "`meta_parquet'", replace
 dtparquet use using "`meta_parquet'", clear
 local z_var_label_default : variable label z
 local z_val_label_default : value label z
-assert "`z_var_label_default'" == ""
-assert "`z_val_label_default'" == ""
+local d_label_default : data label
+notes _count d_note_count_default : _dta
+notes _count z_note_count_default : z
+assert "`z_var_label_default'" == "z label"
+assert "`z_val_label_default'" == "zlbl"
+assert "`d_label_default'" == "meta roundtrip"
+assert `d_note_count_default' == 1
+assert `z_note_count_default' == 1
 
 dtparquet save "`meta_parquet'", replace nolabel
 dtparquet use using "`meta_parquet'", clear
 local z_var_label_nolabel : variable label z
 local z_val_label_nolabel : value label z
+local d_label_nolabel : data label
+notes _count d_note_count_nolabel : _dta
+notes _count z_note_count_nolabel : z
 assert "`z_var_label_nolabel'" == ""
 assert "`z_val_label_nolabel'" == ""
+assert "`d_label_nolabel'" == ""
+assert `d_note_count_nolabel' == 0
+assert `z_note_count_nolabel' == 0
 display as result "Test 13 PASSED: metadata behavior is deterministic with and without nolabel"
 
 capture erase "`meta_parquet'"
