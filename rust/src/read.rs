@@ -370,6 +370,7 @@ pub fn read_to_stata(
         let n_batches = (total_rows as f64 / batch_size as f64).ceil() as usize;
         set_macro("n_batches", &n_batches.to_string(), false);
 
+        let mut loaded_rows = 0usize;
         for batch_i in 0..n_batches {
             let batch_offset = batch_i * batch_size;
             let batch_length = if (batch_i + 1) * batch_size > total_rows {
@@ -378,6 +379,7 @@ pub fn read_to_stata(
                 batch_size
             };
             let batch_df = sliced.slice(batch_offset as i64, batch_length);
+            loaded_rows += batch_df.height();
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
@@ -387,6 +389,7 @@ pub fn read_to_stata(
                 stata_offset,
             )?;
         }
+        set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
 
         return Ok(0);
     }
@@ -451,6 +454,7 @@ pub fn read_to_stata(
         .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), n_rows, n_threads));
     set_macro("n_batches", &n_batches.to_string(), false);
 
+    let mut loaded_rows = 0usize;
     for batch_i in 0..n_batches {
         let mut lf_batch = lf.clone().select(&columns);
         let batch_offset = batch_source_offset + batch_i * batch_size;
@@ -464,6 +468,7 @@ pub fn read_to_stata(
         if batch_df.height() == 0 {
             break;
         }
+        loaded_rows += batch_df.height();
         process_batch_with_strategy(
             &batch_df,
             batch_offset - batch_source_offset,
@@ -473,6 +478,7 @@ pub fn read_to_stata(
             stata_offset,
         )?;
     }
+    set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
 
     Ok(0)
 }

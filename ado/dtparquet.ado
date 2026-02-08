@@ -366,6 +366,13 @@ program dtparquet_use
 
     plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
 
+    local n_loaded_rows = real("`n_loaded_rows'")
+    if missing(`n_loaded_rows') local n_loaded_rows = `row_to_read'
+    if (`n_loaded_rows' < `row_to_read') {
+        local keep_to = `n_obs_already' + `n_loaded_rows'
+        quietly keep in 1/`keep_to'
+    }
+
     if "`if_exp'" != "" {
         quietly keep `if_exp'
     }

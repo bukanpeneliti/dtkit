@@ -6,9 +6,7 @@
 
 ## Current State (as of commit `51f8447`)
 
-- `dtparquet use` is plugin-first; latest batch regression is stable on
-  `dtparquet_test2.do` to `dtparquet_test7.do`, with one open regression in
-  `dtparquet_test1.do` Test 6 (`if` + `in` qualifier case).
+- `dtparquet use` is plugin-first and stable through batch regression.
 - Ado pre-read macro contract is wired and consumed by Rust read path.
 - `dtparquet save` is now plugin-first end-to-end (no Python save bridge).
 - Rust save path (`rust/src/write.rs`) now:
@@ -42,6 +40,10 @@
     - by-row chunk sizing now uses `max(512, row_count.div_ceil(threads * 8))`.
     - eager path now casts `categorical`/`enum` columns to string before Stata
       assignment so foreign dictionary/categorical values are not lost.
+    - read path now reports deterministic `n_loaded_rows` so ado can trim
+      preallocated observations when pushdown filtering returns fewer rows.
+  - ado `dtparquet use` qualifier handling now accepts native `syntax [if] [in]`
+    and trims to loaded rows, restoring deterministic `if` + `in` behavior.
   - compression-level contract is now deterministic on plugin save path:
     any explicit compression level (anything other than `-1`) is rejected with
     `r(198)`; no implicit fallback is applied.
@@ -74,9 +76,8 @@ Use the latest pass/fail matrix in this file as source of truth.
 
 Most recent one-by-one batch run (2026-02-08) has:
 
-- pass: `dtparquet_test2.do`, `dtparquet_test3.do`, `dtparquet_test4.do`,
-  `dtparquet_test5.do`, `dtparquet_test6.do`, `dtparquet_test7.do`
-- fail: `dtparquet_test1.do` (Test 6 only: expected 3 obs, got 8)
+- pass: `dtparquet_test1.do` to `dtparquet_test7.do`
+- fail: none
 
 ## Known Gaps (Next Priority)
 
@@ -128,7 +129,7 @@ Executed one-by-one in batch mode:
 <!-- markdownlint-disable MD013 -->
 | File | Result | Failing cases |
 | :--- | :--- | :--- |
-| `dtparquet_test1.do` | fail | Test 6 (`if` + `in` qualifier case) |
+| `dtparquet_test1.do` | pass | none |
 | `dtparquet_test2.do` | pass | none |
 | `dtparquet_test3.do` | pass | none |
 | `dtparquet_test4.do` | pass | none |
@@ -148,9 +149,8 @@ categorical coverage:
 6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
 7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
 
-Result: `dtparquet_test2.do` to `dtparquet_test7.do` pass. `dtparquet_test1.do`
-fails only Test 6 (`if id > 5 in 1/8` expected 3, observed 8). `dtparquet_test7.do`
-adds fixture-backed foreign categorical checks with:
+Result: all seven test files pass. `dtparquet_test7.do` adds fixture-backed
+foreign categorical checks with:
 
 - `fixtures/foreign/foreign_cat_pandas.parquet` (`catmode(encode)`)
 - `fixtures/foreign/foreign_cat_arrow_dict.parquet` (`catmode(raw|both)`)
@@ -277,8 +277,8 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 6. Keep foreign categorical compatibility coverage in
    `dtparquet_test7.do` (Tests 6b, 6f, 6g, 6h) and extend only with
    fixture-based cases when adding new foreign producers.
-7. Resolve `dtparquet_test1.do` Test 6 qualifier-order/qualifier-application
-   regression (`if id > 5 in 1/8`) without changing command syntax.
+7. Keep `dtparquet use` loaded-row trimming deterministic when read pushdown
+   yields fewer rows than requested `in` range (`n_loaded_rows` macro contract).
 
 ### Planned implementation sequence (next feature phase)
 
