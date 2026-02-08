@@ -162,7 +162,7 @@ fn write_single_dataframe(
         KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
 
     let writer = ParquetWriter::new(&mut file)
-        .with_compression(parquet_compression(compression, compression_level))
+        .with_compression(parquet_compression(compression, compression_level)?)
         .with_key_value_metadata(Some(key_value_metadata));
     writer.finish(df)?;
 
@@ -204,7 +204,7 @@ fn write_partitioned_dataframe(
     create_dir_all(out_path)?;
 
     let mut write_options = ParquetWriteOptions::default();
-    write_options.compression = parquet_compression(compression, compression_level);
+    write_options.compression = parquet_compression(compression, compression_level)?;
 
     write_partitioned_dataset(
         df,
@@ -218,24 +218,22 @@ fn write_partitioned_dataframe(
     Ok(())
 }
 
-fn parquet_compression(compression: &str, compression_level: Option<usize>) -> ParquetCompression {
+fn parquet_compression(
+    compression: &str,
+    compression_level: Option<usize>,
+) -> Result<ParquetCompression, Box<dyn Error>> {
+    if compression_level.is_some() {
+        return Err("compression levels are not supported; pass -1".into());
+    }
+
     match compression {
-        "lz4" => ParquetCompression::Lz4Raw,
-        "uncompressed" => ParquetCompression::Uncompressed,
-        "snappy" => ParquetCompression::Snappy,
-        "gzip" => {
-            let level = compression_level.and_then(|v| GzipLevel::try_new(v as u8).ok());
-            ParquetCompression::Gzip(level)
-        }
-        "lzo" => ParquetCompression::Lzo,
-        "brotli" => {
-            let level = compression_level.and_then(|v| BrotliLevel::try_new(v as u32).ok());
-            ParquetCompression::Brotli(level)
-        }
-        _ => {
-            let level = compression_level.and_then(|v| ZstdLevel::try_new(v as i32).ok());
-            ParquetCompression::Zstd(level)
-        }
+        "lz4" => Ok(ParquetCompression::Lz4Raw),
+        "uncompressed" => Ok(ParquetCompression::Uncompressed),
+        "snappy" => Ok(ParquetCompression::Snappy),
+        "gzip" => Ok(ParquetCompression::Gzip(None)),
+        "lzo" => Ok(ParquetCompression::Lzo),
+        "brotli" => Ok(ParquetCompression::Brotli(None)),
+        _ => Ok(ParquetCompression::Zstd(None)),
     }
 }
 

@@ -163,11 +163,13 @@ local compress_zstd "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_fil
 local compress_uncompressed "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet"
 local compress_default "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet"
 local compress_bad "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_bad.parquet"
+local compress_level_bad "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet"
 
 capture erase "`compress_zstd'"
 capture erase "`compress_uncompressed'"
 capture erase "`compress_default'"
 capture erase "`compress_bad'"
+capture erase "`compress_level_bad'"
 
 dtparquet save "`compress_zstd'", replace compress(zstd)
 assert _rc == 0
@@ -184,6 +186,12 @@ assert fileexists("`compress_default'")
 capture dtparquet save "`compress_bad'", replace compress(invalid_codec)
 assert _rc == 198
 
+capture plugin call dtparquet_plugin, "save" "`compress_level_bad'" "from_macro" "0" "0" "" "from_macros" "" "zstd" "3" "1" "0" "0"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "save" "`compress_level_bad'" "from_macro" "0" "0" "" "from_macros" "" "snappy" "1" "1" "0" "0"
+assert _rc == 198
+
 dtparquet use using "`compress_zstd'", clear
 count
 assert r(N) > 0
@@ -195,7 +203,7 @@ assert r(N) > 0
 dtparquet use using "`compress_default'", clear
 count
 assert r(N) > 0
-display as result "Test 9b PASSED: compress() accepted values/defaults are deterministic"
+display as result "Test 9b PASSED: compress() codec/default and level semantics are deterministic"
 
 * Test 9c: compress_string_to_numeric remains unsupported
 capture dtparquet save "`compress_bad'", replace compress_string_to_numeric
@@ -345,12 +353,14 @@ capture erase "`compress_zstd'"
 capture erase "`compress_uncompressed'"
 capture erase "`compress_default'"
 capture erase "`compress_bad'"
+capture erase "`compress_level_bad'"
 capture erase "`roundtrip_file'.tmp"
 capture erase "`filtered_file'.tmp"
 capture erase "`compress_zstd'.tmp"
 capture erase "`compress_uncompressed'.tmp"
 capture erase "`compress_default'.tmp"
 capture erase "`compress_bad'.tmp"
+capture erase "`compress_level_bad'.tmp"
 capture rmdir "`partition_dir'", all
 
 capture erase "`source_dta'"

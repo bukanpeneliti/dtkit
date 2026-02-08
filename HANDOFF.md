@@ -33,6 +33,9 @@
   - `ST_retcode` warning handled intentionally
   - unused metadata stub param warning removed
 - Additional patch in this handoff cycle:
+  - compression-level contract is now deterministic on plugin save path:
+    any explicit compression level (anything other than `-1`) is rejected with
+    `r(198)`; no implicit fallback is applied.
   - `dtparquet_use` now calls plugin `describe` with `detailed=1` to populate
     observed string lengths in `string_length_*` macros.
   - plugin schema mapping now defaults string-like columns to Stata `string`
@@ -81,7 +84,7 @@ Most recent one-by-one batch run (2026-02-08) has:
 <!-- markdownlint-disable MD013 -->
 | Item | Decision | Next action |
 | :--- | :--- | :--- |
-| `compress` save option parity | test now | Add deterministic checks for accepted values and defaults. |
+| `compress` save option parity | implemented | Keep deterministic checks for accepted values/defaults and reject explicit compression levels with `r(198)`. |
 | `compress_string_to_numeric` parity | defer | Keep in backlog until plugin contract is finalized. |
 | Full `_dt*` metadata parity | implement now | Prioritize labels/notes/dataset label roundtrip assertions. |
 <!-- markdownlint-enable MD013 -->
@@ -208,8 +211,11 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 3. Keep deterministic test cleanup for generated outputs
    (`rust_roundtrip.parquet`, `rust_filtered_save.parquet`,
    `rust_partitioned_out`, and `.tmp` remnants).
-4. Continue parity work for full `_dt*` metadata fidelity
-   (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity).
+4. Keep compression-level contract deterministic: any explicit plugin
+   compression level is rejected (`r(198)`), while codec selection and default
+   behavior remain unchanged.
+5. Keep `compress_string_to_numeric` intentionally unsupported unless the
+   plugin/runtime contract is explicitly redesigned and approved.
 
 ## Important Notes
 
@@ -262,14 +268,17 @@ only when lock contention blocks promotion.
 
 Execute these tasks in one cohesive patch set.
 
-1) Continue full `_dt*` metadata parity implementation (`_dtvars`, `_dtlabel`,
-   `_dtnotes`, `_dtinfo`, value-label fidelity) with deterministic assertions.
+1) Finalize and document deterministic compression-level behavior for
+   `dtparquet save, compress()` (including invalid level handling policy).
 
-2) Add deterministic coverage for save compression option parity (`compress`)
-   including accepted values and default behavior.
+2) Add deterministic regression assertions for the chosen compression-level
+   behavior while preserving current command syntax.
 
-3) Keep `compress_string_to_numeric` intentionally unsupported unless the
-   plugin/runtime contract is explicitly redesigned and approved.
+3) Keep `compress_string_to_numeric` intentionally unsupported and preserve
+   deterministic guardrail assertions (`r(198)`).
+
+4) Update `HANDOFF.md` pass/fail matrix and immediate next tasks to match the
+   latest verified logs with no stale statements.
 
 Constraints for this agent:
 
@@ -283,3 +292,20 @@ Validation required:
 
 - Run `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in batch.
 - Use `dtparquet.new.dll` only when `dtparquet.dll` is locked.
+
+Latest rerun after locking compression-level contract (explicit level rejected)
+and extending `dtparquet_test7.do` compression assertions:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass. `dtparquet_test7.do` now asserts
+deterministic compression behavior for `compress()` codecs/default and rejects
+explicit plugin compression levels (`zstd` level `3`, `snappy` level `1`) with
+`r(198)`. Deterministic cleanup was rechecked for `rust_roundtrip.parquet`,
+`rust_filtered_save.parquet`, `rust_partitioned_out`, and `*.tmp` remnants.

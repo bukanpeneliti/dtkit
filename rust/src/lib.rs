@@ -124,7 +124,16 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     return 198;
                 }
 
-                let compression_level_raw = subfunction_args[8].parse::<isize>().unwrap_or(-1);
+                let compression_level_raw = match subfunction_args[8].parse::<isize>() {
+                    Ok(value) => value,
+                    Err(_) => {
+                        display(&format!(
+                            "Error: invalid compression level '{}'",
+                            subfunction_args[8]
+                        ));
+                        return 198;
+                    }
+                };
                 let compression_level = if compression_level_raw < 0 {
                     None
                 } else {
