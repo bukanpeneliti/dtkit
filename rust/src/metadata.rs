@@ -1,3 +1,4 @@
+use parquet_footer::read::read_metadata;
 use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
@@ -72,7 +73,7 @@ pub fn extract_dtmeta() -> String {
 pub fn load_dtmeta_from_parquet(parquet_path: &str) -> Option<DtMeta> {
     let file = File::open(parquet_path).ok()?;
     let mut reader = BufReader::new(file);
-    let metadata = parquet2::read::read_metadata(&mut reader).ok()?;
+    let metadata = read_metadata(&mut reader).ok()?;
     let kv = metadata.key_value_metadata.as_ref()?;
     let dtmeta_text = kv
         .iter()

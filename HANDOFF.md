@@ -49,10 +49,10 @@
 
 Use the latest pass/fail matrix in this file as source of truth.
 
-Most recent one-by-one batch run (2026-02-08) currently has:
+Most recent one-by-one batch run (2026-02-08) has:
 
-- pass: `dtparquet_test2.do`, `dtparquet_test3.do`, `dtparquet_test6.do`
-- fail: `dtparquet_test1.do`, `dtparquet_test4.do`, `dtparquet_test5.do`, `dtparquet_test7.do`
+- pass: `dtparquet_test1.do` to `dtparquet_test7.do`
+- fail: none
 
 ## Known Gaps (Next Priority)
 
@@ -85,8 +85,9 @@ Most recent one-by-one batch run (2026-02-08) currently has:
 
 - All previously recorded failing capability gaps in `dtparquet_test1.do` to
   `dtparquet_test7.do` are now closed on this branch.
-- `dtparquet_test5.do` Test 5b remains skipped by test design
-  (strL signature stress case), unchanged.
+- `dtparquet_test5.do` includes intentional skips by test design:
+  Test 5b (strL signature stress case) and legacy pyarrow-fixture-dependent
+  tests (6, 7, 8, 9a, 9b, 10).
 
 ### Latest batch pass/fail matrix (2026-02-08)
 
@@ -112,8 +113,8 @@ Executed one-by-one in batch mode:
 | `dtparquet_test7.do` | pass | none |
 <!-- markdownlint-enable MD013 -->
 
-Revalidated one-by-one again after switching metadata restore to
-in-parquet-only (no sidecar file reads/writes):
+Latest rerun details after crate alias rename (`parquet2` ->
+`parquet_footer`) and lock-safe DLL promotion:
 
 1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
 2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
@@ -123,23 +124,14 @@ in-parquet-only (no sidecar file reads/writes):
 6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
 7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
 
-Result: all seven test files pass in this rerun.
-
-Additional rerun after deterministic cleanup + sql_if save stabilization:
-
-1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
-2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
-3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
-4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
-5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
-6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
-7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
-
-Result: all seven test files pass in this rerun too.
+Result: all seven test files pass in this rerun. Deterministic cleanup was
+rechecked for `rust_roundtrip.parquet`, `rust_filtered_save.parquet`,
+`rust_partitioned_out`, and `*.tmp` remnants.
 
 ### Explicit unsupported behavior (current)
 
-- None currently recorded.
+- `dtparquet_test5.do` intentionally skips legacy pyarrow-fixture-dependent
+  cases (6, 7, 8, 9a, 9b, 10) and strL stress case 5b by test design.
 
 ### Immediate next tasks
 
@@ -147,8 +139,11 @@ Result: all seven test files pass in this rerun too.
    reintroduce sidecar metadata files.
 2. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
    batch after each metadata/save-path change.
-3. Keep deterministic test cleanup for generated outputs (`rust_roundtrip.parquet`,
-   `rust_filtered_save.parquet`, `rust_partitioned_out`, and `.tmp` remnants).
+3. Keep deterministic test cleanup for generated outputs
+   (`rust_roundtrip.parquet`, `rust_filtered_save.parquet`,
+   `rust_partitioned_out`, and `.tmp` remnants).
+4. Continue parity work for full `_dt*` metadata fidelity
+   (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity).
 
 ## Important Notes
 
@@ -201,23 +196,14 @@ only when lock contention blocks promotion.
 
 Execute these tasks in one cohesive patch set.
 
-1) Add lock-safe DLL promotion documentation that defines a deterministic
-   promotion flow from `ado/ancillary_files/dtparquet.new.dll` to
-   `ado/ancillary_files/dtparquet.dll`.
+1) Continue full `_dt*` metadata parity implementation (`_dtvars`, `_dtlabel`,
+   `_dtnotes`, `_dtinfo`, value-label fidelity) with deterministic assertions.
 
-2) Extend
-   `ado/ancillary_files/test/dtparquet/dtparquet_test7.do` with focused
-   coverage for `dtparquet export` and `dtparquet import` command paths,
-   including:
-   - normal export/import roundtrip
-   - `replace`
-   - `nolabel`
-   - `allstring`
-   - quoted paths containing spaces
+2) Add deterministic coverage for save compression option parity (`compress`)
+   including accepted values and default behavior.
 
-3) Harden parsing in `ado/dtparquet.ado` for `dtparquet_export` and
-   `dtparquet_import` so user-facing syntax handling remains stable across
-   option combinations and quoted arguments.
+3) Keep `compress_string_to_numeric` explicitly deferred unless plugin contract
+   is finalized; if touched, add explicit tested behavior.
 
 Constraints for this agent:
 
@@ -229,13 +215,5 @@ Constraints for this agent:
 
 Validation required:
 
-- Run batch regression until green.
+- Run `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in batch.
 - Use `dtparquet.new.dll` only when `dtparquet.dll` is locked.
-
-Batch validation command:
-
-```bash
-cd "D:\OneDrive\MyWork\00personal\stata\dtkit" && \
-"C:\Program Files\StataNow19\StataMP-64.exe" /e \
-"D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"
-```
