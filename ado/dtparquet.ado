@@ -79,7 +79,10 @@ program dtparquet_save
     foreach vari of local varlist {
         local i = `i' + 1
         local typei: type `vari'
+        local typei_raw `typei'
         local formati: format `vari'
+        local varlabi : variable label `vari'
+        local vallabi : value label `vari'
         local str_length 0
 
         if ((substr("`typei'", 1, 3) == "str") & ("`typei'" != "strl")) {
@@ -91,6 +94,30 @@ program dtparquet_save
         local dtype_`i' `typei'
         local format_`i' `formati'
         local str_length_`i' `str_length'
+
+        local dtmeta_varname_`i' `vari'
+        local dtmeta_vartype_`i' `typei_raw'
+        local dtmeta_varfmt_`i' `formati'
+        local dtmeta_varlab_`i' `varlabi'
+        local dtmeta_vallab_`i' `vallabi'
+    }
+
+    local dtmeta_var_count `var_count'
+    local dtmeta_label_count 0
+    local dtmeta_dta_label ""
+
+    if `is_nolabel' == 0 {
+        capture frame _dtinfo: local dtmeta_dta_label = dta_label[1]
+        capture frame _dtlabel: count
+        if _rc == 0 {
+            local n_lbl = r(N)
+            local dtmeta_label_count `n_lbl'
+            forvalues j = 1/`n_lbl' {
+                frame _dtlabel: local dtmeta_label_name_`j' = vallab[`j']
+                frame _dtlabel: local dtmeta_label_value_`j' = value[`j']
+                frame _dtlabel: local dtmeta_label_text_`j' = label[`j']
+            }
+        }
     }
 
     plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "" "zstd" "-1" "1" "0" "0"
@@ -168,13 +195,30 @@ program dtparquet_use
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
 
-    plugin call dtparquet_plugin, "describe" "`file'" "1" "0" "" "" "0" "0"
+    plugin call dtparquet_plugin, "describe" "`file'" "1" "1" "" "" "0" "0"
+    plugin call dtparquet_plugin, "load_meta" "`file'"
 
     local n_rows = `n_rows'
     local n_columns = `n_columns'
     local vars_in_file
     forvalues i = 1/`n_columns' {
         local vars_in_file `vars_in_file' `name_`i''
+    }
+
+    if "`dtmeta_loaded'" == "1" {
+        local n_meta = real("`dtmeta_var_count'")
+        forvalues m = 1/`n_meta' {
+            local mname `dtmeta_varname_`m''
+            local mtype `dtmeta_vartype_`m''
+            local mfmt `dtmeta_varfmt_`m''
+            local i_original : list posof "`mname'" in vars_in_file
+            if (`i_original' > 0 & `"`mtype'"' != "") {
+                if (substr("`mtype'", 1, 3) == "str" | "`mtype'" == "strl") {
+                    local type_`i_original' `mtype'
+                    if `"`mfmt'"' != "" local format_`i_original' `mfmt'
+                }
+            }
+        }
     }
 
     if "`vlist'" == "" | "`vlist'" == "*" {
@@ -245,9 +289,13 @@ program dtparquet_use
         local i_matched : list posof "`vari'" in matched_vars
         if (`i_matched' > 0) {
             local i_original : list posof "`vari'" in vars_in_file
+            local read_type `load_type_`i_original''
+            if (substr("`read_type'", 1, 3) == "str" & "`read_type'" != "strl") {
+                local read_type string
+            }
             local v_to_read_index_`i_matched' `i'
             local v_to_read_name_`i_matched' `vari'
-            local v_to_read_type_`i_matched' `load_type_`i_original''
+            local v_to_read_type_`i_matched' `read_type'
             local v_to_read_p_type_`i_matched' `polars_type_`i_original''
         }
     }
@@ -268,12 +316,46 @@ program dtparquet_use
     local if_in = trim("`if_exp' `in_exp'")
     if `"`if_in'"' != "" quietly keep `if_in'
     if `is_nolabel' == 0 {
-        capture confirm frame _dtvars
-        if _rc == 0 {
-            _apply_dtmeta
+        if "`dtmeta_loaded'" == "1" {
+            local apply_labels = (`"`dtmeta_dta_label'"' != "")
+
+            if (`apply_labels') {
+                local nlab = real("`dtmeta_label_count'")
+                if (`nlab' > 0) {
+                    forvalues j = 1/`nlab' {
+                        local lname `dtmeta_label_name_`j''
+                        local lvalue `dtmeta_label_value_`j''
+                        local ltext `dtmeta_label_text_`j''
+                        if "`lname'" != "" {
+                            capture noisily label define `lname' `lvalue' `"`ltext'"', modify
+                        }
+                    }
+                }
+            }
+
+            local nvars_meta = real("`dtmeta_var_count'")
+            forvalues i = 1/`nvars_meta' {
+                local vname `dtmeta_varname_`i''
+                capture confirm variable `vname'
+                if _rc == 0 {
+                    local vlab `dtmeta_varlab_`i''
+                    local vfmt `dtmeta_varfmt_`i''
+                    local vlbl `dtmeta_vallab_`i''
+                    if `"`vfmt'"' != "" format `vname' `vfmt'
+                    if (`apply_labels') {
+                        if `"`vlab'"' != "" label variable `vname' `"`vlab'"'
+                        if `"`vlbl'"' != "" capture label values `vname' `vlbl'
+                    }
+                }
+            }
+
+            if (`apply_labels') {
+                if `"`dtmeta_dta_label'"' != "" label data `"`dtmeta_dta_label'"'
+            }
+            capture error 0
         }
         else {
-            capture error 0
+            _apply_dtmeta
         }
     }
 end
@@ -397,6 +479,42 @@ end
 
 capture program drop _apply_dtmeta
 program _apply_dtmeta
+    local use_macro_meta 0
+    if "`dtmeta_var_count'" != "" {
+        local use_macro_meta = (real("`dtmeta_var_count'") > 0)
+    }
+
+    if `use_macro_meta' {
+        local nlab = real("`dtmeta_label_count'")
+        if (`nlab' > 0) {
+            forvalues j = 1/`nlab' {
+                local lname `dtmeta_label_name_`j''
+                local lvalue `dtmeta_label_value_`j''
+                local ltext `dtmeta_label_text_`j''
+                if "`lname'" != "" {
+                    capture noisily label define `lname' `lvalue' `"`ltext'"', modify
+                }
+            }
+        }
+
+        local nvars = real("`dtmeta_var_count'")
+        forvalues i = 1/`nvars' {
+            local vname `dtmeta_varname_`i''
+            capture confirm variable `vname'
+            if _rc == 0 {
+                local vlab `dtmeta_varlab_`i''
+                local vfmt `dtmeta_varfmt_`i''
+                local vlbl `dtmeta_vallab_`i''
+                if `"`vlab'"' != "" label variable `vname' `"`vlab'"'
+                if `"`vfmt'"' != "" format `vname' `vfmt'
+                if `"`vlbl'"' != "" capture label values `vname' `vlbl'
+            }
+        }
+
+        if `"`dtmeta_dta_label'"' != "" label data `"`dtmeta_dta_label'"'
+        exit 0
+    }
+
     // Restore variable labels and formats from _dtvars
     capture frame _dtvars: count
     if _rc == 0 {
@@ -476,6 +594,8 @@ program _apply_dtmeta
     foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
         capture frame drop `fr'
     }
+
+    capture error 0
 end
 
 capture program drop dtparquet_match_variables
@@ -532,8 +652,14 @@ program dtparquet_gen_or_recast
     local string_length = max(1,`str_length')
     if ("`type_new'" == "datetime")      local type_new double
     else if ("`type_new'" == "time")     local type_new double
-    else if ("`type_new'" == "date")     local type_new long
+    else if ("`type_new'" == "date")     local type_new float
+    else if regexm("`type_new'", "^str([0-9]+)$") {
+        local string_length = max(1, real(regexs(1)))
+        local type_new string
+    }
     else if ("`type_new'" == "string")   local type_str str`string_length'
+
+    if ("`type_new'" == "string") local type_str str`string_length'
 
     capture confirm variable `name', exact
     local b_gen = _rc > 0

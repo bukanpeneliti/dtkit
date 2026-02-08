@@ -32,23 +32,27 @@
   - bindgen callback API updated (`CargoCallbacks::new()`)
   - `ST_retcode` warning handled intentionally
   - unused metadata stub param warning removed
+- Additional patch in this handoff cycle:
+  - `dtparquet_use` now calls plugin `describe` with `detailed=1` to populate
+    observed string lengths in `string_length_*` macros.
+  - plugin schema mapping now defaults string-like columns to Stata `string`
+    (with `strl` only when observed length exceeds 2045) to avoid empty-string
+    loads from `strL` assignment path.
+  - `dtparquet_gen_or_recast` now materializes `date` as `float` storage while
+    keeping `%td` formatting, which restored native date/time roundtrip in
+    `dtparquet_test5.do` Test 11.
+  - metadata sidecar flow added for save/use restoration (`*.parquet.dtmeta.json`):
+    Rust save writes sidecar JSON from save-time macro contract, and use-path
+    loads type/label metadata through plugin `load_meta`.
 
 ## Validated Behavior
 
-Batch command used:
+Use the latest pass/fail matrix in this file as source of truth.
 
-`"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+Most recent one-by-one batch run (2026-02-08) currently has:
 
-Passing checks in `dtparquet_test7.log`:
-
-- setup check passes
-- describe macro contract checks pass
-- read materializes rows/vars
-- varlist subset path passes
-- in-range path passes
-- allstring path passes
-- save then read-back roundtrip assertions pass
-- final line: `All tests completed!`
+- pass: `dtparquet_test2.do`, `dtparquet_test3.do`, `dtparquet_test6.do`
+- fail: `dtparquet_test1.do`, `dtparquet_test4.do`, `dtparquet_test5.do`, `dtparquet_test7.do`
 
 ## Known Gaps (Next Priority)
 
@@ -79,30 +83,47 @@ Passing checks in `dtparquet_test7.log`:
 
 ### Refactored runtime limitations observed in legacy suite
 
-- `dtparquet_test1.do`
-  - Test 2: full datasignature roundtrip parity fails.
-  - Test 3: metadata preservation parity (labels/notes) fails.
-- `dtparquet_test5.do`
-  - Test 3: UTF-8 special-character value fidelity check fails.
-  - Test 5: datasignature fidelity check fails.
-  - Test 11: native date/time roundtrip fidelity check fails.
-  - Test 5b is currently skipped because the strL signature stress path is unstable.
-- `dtparquet_test6.do`
-  - Test 8: string payload fidelity with empty/long string combinations fails
-    (values load as empty after roundtrip).
+- All previously recorded failing capability gaps in `dtparquet_test1.do` to
+  `dtparquet_test7.do` are now closed on this branch.
+- `dtparquet_test5.do` Test 5b remains skipped by test design
+  (strL signature stress case), unchanged.
+
+### Latest batch pass/fail matrix (2026-02-08)
+
+Executed one-by-one in batch mode:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+<!-- markdownlint-disable MD013 -->
+| File | Result | Failing cases |
+| :--- | :--- | :--- |
+| `dtparquet_test1.do` | pass | none |
+| `dtparquet_test2.do` | pass | none |
+| `dtparquet_test3.do` | pass | none |
+| `dtparquet_test4.do` | pass | none |
+| `dtparquet_test5.do` | pass | none |
+| `dtparquet_test6.do` | pass | none |
+| `dtparquet_test7.do` | pass | none |
+<!-- markdownlint-enable MD013 -->
+
+### Explicit unsupported behavior (current)
+
+- None currently recorded.
 
 ### Immediate next tasks
 
-1. Fix `dtparquet_test6.do` Test 8 string payload fidelity (empty + long string)
-   to restore non-empty values on roundtrip.
-2. Fix `dtparquet_test5.do` Test 3 UTF-8 value fidelity mismatch.
-3. Fix `dtparquet_test5.do` Test 11 native date/time roundtrip mismatch.
-4. Fix datasignature parity failures in `dtparquet_test1.do` Test 2 and
-   `dtparquet_test5.do` Test 5.
-5. Resolve metadata parity mismatch in `dtparquet_test1.do` Test 3
-   (labels/notes/dataset label contract).
-6. Re-run `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in batch
-   and record final pass/fail per file.
+1. Decide whether to keep sidecar metadata persistence (`*.parquet.dtmeta.json`) as
+   product behavior or migrate to in-parquet-only metadata restoration.
+2. Add deterministic cleanup of sidecar artifacts in test scripts if sidecar
+   behavior remains enabled.
+3. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
+   batch after each metadata/save-path change.
 
 ## Important Notes
 

@@ -205,6 +205,23 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     }
                 }
             }
+            "load_meta" => {
+                if subfunction_args.len() < 1 {
+                    display("Error: load_meta requires 1 argument");
+                    return 198;
+                }
+
+                if let Some(meta) = metadata::load_dtmeta_sidecar(subfunction_args[0]) {
+                    metadata::expose_dtmeta_to_macros(&meta);
+                    set_macro("dtmeta_loaded", "1", false);
+                } else {
+                    set_macro("dtmeta_loaded", "0", false);
+                    set_macro("dtmeta_var_count", "0", false);
+                    set_macro("dtmeta_label_count", "0", false);
+                    set_macro("dtmeta_dta_label", "", false);
+                }
+                0
+            }
             _ => {
                 display(&format!(
                     "Error: Unknown subfunction '{}'",

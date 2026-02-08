@@ -5,7 +5,7 @@ use std::error::Error;
 use std::fs::{create_dir_all, File};
 use std::path::Path;
 
-use crate::metadata::{extract_dtmeta, DTMETA_KEY};
+use crate::metadata::{extract_dtmeta, write_dtmeta_sidecar, DTMETA_KEY};
 use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
 use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
 
@@ -101,6 +101,8 @@ pub fn write_from_stata(
         .map(PlSmallStr::from)
         .collect();
 
+    let dtmeta_json = extract_dtmeta();
+
     if partition_cols.is_empty() {
         write_single_dataframe(
             path,
@@ -108,7 +110,9 @@ pub fn write_from_stata(
             compression,
             compression_level,
             overwrite_partition,
+            &dtmeta_json,
         )?;
+        let _ = write_dtmeta_sidecar(path, &dtmeta_json);
     } else {
         write_partitioned_dataframe(
             path,
@@ -129,6 +133,7 @@ fn write_single_dataframe(
     compression: &str,
     compression_level: Option<usize>,
     overwrite_partition: bool,
+    dtmeta_json: &str,
 ) -> Result<(), Box<dyn Error>> {
     let out_path = Path::new(path);
 
@@ -150,7 +155,7 @@ fn write_single_dataframe(
     let mut file = File::create(&tmp_path)?;
 
     let key_value_metadata =
-        KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), extract_dtmeta())]);
+        KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
 
     let writer = ParquetWriter::new(&mut file)
         .with_compression(parquet_compression(compression, compression_level))

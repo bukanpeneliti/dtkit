@@ -509,9 +509,7 @@ fn set_schema_macros(
             DataType::Time => "time",
             DataType::Datetime(_, _) => "datetime",
             DataType::String | DataType::Categorical(_, _) | DataType::Enum(_, _) => {
-                if !detailed {
-                    "strl"
-                } else if string_length > 2045 {
+                if detailed && string_length > 2045 {
                     "strl"
                 } else {
                     "string"
