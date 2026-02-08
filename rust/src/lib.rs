@@ -219,6 +219,9 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     set_macro("dtmeta_var_count", "0", false);
                     set_macro("dtmeta_label_count", "0", false);
                     set_macro("dtmeta_dta_label", "", false);
+                    set_macro("dtmeta_dta_obs", "0", false);
+                    set_macro("dtmeta_dta_vars", "0", false);
+                    set_macro("dtmeta_dta_ts", "", false);
                     set_macro("dtmeta_dta_note_count", "0", false);
                     set_macro("dtmeta_var_note_count", "0", false);
                 }

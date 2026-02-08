@@ -254,6 +254,13 @@ notes: "dataset note one"
 notes z: "z var note one"
 
 dtparquet save "`meta_parquet'", replace
+plugin call dtparquet_plugin, "load_meta" "`meta_parquet'"
+assert "`dtmeta_loaded'" == "1"
+assert real("`dtmeta_dta_obs'") == 3
+assert real("`dtmeta_dta_vars'") == 1
+assert "`dtmeta_dta_ts'" != ""
+assert real("`dtmeta_dta_note_count'") == 1
+assert real("`dtmeta_var_note_count'") == 1
 dtparquet use using "`meta_parquet'", clear
 local z_var_label_default : variable label z
 local z_val_label_default : value label z
@@ -267,6 +274,13 @@ assert `d_note_count_default' == 1
 assert `z_note_count_default' == 1
 
 dtparquet save "`meta_parquet'", replace nolabel
+plugin call dtparquet_plugin, "load_meta" "`meta_parquet'"
+assert "`dtmeta_loaded'" == "1"
+assert real("`dtmeta_dta_obs'") == 0
+assert real("`dtmeta_dta_vars'") == 0
+assert "`dtmeta_dta_ts'" == ""
+assert real("`dtmeta_dta_note_count'") == 0
+assert real("`dtmeta_var_note_count'") == 0
 dtparquet use using "`meta_parquet'", clear
 local z_var_label_nolabel : variable label z
 local z_val_label_nolabel : value label z

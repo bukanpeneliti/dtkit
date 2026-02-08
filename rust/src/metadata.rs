@@ -15,6 +15,12 @@ pub struct DtMeta {
     pub value_labels: Vec<ValueLabelMeta>,
     pub dta_label: String,
     #[serde(default)]
+    pub dta_obs: i64,
+    #[serde(default)]
+    pub dta_vars: i64,
+    #[serde(default)]
+    pub dta_ts: String,
+    #[serde(default)]
     pub dta_notes: Vec<String>,
     #[serde(default)]
     pub var_notes: Vec<VarNoteMeta>,
@@ -75,6 +81,13 @@ pub fn extract_dtmeta() -> String {
         vars,
         value_labels,
         dta_label: get_macro("dtmeta_dta_label", false, Some(65_536)),
+        dta_obs: get_macro("dtmeta_dta_obs", false, None)
+            .parse::<i64>()
+            .unwrap_or(0),
+        dta_vars: get_macro("dtmeta_dta_vars", false, None)
+            .parse::<i64>()
+            .unwrap_or(0),
+        dta_ts: get_macro("dtmeta_dta_ts", false, Some(65_536)),
         dta_notes: {
             let count = get_macro("dtmeta_dta_note_count", false, None)
                 .parse::<usize>()
@@ -139,6 +152,9 @@ pub fn expose_dtmeta_to_macros(meta: &DtMeta) {
     }
 
     set_macro("dtmeta_dta_label", &meta.dta_label, false);
+    set_macro("dtmeta_dta_obs", &meta.dta_obs.to_string(), false);
+    set_macro("dtmeta_dta_vars", &meta.dta_vars.to_string(), false);
+    set_macro("dtmeta_dta_ts", &meta.dta_ts, false);
     set_macro(
         "dtmeta_dta_note_count",
         &meta.dta_notes.len().to_string(),

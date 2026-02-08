@@ -105,11 +105,17 @@ program dtparquet_save
     local dtmeta_var_count `var_count'
     local dtmeta_label_count 0
     local dtmeta_dta_label ""
+    local dtmeta_dta_obs 0
+    local dtmeta_dta_vars 0
+    local dtmeta_dta_ts ""
     local dtmeta_dta_note_count 0
     local dtmeta_var_note_count 0
 
     if `is_nolabel' == 0 {
         capture frame _dtinfo: local dtmeta_dta_label = dta_label[1]
+        capture frame _dtinfo: local dtmeta_dta_obs = dta_obs[1]
+        capture frame _dtinfo: local dtmeta_dta_vars = dta_vars[1]
+        capture frame _dtinfo: local dtmeta_dta_ts = dta_ts[1]
         capture frame _dtlabel: count
         if _rc == 0 {
             local n_lbl = r(N)
