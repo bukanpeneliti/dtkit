@@ -125,6 +125,18 @@ in-parquet-only (no sidecar file reads/writes):
 
 Result: all seven test files pass in this rerun.
 
+Additional rerun after deterministic cleanup + sql_if save stabilization:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass in this rerun too.
+
 ### Explicit unsupported behavior (current)
 
 - None currently recorded.
@@ -135,8 +147,8 @@ Result: all seven test files pass in this rerun.
    reintroduce sidecar metadata files.
 2. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
    batch after each metadata/save-path change.
-3. Optional hardening: replace byte-window metadata key checks with strict
-   parquet footer parsing for metadata lookup.
+3. Keep deterministic test cleanup for generated outputs (`rust_roundtrip.parquet`,
+   `rust_filtered_save.parquet`, `rust_partitioned_out`, and `.tmp` remnants).
 
 ## Important Notes
 

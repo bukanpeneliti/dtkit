@@ -7,6 +7,13 @@ capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
+* Deterministic pre-clean for generated outputs from prior interrupted runs
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
+capture rmdir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out", all
+
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
@@ -94,6 +101,7 @@ display as result "Test 7 PASSED: save and read-back roundtrip works"
 * Test 8: Plugin save with partition_by + overwrite behavior
 local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 capture rmdir "`partition_dir'", all
+capture error 0
 
 dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
 quietly ds
@@ -132,9 +140,14 @@ display as result "Test 8 PASSED: partition_by save + overwrite guard works"
 * Test 9: Plugin save sql_if filter semantics
 local filtered_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
 capture erase "`filtered_file'"
+capture error 0
 
 plugin call dtparquet_plugin, "save" "`filtered_file'" "from_macro" "0" "0" "year > 2015" "from_macros" "" "zstd" "-1" "1" "0" "0"
-assert _rc == 0
+local rc_test9_save = _rc
+if (`rc_test9_save' != 0) {
+    display as error "Test 9 save rc: `rc_test9_save'"
+}
+assert `rc_test9_save' == 0
 assert fileexists("`filtered_file'")
 
 dtparquet use using "`filtered_file'", clear
@@ -253,6 +266,11 @@ assert "`z_val_label_nolabel'" == ""
 display as result "Test 13 PASSED: metadata behavior is deterministic with and without nolabel"
 
 capture erase "`meta_parquet'"
+capture erase "`roundtrip_file'"
+capture erase "`filtered_file'"
+capture erase "`roundtrip_file'.tmp"
+capture erase "`filtered_file'.tmp"
+capture rmdir "`partition_dir'", all
 
 capture erase "`source_dta'"
 capture erase "`export_parquet'"

@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::BufReader;
 
 use crate::stata_interface::{get_macro, set_macro};
 
@@ -68,31 +70,15 @@ pub fn extract_dtmeta() -> String {
 }
 
 pub fn load_dtmeta_from_parquet(parquet_path: &str) -> Option<DtMeta> {
-    let bytes = std::fs::read(parquet_path).ok()?;
-    let key = DTMETA_KEY.as_bytes();
-
-    let key_pos = bytes.windows(key.len()).position(|w| w == key)?;
-    let after_key = &bytes[key_pos + key.len()..];
-    let start_rel = after_key.iter().position(|b| *b == b'{')?;
-    let start = key_pos + key.len() + start_rel;
-
-    let mut depth = 0i32;
-    let mut end = None;
-    for (i, b) in bytes[start..].iter().enumerate() {
-        if *b == b'{' {
-            depth += 1;
-        } else if *b == b'}' {
-            depth -= 1;
-            if depth == 0 {
-                end = Some(start + i + 1);
-                break;
-            }
-        }
-    }
-
-    let end = end?;
-    let json_text = std::str::from_utf8(&bytes[start..end]).ok()?;
-    serde_json::from_str::<DtMeta>(json_text).ok()
+    let file = File::open(parquet_path).ok()?;
+    let mut reader = BufReader::new(file);
+    let metadata = parquet2::read::read_metadata(&mut reader).ok()?;
+    let kv = metadata.key_value_metadata.as_ref()?;
+    let dtmeta_text = kv
+        .iter()
+        .find(|entry| entry.key == DTMETA_KEY)
+        .and_then(|entry| entry.value.as_deref())?;
+    serde_json::from_str::<DtMeta>(dtmeta_text).ok()
 }
 
 pub fn expose_dtmeta_to_macros(meta: &DtMeta) {

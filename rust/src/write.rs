@@ -3,6 +3,7 @@ use polars_sql::SQLContext;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::{create_dir_all, File};
+use std::io::ErrorKind;
 use std::path::Path;
 
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
@@ -40,11 +41,6 @@ pub fn write_from_stata(
         varlist
     };
 
-    let selected_names: Vec<&str> = selected_vars.split_whitespace().collect();
-    if selected_names.is_empty() {
-        return Err("No variables selected for save".into());
-    }
-
     let all_columns = if mapping.is_empty() || mapping == "from_macros" {
         let var_count = get_macro("var_count", false, None).parse::<usize>()?;
         column_info_from_macros(var_count)
@@ -57,15 +53,20 @@ pub fn write_from_stata(
         .map(|info| (info.name.as_str(), info))
         .collect();
 
-    let selected_infos: Vec<StataColumnInfo> = selected_names
-        .iter()
-        .map(|name| {
-            *info_by_name
-                .get(*name)
-                .unwrap_or_else(|| panic!("Missing macro metadata for variable {}", name))
-        })
-        .cloned()
-        .collect();
+    let selected_names: Vec<&str> = selected_vars.split_whitespace().collect();
+    let selected_infos: Vec<StataColumnInfo> = if selected_names.is_empty() {
+        all_columns.clone()
+    } else {
+        selected_names
+            .iter()
+            .map(|name| {
+                *info_by_name
+                    .get(*name)
+                    .unwrap_or_else(|| panic!("Missing macro metadata for variable {}", name))
+            })
+            .cloned()
+            .collect()
+    };
 
     let total_rows = n_obs() as usize;
     let start_row = offset.min(total_rows);
@@ -147,7 +148,11 @@ fn write_single_dataframe(
     }
 
     if out_path.exists() && overwrite_partition {
-        std::fs::remove_file(out_path)?;
+        match std::fs::remove_file(out_path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == ErrorKind::NotFound => {}
+            Err(e) => return Err(Box::new(e)),
+        }
     }
 
     let tmp_path = format!("{}.tmp", path);
@@ -161,7 +166,16 @@ fn write_single_dataframe(
         .with_key_value_metadata(Some(key_value_metadata));
     writer.finish(df)?;
 
-    std::fs::rename(&tmp_path, path)?;
+    match std::fs::rename(&tmp_path, path) {
+        Ok(()) => {}
+        Err(_) => {
+            if out_path.exists() {
+                let _ = std::fs::remove_file(out_path);
+            }
+            std::fs::copy(&tmp_path, path)?;
+            std::fs::remove_file(&tmp_path)?;
+        }
+    }
     Ok(())
 }
 
