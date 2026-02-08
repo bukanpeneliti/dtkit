@@ -178,10 +178,26 @@ Result: all seven test files pass; `dtparquet_test7.do` now validates
 `compress()` accepted values/default behavior and deterministic invalid input
 handling (`r(198)`).
 
+Latest rerun after adding explicit guardrail coverage that
+`compress_string_to_numeric` remains unsupported in dtparquet syntax:
+
+1. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test1.do"`
+2. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test2.do"`
+3. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test3.do"`
+4. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test4.do"`
+5. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test5.do"`
+6. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test6.do"`
+7. `"C:\Program Files\StataNow19\StataMP-64.exe" /e "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\dtparquet\dtparquet_test7.do"`
+
+Result: all seven test files pass; `dtparquet_test7.do` now asserts
+`compress_string_to_numeric` returns deterministic syntax error (`r(198)`).
+
 ### Explicit unsupported behavior (current)
 
 - `dtparquet_test5.do` intentionally skips legacy pyarrow-fixture-dependent
   cases (6, 7, 8, 9a, 9b, 10) and strL stress case 5b by test design.
+- `compress_string_to_numeric` is intentionally unsupported in dtparquet
+  command syntax and is guarded by deterministic regression assertion (`r(198)`).
 
 ### Immediate next tasks
 
@@ -252,8 +268,8 @@ Execute these tasks in one cohesive patch set.
 2) Add deterministic coverage for save compression option parity (`compress`)
    including accepted values and default behavior.
 
-3) Keep `compress_string_to_numeric` explicitly deferred unless plugin contract
-   is finalized; if touched, add explicit tested behavior.
+3) Keep `compress_string_to_numeric` intentionally unsupported unless the
+   plugin/runtime contract is explicitly redesigned and approved.
 
 Constraints for this agent:
 

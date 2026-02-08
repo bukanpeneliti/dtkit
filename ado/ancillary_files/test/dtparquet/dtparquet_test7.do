@@ -197,6 +197,11 @@ count
 assert r(N) > 0
 display as result "Test 9b PASSED: compress() accepted values/defaults are deterministic"
 
+* Test 9c: compress_string_to_numeric remains unsupported
+capture dtparquet save "`compress_bad'", replace compress_string_to_numeric
+assert _rc == 198
+display as result "Test 9c PASSED: compress_string_to_numeric is deterministically unsupported"
+
 * Test 10: Metadata key scaffold is embedded
 plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
 assert "`has_metadata_key'" == "1"
