@@ -18,7 +18,7 @@ name = "dtparquet"
 crate-type = ["cdylib"]
 
 [dependencies]
-polars = { version = "0.49.1", features=["lazy",
+polars = { version = "0.52.0", features=["lazy",
     "parquet",
     "dtype-categorical",
     "dtype-i8",
@@ -26,7 +26,7 @@ polars = { version = "0.49.1", features=["lazy",
     "dtype-u8",
     "dtype-u16",
 ] }
-polars-sql = "0.49.1"
+polars-sql = "0.52.0"
 
 stata-sys = { path = "./crates/stata-sys" }
 rayon = "1.8"

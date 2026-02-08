@@ -6,6 +6,17 @@
 
 ## Current State (as of commit `51f8447`)
 
+- Rust Polars stack is upgraded to `0.52.0` (`polars`, `polars-sql`, and aligned
+  split crates via lockfile).
+- Upgrade rationale: keep current dtparquet behavior contracts while moving to the
+  latest Polars API/runtime.
+- Polars `0.52.0` compatibility edits were localized to path-typed scan/write
+  callsites:
+  - `LazyFrame::scan_parquet` now receives `PlPath::new(...)`.
+  - `write_partitioned_dataset` now receives `PlPathRef::Local(...)`.
+- No user-visible syntax or semantics were changed in ado/plugin contracts during
+  this upgrade.
+
 - `dtparquet use` is plugin-first and stable through batch regression.
 - Ado pre-read macro contract is wired and consumed by Rust read path.
 - `dtparquet save` is now plugin-first end-to-end (no Python save bridge).
@@ -74,10 +85,22 @@
 
 Use the latest pass/fail matrix in this file as source of truth.
 
-Most recent one-by-one batch run (2026-02-08) has:
+Most recent one-by-one batch run (Polars `0.52.0`, 2026-02-08) has:
 
 - pass: `dtparquet_test1.do` to `dtparquet_test7.do`
 - fail: none
+
+Latest run matrix from this cycle only:
+
+| File | Result | Failing cases |
+| :--- | :--- | :--- |
+| `dtparquet_test1.do` | pass | none |
+| `dtparquet_test2.do` | pass | none |
+| `dtparquet_test3.do` | pass | none |
+| `dtparquet_test4.do` | pass | none |
+| `dtparquet_test5.do` | pass | none |
+| `dtparquet_test6.do` | pass | none |
+| `dtparquet_test7.do` | pass | none |
 
 ## Known Gaps (Next Priority)
 
@@ -247,8 +270,8 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
   with value labels via deterministic `encode` mapping.
 - Label-set naming is deterministic per load (`dtpq_cat_1`, `dtpq_cat_2`, ... in
   matched variable order).
-- Code-to-text mapping follows Stata `encode` semantics (sorted text order) and is
-  stable for a fixed set of category strings.
+- Code-to-text mapping follows Stata `encode` semantics
+  (sorted text order) and is stable for a fixed set of category strings.
 - Existing in-parquet metadata restoration behavior remains unchanged and takes
   precedence whenever `dtparquet.dtmeta` is present (`dtmeta_loaded == 1`).
 - No broad silent fallback was introduced: mapping is only applied to detected
@@ -262,32 +285,37 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 
 ### Immediate next tasks
 
-1. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta` key); do not
+1. Rename the Rust plugin workspace directory from `rust/` to `plugin/` with
+   minimal path/config updates, no behavior changes.
+2. Clean temporary/non-relevant generated files across the repo
+   deterministically (not only `*.tmp`), excluding anything under
+   `temp_repos/` and without deleting fixtures or source assets.
+3. Produce an explicit track/commit decision list before release (what should be
+   versioned now vs. kept untracked/machine-local).
+4. Update all dtparquet test do-files so they deploy/copy the local plugin DLL
+   to the relevant personal ado plus path before test execution.
+5. Prepare final pre-release checklist for dtkit with upgraded dtparquet
+   (build, lock-safe DLL promotion, 1..7 batch verification, cleanup, docs).
+6. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta`); do not
    reintroduce sidecar metadata files.
-2. Keep running `dtparquet_test1.do` through `dtparquet_test7.do` one-by-one in
-   batch after each metadata/save-path change.
-3. Keep deterministic test cleanup for generated outputs
-   (`rust_roundtrip.parquet`, `rust_filtered_save.parquet`,
-   `rust_partitioned_out`, and `.tmp` remnants).
-4. Keep compression-level contract deterministic: any explicit plugin
-   compression level is rejected (`r(198)`), while codec selection and default
-   behavior remain unchanged.
-5. Keep `compress_string_to_numeric` intentionally unsupported unless the
+7. Keep compression-level contract deterministic: explicit level rejects with
+   `r(198)` while codec/default selection behavior remains unchanged.
+8. Keep `compress_string_to_numeric` intentionally unsupported unless the
    plugin/runtime contract is explicitly redesigned and approved.
-6. Keep foreign categorical compatibility coverage in
-   `dtparquet_test7.do` (Tests 6b, 6f, 6g, 6h) and extend only with
-   fixture-based cases when adding new foreign producers.
-7. Keep `dtparquet use` loaded-row trimming deterministic when read pushdown
-   yields fewer rows than requested `in` range (`n_loaded_rows` macro contract).
 
 ### Planned implementation sequence (next feature phase)
 
-1. Port Stata-to-SQL expression translator (`sql_from_if.rs`) to convert
-   Stata-style `if` predicates to the Polars-side filter expression contract.
-2. Implement `if` condition pushdown on read path so filtering occurs before
-   full materialization into Stata memory.
-3. Tune parallelization and batching strategy (ByColumn/ByRow and related
-   chunking decisions) after functional stability is locked.
+1. Rename `rust/` to `plugin/` and update all repository references, build
+   paths, and docs in one coherent patch.
+2. Add deterministic global cleanup of temporary/non-relevant files (not only
+   `*.tmp`) and verify no fixtures are removed.
+3. Add/update release notes section listing files to track now for commit and
+   files that remain intentionally untracked.
+4. Update each dtparquet test do-file to deploy local `dtparquet.dll` into the
+   user ado plus plugin location before running assertions.
+5. Run release-prep validation: `cargo build --release`, lock-safe DLL
+   promotion, one-by-one `dtparquet_test1.do` through `dtparquet_test7.do`,
+   then deterministic cleanup and HANDOFF refresh.
 
 ## Important Notes
 
@@ -340,17 +368,22 @@ only when lock contention blocks promotion.
 
 Execute these tasks in one cohesive patch set.
 
-1) Finalize and document deterministic compression-level behavior for
-   `dtparquet save, compress()` (including invalid level handling policy).
+1) Rename `rust/` to `plugin/` and update all hardcoded references (docs,
+   scripts, configs, paths) with no behavior change.
 
-2) Add deterministic regression assertions for the chosen compression-level
-   behavior while preserving current command syntax.
+2) Clean temporary/non-relevant generated files repo-wide deterministically
+   (not only `*.tmp`), excluding `temp_repos/`, and verify fixtures were not
+   touched.
 
-3) Keep `compress_string_to_numeric` intentionally unsupported and preserve
-   deterministic guardrail assertions (`r(198)`).
+3) Provide a clear release-oriented file tracking decision list (track/commit
+   now vs intentionally untracked) and apply only agreed changes.
 
-4) Update `HANDOFF.md` pass/fail matrix and immediate next tasks to match the
-   latest verified logs with no stale statements.
+4) Update all dtparquet test do-files to deploy/copy local `dtparquet.dll` to
+   the user's ado plus location before test execution.
+
+5) Prepare release state for upgraded dtparquet: build release, promote DLL
+   lock-safely, run tests 1..7 in order, confirm pass/fail matrix, clean
+   generated artifacts, and refresh `HANDOFF.md`.
 
 Constraints for this agent:
 

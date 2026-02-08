@@ -210,7 +210,7 @@ fn write_partitioned_dataframe(
 
     write_partitioned_dataset(
         df,
-        out_path,
+        PlPathRef::Local(out_path),
         partition_by.to_vec(),
         &write_options,
         None,

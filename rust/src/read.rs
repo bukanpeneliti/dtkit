@@ -104,7 +104,7 @@ pub fn scan_lazyframe(
             let mut scan_args = ScanArgsParquet::default();
             scan_args.allow_missing_columns = true;
             scan_args.cache = false;
-            LazyFrame::scan_parquet(&normalized_pattern, scan_args)
+            LazyFrame::scan_parquet(PlPath::new(&normalized_pattern), scan_args)
         }
     }
 }
@@ -129,7 +129,7 @@ fn scan_hive_partitioned(dir_path: &str) -> Result<LazyFrame, PolarsError> {
                 let mut scan_args = ScanArgsParquet::default();
                 scan_args.allow_missing_columns = true;
                 scan_args.cache = false;
-                return LazyFrame::scan_parquet(&pattern, scan_args);
+                return LazyFrame::scan_parquet(PlPath::new(&pattern), scan_args);
             }
         }
     }
@@ -168,7 +168,10 @@ fn scan_with_diagonal_relaxed(glob_path: &str) -> Result<LazyFrame, PolarsError>
     scan_args.cache = false;
     let lazy_frames: Result<Vec<LazyFrame>, PolarsError> = file_paths
         .iter()
-        .map(|path| LazyFrame::scan_parquet(path.to_string_lossy().as_ref(), scan_args.clone()))
+        .map(|path| {
+            let path_string = path.to_string_lossy().to_string();
+            LazyFrame::scan_parquet(PlPath::new(&path_string), scan_args.clone())
+        })
         .collect();
 
     concat(
@@ -238,7 +241,7 @@ fn scan_with_filename_extraction(
                 .and_then(|caps| caps.get(1))
                 .map(|m| m.as_str())
                 .unwrap_or("unknown");
-            LazyFrame::scan_parquet(path_str.as_ref(), scan_args.clone())
+            LazyFrame::scan_parquet(PlPath::new(path_str.as_ref()), scan_args.clone())
                 .map(|lf| lf.with_columns([smart_lit(extracted_value).alias(variable_name)]))
         })
         .collect();
