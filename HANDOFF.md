@@ -20,7 +20,7 @@
 - `dtparquet use` is plugin-first and stable through batch regression.
 - Ado pre-read macro contract is wired and consumed by Rust read path.
 - `dtparquet save` is now plugin-first end-to-end (no Python save bridge).
-- Rust save path (`rust/src/write.rs`) now:
+- Rust save path (`plugin/src/write.rs`) now:
   - reads Stata data via plugin API (`read_numeric`, `read_string`, `read_string_strl`)
   - builds Polars columns/DataFrame
   - applies save-time `sql_if` filtering when provided
@@ -44,7 +44,7 @@
   - `ST_retcode` warning handled intentionally
   - unused metadata stub param warning removed
 - Additional patch in this handoff cycle:
-  - read-path batching/parallel internals were tuned in `rust/src/read.rs`:
+  - read-path batching/parallel internals were tuned in `plugin/src/read.rs`:
     - uses `get_thread_count()` instead of hard-coded single-thread batching.
     - eager-path batch count now uses realized sliced row count.
     - lazy-path batching exits early on first empty collected batch.
@@ -283,14 +283,13 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 
 ### Immediate next tasks
 
-1. Rename the Rust plugin workspace directory from `rust/` to `plugin/` with
-   minimal path/config updates, no behavior changes.
+1. [x] Rename the Rust plugin workspace directory from `rust/` to `plugin/`.
 2. Clean temporary/non-relevant generated files across the repo
    deterministically (not only `*.tmp`), excluding anything under
    `temp_repos/` and without deleting fixtures or source assets.
 3. Produce an explicit track/commit decision list before release (what should be
    versioned now vs. kept untracked/machine-local).
-4. Update all dtparquet test do-files so they deploy/copy the local plugin DLL
+4. [x] Update all dtparquet test do-files to deploy/copy local plugin DLL
    to the relevant personal ado plus path before test execution.
 5. Prepare final pre-release checklist for dtkit with upgraded dtparquet
    (build, lock-safe DLL promotion, 1..7 batch verification, cleanup, docs).
@@ -303,13 +302,13 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 
 ### Planned implementation sequence (next feature phase)
 
-1. Rename `rust/` to `plugin/` and update all repository references, build
+1. [x] Rename `rust/` to `plugin/` and update all repository references, build
    paths, and docs in one coherent patch.
 2. Add deterministic global cleanup of temporary/non-relevant files (not only
    `*.tmp`) and verify no fixtures are removed.
 3. Add/update release notes section listing files to track now for commit and
    files that remain intentionally untracked.
-4. Update each dtparquet test do-file to deploy local `dtparquet.dll` into the
+4. [x] Update each dtparquet test do-file to deploy local `dtparquet.dll` into the
    user ado plus plugin location before running assertions.
 5. Run release-prep validation: `cargo build --release`, lock-safe DLL
    promotion, one-by-one `dtparquet_test1.do` through `dtparquet_test7.do`,
@@ -317,9 +316,9 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 
 ## Important Notes
 
-- Build target dir is configured in `rust/.cargo/config.toml` (machine-local, ignored):
-  - `D:/OneDrive/tmp/rust/dtparquet-target`
-- `rust/target/` is ignored.
+- Build target dir is configured in `plugin/.cargo/config.toml` (machine-local, ignored):
+  - `D:/OneDrive/tmp/plugin/dtparquet-target`
+- `plugin/target/` is ignored.
 - Large/untracked repo content still exists (fixtures, dll binaries, rust crate
   files, etc.).
 - Keep edits minimal and scoped; do not normalize unrelated untracked files.
@@ -345,10 +344,10 @@ only when lock contention blocks promotion.
 ## Files To Read First
 
 1. `HANDOFF.md`
-2. `rust/src/lib.rs`
-3. `rust/src/read.rs`
-4. `rust/src/write.rs`
-5. `rust/src/metadata.rs`
+2. `plugin/src/lib.rs`
+3. `plugin/src/read.rs`
+4. `plugin/src/write.rs`
+5. `plugin/src/metadata.rs`
 6. `ado/dtparquet.ado`
 7. `ado/ancillary_files/test/dtparquet/dtparquet_test7.do`
 8. reference: `temp_repos/stata_parquet_io-main/src/write.rs`
@@ -366,7 +365,7 @@ only when lock contention blocks promotion.
 
 Execute these tasks in one cohesive patch set.
 
-1) Rename `rust/` to `plugin/` and update all hardcoded references (docs,
+1) Rename `plugin/` to `plugin/` and update all hardcoded references (docs,
    scripts, configs, paths) with no behavior change.
 
 2) Clean temporary/non-relevant generated files repo-wide deterministically

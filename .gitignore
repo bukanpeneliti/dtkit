@@ -40,6 +40,6 @@ cleanup_test_logs.do
 
 temp_repos/
 
-# Rust local artifacts/config
-rust/target/
-rust/.cargo/config.toml
+# Plugin local artifacts/config
+plugin/target/
+plugin/.cargo/config.toml

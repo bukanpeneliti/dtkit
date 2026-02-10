@@ -1,4 +1,4 @@
-* Test script for dtparquet Rust plugin
+* Test script for dtparquet plugin
 
 version 16
 clear frames
