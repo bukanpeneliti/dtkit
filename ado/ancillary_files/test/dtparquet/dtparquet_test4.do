@@ -11,10 +11,17 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
 
-// Load programs from ado directory to PLUS for testing
+// Load programs from ado directory
 discard
-local ado_plus = c(sysdir_plus)
-copy "ado/dtparquet.ado" "`ado_plus'd/dtparquet.ado", replace
+adopath ++ "D:/OneDrive/MyWork/00personal/stata/dtkit/ado"
+
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+if _rc != 0 {
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+}
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
 
 // Initialize test tracking
 local passed_tests ""

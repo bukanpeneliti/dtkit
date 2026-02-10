@@ -13,6 +13,14 @@ log using ado/ancillary_files/test/log/dtparquet_test2.log, replace
 discard
 adopath ++ "D:/OneDrive/MyWork/00personal/stata/dtkit/ado"
 
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+if _rc != 0 {
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+}
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
+
 // Initialize test tracking
 local passed_tests ""
 local failed_tests ""

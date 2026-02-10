@@ -85,12 +85,12 @@
 
 Use the latest pass/fail matrix in this file as source of truth.
 
-Most recent one-by-one batch run (Polars `0.52.0`, 2026-02-08) has:
+Most recent one-by-one batch run (Polars `0.52.0`, 2026-02-10) has:
 
 - pass: `dtparquet_test1.do` to `dtparquet_test7.do`
 - fail: none
 
-Latest run matrix from this cycle only:
+Latest run matrix from this cycle only (2026-02-10):
 
 | File | Result | Failing cases |
 | :--- | :--- | :--- |
@@ -112,10 +112,8 @@ Latest run matrix from this cycle only:
   - metadata key regression uses plugin call `has_metadata_key`.
 - Legacy Python-based tests/scripts still exist in `ado/ancillary_files/test/dtparquet`
   and can be cleaned separately if no longer needed.
-- Rust parity still deferred:
-  - `compress` / `compress_string_to_numeric` parity behavior on save.
-  - full metadata embedding/restoration parity (`_dtvars`, `_dtlabel`,
-    `_dtnotes`, `_dtinfo`, value-label fidelity).
+- Full metadata embedding/restoration (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity) is implemented for single-file saves.
+  - *Note:* Metadata embedding for `partition_by` datasets is still pending.
 - Save path is currently full in-memory DataFrame materialization (not chunked
   streaming write).
 
@@ -126,7 +124,7 @@ Latest run matrix from this cycle only:
 | :--- | :--- | :--- |
 | `compress` save option parity | implemented | Keep deterministic checks for accepted values/defaults and reject explicit compression levels with `r(198)`. |
 | `compress_string_to_numeric` parity | defer | Keep in backlog until plugin contract is finalized. |
-| Full `_dt*` metadata parity | implement now | Prioritize labels/notes/dataset label roundtrip assertions. |
+| Full `_dt*` metadata parity | implemented (single-file) | Complete `partition_by` metadata embedding. |
 <!-- markdownlint-enable MD013 -->
 
 ### Refactored runtime limitations observed in legacy suite
@@ -137,7 +135,7 @@ Latest run matrix from this cycle only:
   Test 5b (strL signature stress case) and legacy pyarrow-fixture-dependent
   tests (6, 7, 8, 9a, 9b, 10).
 
-### Latest batch pass/fail matrix (2026-02-08)
+### Latest batch pass/fail matrix (2026-02-10)
 
 Executed one-by-one in batch mode:
 

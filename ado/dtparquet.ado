@@ -373,10 +373,6 @@ program dtparquet_use
         quietly keep in 1/`keep_to'
     }
 
-    if "`if_exp'" != "" {
-        quietly keep `if_exp'
-    }
-
     if `is_nolabel' == 0 {
         if "`dtmeta_loaded'" == "1" {
             local apply_labels = (`"`dtmeta_dta_label'"' != "")
