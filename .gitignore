@@ -42,4 +42,5 @@ temp_repos/
 
 # Plugin local artifacts/config
 plugin/target/
+plugin/dtpq/target/
 plugin/.cargo/config.toml
