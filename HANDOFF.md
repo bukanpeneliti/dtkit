@@ -131,6 +131,8 @@ Latest run matrix from this cycle only (2026-02-10):
 
 - All previously recorded failing capability gaps in `dtparquet_test1.do` to
   `dtparquet_test7.do` are now closed on this branch.
+- [x] Transparent attribution and licensing applied in `LICENSE` and `ado/dtparquet.ado` 
+  acknowledging the original work by Jon Rothbaum (`pq` / `stata_parquet_io`).
 - `dtparquet_test5.do` includes intentional skips by test design:
   Test 5b (strL signature stress case) and legacy pyarrow-fixture-dependent
   tests (6, 7, 8, 9a, 9b, 10).
