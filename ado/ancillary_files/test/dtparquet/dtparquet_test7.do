@@ -466,6 +466,36 @@ assert `d_note_count_nolabel' == 0
 assert `z_note_count_nolabel' == 0
 display as result "Test 13 PASSED: metadata behavior is deterministic with and without nolabel"
 
+* Test 14: partitioned metadata embedding
+local partition_meta_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/partition_meta"
+capture rmdir "`partition_meta_dir'", all
+
+clear
+set obs 10
+gen byte group = (_n > 5)
+gen byte z = _n
+label define zlbl 1 "one" 2 "two" 3 "three", replace
+label values z zlbl
+label variable z "z label"
+label data "partitioned meta test"
+
+dtparquet save "`partition_meta_dir'", partition_by(group) replace
+
+* Check metadata in one of the leaf files
+local leaf_file "`partition_meta_dir'/group=0"
+local leaf_files : dir "`leaf_file'" files "*.parquet"
+local first_leaf : word 1 of `leaf_files'
+local leaf_path "`leaf_file'/`first_leaf'"
+
+plugin call dtparquet_plugin, "load_meta" "`leaf_path'"
+assert "`dtmeta_loaded'" == "1"
+assert "`dtmeta_dta_vars'" == "2" 
+dtparquet use using "`leaf_path'", clear
+local z_var_label : variable label z
+assert "`z_var_label'" == "z label"
+display as result "Test 14 PASSED: partitioned metadata embedding works"
+capture rmdir "`partition_meta_dir'", all
+
 capture erase "`meta_parquet'"
 capture erase "`roundtrip_file'"
 capture erase "`filtered_file'"

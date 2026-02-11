@@ -123,6 +123,7 @@ pub fn write_from_stata(
             compression_level,
             &partition_cols,
             overwrite_partition,
+            &dtmeta_json,
         )?;
     }
 
@@ -188,6 +189,7 @@ fn write_partitioned_dataframe(
     compression_level: Option<usize>,
     partition_by: &[PlSmallStr],
     overwrite_partition: bool,
+    dtmeta_json: &str,
 ) -> Result<(), Box<dyn Error>> {
     let out_path = Path::new(path);
 
@@ -207,6 +209,9 @@ fn write_partitioned_dataframe(
 
     let mut write_options = ParquetWriteOptions::default();
     write_options.compression = parquet_compression(compression, compression_level)?;
+    let key_value_metadata =
+        KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
+    write_options.key_value_metadata = Some(key_value_metadata);
 
     write_partitioned_dataset(
         df,

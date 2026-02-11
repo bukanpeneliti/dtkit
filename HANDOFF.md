@@ -112,8 +112,7 @@ Latest run matrix from this cycle only (2026-02-10):
   - metadata key regression uses plugin call `has_metadata_key`.
 - Legacy Python-based tests/scripts still exist in `ado/ancillary_files/test/dtparquet`
   and can be cleaned separately if no longer needed.
-- Full metadata embedding/restoration (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity) is implemented for single-file saves.
-  - *Note:* Metadata embedding for `partition_by` datasets is still pending.
+- Full metadata embedding/restoration (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity) is implemented for both single-file and `partition_by` saves.
 - Save path is currently full in-memory DataFrame materialization (not chunked
   streaming write).
 
@@ -124,7 +123,7 @@ Latest run matrix from this cycle only (2026-02-10):
 | :--- | :--- | :--- |
 | `compress` save option parity | implemented | Keep deterministic checks for accepted values/defaults and reject explicit compression levels with `r(198)`. |
 | `compress_string_to_numeric` parity | defer | Keep in backlog until plugin contract is finalized. |
-| Full `_dt*` metadata parity | implemented (single-file) | Complete `partition_by` metadata embedding. |
+| Full `_dt*` metadata parity | implemented | Complete. Metadata is embedded in both single-file and partitioned outputs. |
 <!-- markdownlint-enable MD013 -->
 
 ### Refactored runtime limitations observed in legacy suite
@@ -291,7 +290,8 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
    `temp_repos/` and without deleting fixtures or source assets.
 3. Produce an explicit track/commit decision list before release (what should be
    versioned now vs. kept untracked/machine-local).
-4. [x] Update all dtparquet test do-files to deploy/copy local plugin DLL
+- [x] Implement dtparquet.dtmeta embedding for partition_by write paths.
+- [x] Update all dtparquet test do-files to deploy/copy local plugin DLL
    to the relevant personal ado plus path before test execution.
 5. Prepare final pre-release checklist for dtkit with upgraded dtparquet
    (build, lock-safe DLL promotion, 1..7 batch verification, cleanup, docs).
