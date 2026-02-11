@@ -2,21 +2,126 @@ use polars::prelude::*;
 use polars_sql::SQLContext;
 use std::collections::HashMap;
 use std::error::Error;
-use std::fs::{create_dir_all, File};
+use std::fs::create_dir_all;
 use std::io::ErrorKind;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::sql_from_if::stata_to_sql;
 use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
 use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
 
-#[derive(Clone)]
-struct StataColumnInfo {
-    name: String,
-    dtype: String,
-    format: String,
-    str_length: usize,
+#[derive(Clone, Debug)]
+pub struct StataColumnInfo {
+    pub name: String,
+    pub dtype: String,
+    pub format: String,
+    pub str_length: usize,
+}
+
+pub struct StataDataScan {
+    column_info: Vec<StataColumnInfo>,
+    start_row: usize,
+    n_rows: usize,
+    batch_size: usize,
+    current_offset: AtomicUsize,
+    schema: Arc<Schema>,
+    stata_api_lock: Mutex<()>,
+}
+
+impl StataDataScan {
+    pub fn new(
+        column_info: Vec<StataColumnInfo>,
+        start_row: usize,
+        n_rows: usize,
+        batch_size: usize,
+    ) -> Self {
+        let mut fields = Vec::with_capacity(column_info.len());
+        for info in &column_info {
+            let dtype = match info.dtype.as_str() {
+                "byte" => DataType::Int8,
+                "int" => DataType::Int16,
+                "long" => DataType::Int32,
+                "float" => DataType::Float32,
+                "double" => DataType::Float64,
+                _ if info.dtype == "strl" || info.dtype.starts_with("str") => DataType::String,
+                _ => DataType::Float64,
+            };
+            let dtype = if info.format.starts_with("%td") {
+                DataType::Date
+            } else if info.format.starts_with("%tc") {
+                DataType::Datetime(TimeUnit::Milliseconds, None)
+            } else {
+                dtype
+            };
+            fields.push(Field::new(PlSmallStr::from(&info.name), dtype));
+        }
+
+        StataDataScan {
+            column_info,
+            start_row,
+            n_rows,
+            batch_size,
+            current_offset: AtomicUsize::new(0),
+            schema: Arc::new(Schema::from_iter(fields)),
+            stata_api_lock: Mutex::new(()),
+        }
+    }
+}
+
+impl AnonymousScan for StataDataScan {
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
+    fn schema(&self, _infer_schema_length: Option<usize>) -> PolarsResult<Arc<Schema>> {
+        Ok(self.schema.clone())
+    }
+
+    fn scan(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<DataFrame> {
+        let offset = self
+            .current_offset
+            .fetch_add(self.n_rows, Ordering::Relaxed);
+        if offset >= self.n_rows {
+            return Ok(DataFrame::empty_with_schema(&self.schema));
+        }
+        let read_count = std::cmp::min(self.n_rows - offset, self.n_rows);
+
+        let _lock = self.stata_api_lock.lock().unwrap();
+        let df = self.read_batch(offset, read_count)?;
+        Ok(df)
+    }
+
+    fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
+        let offset = self
+            .current_offset
+            .fetch_add(self.batch_size, Ordering::Relaxed);
+        if offset >= self.n_rows {
+            return Ok(None);
+        }
+        let read_count = std::cmp::min(self.batch_size, self.n_rows - offset);
+
+        let _lock = self.stata_api_lock.lock().unwrap();
+        let df = self.read_batch(offset, read_count)?;
+        Ok(Some(df))
+    }
+}
+
+impl StataDataScan {
+    fn read_batch(&self, batch_offset: usize, batch_rows: usize) -> PolarsResult<DataFrame> {
+        let mut columns = Vec::with_capacity(self.column_info.len());
+        for (idx, info) in self.column_info.iter().enumerate() {
+            columns.push(series_from_stata_column(
+                idx + 1,
+                info,
+                self.start_row + batch_offset,
+                batch_rows,
+            )?);
+        }
+        Ok(DataFrame::from_iter(columns))
+    }
 }
 
 pub fn write_from_stata(
@@ -33,6 +138,7 @@ pub fn write_from_stata(
     overwrite_partition: bool,
     _compress: bool,
     _compress_string: bool,
+    batch_size: usize,
 ) -> Result<i32, Box<dyn Error>> {
     let selected_vars_owned;
     let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
@@ -78,25 +184,20 @@ pub fn write_from_stata(
         n_rows.min(rows_available)
     };
 
-    let mut columns = Vec::with_capacity(selected_infos.len());
-    for (idx, info) in selected_infos.iter().enumerate() {
-        columns.push(series_from_stata_column(
-            idx + 1,
-            info,
-            start_row,
-            rows_to_read,
-        )?);
-    }
+    let final_batch_size = if batch_size == 0 {
+        determine_optimal_batch_size(&selected_infos)
+    } else {
+        batch_size
+    };
 
-    let mut df = DataFrame::from_iter(columns);
+    let scan = StataDataScan::new(selected_infos, start_row, rows_to_read, final_batch_size);
+    let mut lf = LazyFrame::anonymous_scan(Arc::new(scan), ScanArgsAnonymous::default())?;
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
-        ctx.register("df", df.lazy());
+        ctx.register("df", lf);
         let translated = stata_to_sql(sql);
-        df = ctx
-            .execute(&format!("select * from df where {}", translated))?
-            .collect()?;
+        lf = ctx.execute(&format!("select * from df where {}", translated))?;
     }
 
     let partition_cols: Vec<PlSmallStr> = partition_by
@@ -109,13 +210,14 @@ pub fn write_from_stata(
     if partition_cols.is_empty() {
         write_single_dataframe(
             path,
-            &mut df,
+            lf,
             compression,
             compression_level,
             overwrite_partition,
             &dtmeta_json,
         )?;
     } else {
+        let mut df = lf.collect()?;
         write_partitioned_dataframe(
             path,
             &mut df,
@@ -132,7 +234,7 @@ pub fn write_from_stata(
 
 fn write_single_dataframe(
     path: &str,
-    df: &mut DataFrame,
+    lf: LazyFrame,
     compression: &str,
     compression_level: Option<usize>,
     overwrite_partition: bool,
@@ -159,15 +261,16 @@ fn write_single_dataframe(
     }
 
     let tmp_path = format!("{}.tmp", path);
-    let mut file = File::create(&tmp_path)?;
-
     let key_value_metadata =
         KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
 
-    let writer = ParquetWriter::new(&mut file)
-        .with_compression(parquet_compression(compression, compression_level)?)
-        .with_key_value_metadata(Some(key_value_metadata));
-    writer.finish(df)?;
+    let mut write_options = ParquetWriteOptions::default();
+    write_options.compression = parquet_compression(compression, compression_level)?;
+    write_options.key_value_metadata = Some(key_value_metadata);
+
+    let sink_target = SinkTarget::Path(PlPath::new(&tmp_path));
+    lf.sink_parquet(sink_target, write_options, None, SinkOptions::default())?
+        .collect()?;
 
     match std::fs::rename(&tmp_path, path) {
         Ok(()) => {}
@@ -223,6 +326,36 @@ fn write_partitioned_dataframe(
     )?;
 
     Ok(())
+}
+
+fn determine_optimal_batch_size(infos: &[StataColumnInfo]) -> usize {
+    // Target ~128 MB per batch for a balance between speed and memory overhead
+    const TARGET_BATCH_BYTES: usize = 128 * 1024 * 1024;
+    const MIN_BATCH_SIZE: usize = 5_000;
+    const MAX_BATCH_SIZE: usize = 500_000;
+
+    let row_width: usize = infos
+        .iter()
+        .map(|info| match info.dtype.as_str() {
+            "byte" => 1,
+            "int" => 2,
+            "long" | "float" => 4,
+            "double" => 8,
+            "strl" => 128, // Conservatively estimate average strL size
+            _ if info.dtype.starts_with("str") => info.str_length + 1,
+            _ => 8,
+        })
+        .sum();
+
+    if row_width == 0 {
+        return 100_000;
+    }
+
+    let batch_size = TARGET_BATCH_BYTES / row_width;
+    let clamped = batch_size.clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE);
+
+    // Round to nearest 5,000 for cleaner boundaries
+    (clamped / 5000) * 5000
 }
 
 fn parquet_compression(

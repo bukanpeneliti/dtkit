@@ -59,7 +59,7 @@ program dtparquet_plugin, plugin using("ado/ancillary_files/dtparquet.dll")
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 50000) COMPress(string) PARTITION_by(string)]
+    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTITION_by(string)]
     local is_nolabel = ("`nolabel'" != "")
     local compression = lower(trim("`compress'"))
     if "`compression'" == "" local compression zstd
@@ -169,7 +169,7 @@ program dtparquet_save
         }
     }
 
-    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0"
+    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
 
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {

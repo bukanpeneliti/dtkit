@@ -20,16 +20,14 @@
 - `dtparquet use` is plugin-first and stable through batch regression.
 - Ado pre-read macro contract is wired and consumed by Rust read path.
 - `dtparquet save` is now plugin-first end-to-end (no Python save bridge).
-- Rust save path (`plugin/src/write.rs`) now:
-  - reads Stata data via plugin API (`read_numeric`, `read_string`, `read_string_strl`)
-  - builds Polars columns/DataFrame
-  - applies save-time `sql_if` filtering when provided
-  - supports `partition_by` write path
-  - enforces safe overwrite behavior for single-file and partitioned outputs
-  - writes parquet with compression mapping (`lz4`, `uncompressed`, `snappy`,
-    `gzip`, `lzo`, `brotli`, `zstd`)
-  - embeds initial parquet metadata scaffold key `dtparquet.dtmeta`
-  - writes atomically via `*.tmp` then rename
+- Rust save path (`plugin/src/write.rs`) now implements a memory-safe streaming strategy:
+  - Uses `AnonymousScan` to read Stata data in batches (default 100,000 rows).
+  - Uses `LazyFrame::sink_parquet` to stream data to single Parquet files without full in-memory materialization.
+  - Implements thread-safety via `Mutex` to ensure sequential access to Stata's SFI API during Polars query execution.
+  - Partitioned save currently collects into memory before writing (partitioned streaming sink is reserved for future optimization).
+  - Preserves metadata embedding (`dtparquet.dtmeta`) in all write paths.
+  - Supports `sql_if` pushdown at the `LazyFrame` level.
+  - Writes atomically via `*.tmp` then rename.
 - Ado save path (`ado/dtparquet.ado`) now prepares macro contract for Rust save:
   - `varlist`, `var_count`
   - `name_*`, `dtype_*`, `format_*`, `str_length_*`
@@ -85,12 +83,12 @@
 
 Use the latest pass/fail matrix in this file as source of truth.
 
-Most recent one-by-one batch run (Polars `0.52.0`, 2026-02-10) has:
+Most recent one-by-one batch run (Polars `0.52.0`, 2026-02-11) has:
 
 - pass: `dtparquet_test1.do` to `dtparquet_test7.do`
 - fail: none
 
-Latest run matrix from this cycle only (2026-02-10):
+Latest run matrix from this cycle only (2026-02-11):
 
 | File | Result | Failing cases |
 | :--- | :--- | :--- |
@@ -110,11 +108,14 @@ Latest run matrix from this cycle only (2026-02-10):
   - `_check_python` is a no-op for the active runtime path.
   - `_cleanup_orphaned` is Stata-frame cleanup only.
   - metadata key regression uses plugin call `has_metadata_key`.
-- Legacy Python-based tests/scripts still exist in `ado/ancillary_files/test/dtparquet`
-  and can be cleaned separately if no longer needed.
+- Legacy Python test scripts under `ado/ancillary_files/test/dtparquet` are no longer present.
+  Remaining references are documentation/comments for intentionally skipped
+  pyarrow-fixture cases.
 - Full metadata embedding/restoration (`_dtvars`, `_dtlabel`, `_dtnotes`, `_dtinfo`, value-label fidelity) is implemented for both single-file and `partition_by` saves.
-- Save path is currently full in-memory DataFrame materialization (not chunked
-  streaming write).
+- Save path is now memory-safe streaming for single-file outputs. Partitioned save still uses full materialization.
+- Foreign pyarrow fixture behaviors are now covered in active tests:
+  - `dtparquet_test5.do` now includes deterministic checks for foreign categorical fixtures (Tests 6 and 7).
+  - `dtparquet_test5.do` strL stress signature case `5b` is now actively validated and stable.
 
 ### Parity triage (next actions)
 
@@ -285,41 +286,53 @@ Result: all seven test files pass; `dtparquet_test7.do` now asserts
 ### Immediate next tasks
 
 1. [x] Rename the Rust plugin workspace directory from `rust/` to `plugin/`.
-2. Clean temporary/non-relevant generated files across the repo
+2. [x] Clean temporary/non-relevant generated files across the repo
    deterministically (not only `*.tmp`), excluding anything under
    `temp_repos/` and without deleting fixtures or source assets.
 3. Produce an explicit track/commit decision list before release (what should be
    versioned now vs. kept untracked/machine-local).
-- [x] Implement dtparquet.dtmeta embedding for partition_by write paths.
-- [x] Update all dtparquet test do-files to deploy/copy local plugin DLL
+4. Design and implement reliable release automation for `net install` publish:
+   build platform plugin binaries, run batch validation, stage installable
+   package files, and publish to the install endpoint.
+5. [x] Implement dtparquet.dtmeta embedding for partition_by write paths.
+6. [x] Update all dtparquet test do-files to deploy/copy local plugin DLL
    to the relevant personal ado plus path before test execution.
-5. Prepare final pre-release checklist for dtkit with upgraded dtparquet
+7. Prepare final pre-release checklist for dtkit with upgraded dtparquet
    (build, lock-safe DLL promotion, 1..7 batch verification, cleanup, docs).
-6. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta`); do not
+8. Keep metadata restoration in-parquet-only (`dtparquet.dtmeta`); do not
    reintroduce sidecar metadata files.
-7. Keep compression-level contract deterministic: explicit level rejects with
+9. Keep compression-level contract deterministic: explicit level rejects with
    `r(198)` while codec/default selection behavior remains unchanged.
-8. Keep `compress_string_to_numeric` intentionally unsupported unless the
+10. Keep `compress_string_to_numeric` intentionally unsupported unless the
    plugin/runtime contract is explicitly redesigned and approved.
+11. Prioritize pq parity coverage gaps next:
+    - [x] close or redesign legacy pyarrow-fixture skips in
+      `dtparquet_test5.do` (`6`, `7`);
+    - [x] revisit strL stress signature skip (`dtparquet_test5.do` `5b`);
+    - [x] evaluate/implement chunked streaming save path to reduce full-memory
+      materialization risk.
+
 
 ### Planned implementation sequence (next feature phase)
 
 1. [x] Rename `rust/` to `plugin/` and update all repository references, build
    paths, and docs in one coherent patch.
-2. Add deterministic global cleanup of temporary/non-relevant files (not only
+2. [x] Add deterministic global cleanup of temporary/non-relevant files (not only
    `*.tmp`) and verify no fixtures are removed.
 3. Add/update release notes section listing files to track now for commit and
    files that remain intentionally untracked.
-4. [x] Update each dtparquet test do-file to deploy local `dtparquet.dll` into the
+4. Design release automation for `net install` publication so install endpoint
+   always contains built plugin binaries and package files.
+5. [x] Update each dtparquet test do-file to deploy local `dtparquet.dll` into the
    user ado plus plugin location before running assertions.
-5. Run release-prep validation: `cargo build --release`, lock-safe DLL
+6. Run release-prep validation: `cargo build --release`, lock-safe DLL
    promotion, one-by-one `dtparquet_test1.do` through `dtparquet_test7.do`,
    then deterministic cleanup and HANDOFF refresh.
 
 ## Important Notes
 
 - Build target dir is configured in `plugin/.cargo/config.toml` (machine-local, ignored):
-  - `D:/OneDrive/tmp/plugin/dtparquet-target`
+  - `D:/OneDrive/tmp/rust/dtparquet-target`
 - `plugin/target/` is ignored.
 - Large/untracked repo content still exists (fixtures, dll binaries, rust crate
   files, etc.).
@@ -450,3 +463,31 @@ Incremental rerun after wiring `if` pushdown and adding Test 5b assertion:
 
 Result: pass. `dtparquet_test7.log` includes `Test 5b PASSED: if qualifier
 filtering is pushed down`.
+
+### Save chunksize benchmark notes (2026-02-11)
+
+Benchmark dofile: `ado/ancillary_files/test/dtparquet/dtparquet_benchmark_chunksize.do`
+
+- Method:
+  - warm-up + 5 timed reps per chunksize;
+  - display-only summary (median/min/max/spread);
+  - large synthetic save workload with mixed numeric + fixed-width string columns.
+- Chunksizes tested: `50000`, `100000`, `200000`, `400000`, `800000`, `0` (auto).
+
+Observed results:
+
+- `N = 2,000,000` rows:
+  - best median: `chunksize(100000)` at `2.598s`;
+  - `chunksize(50000)` median `2.732s`;
+  - `chunksize(0)` median `2.884s` with highest instability (`spread=0.283`).
+- `N = 10,000,000` rows:
+  - best median: `chunksize(50000)` at `17.493s`;
+  - most stable: `chunksize(400000)` (`spread=0.065`) but slightly slower (`18.568s` median);
+  - `chunksize(200000)` showed a severe outlier (`max=74.127s`, `spread=2.260`);
+  - `chunksize(0)` median `18.842s` (acceptable fallback, not fastest).
+
+Decision note:
+
+- Optimal save chunksize is workload-size dependent (no single universal winner from these runs).
+- For very large saves, `chunksize(50000)` is currently the best speed candidate.
+- `chunksize(0)` auto mode remains useful as a fallback but is not benchmark-top on tested profiles.

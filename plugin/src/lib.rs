@@ -121,7 +121,7 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
             }
             "save" => {
                 if subfunction_args.len() < 12 {
-                    display("Error: save requires 12 arguments");
+                    display("Error: save requires at least 12 arguments");
                     return 198;
                 }
 
@@ -141,6 +141,12 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     Some(compression_level_raw as usize)
                 };
 
+                let batch_size = if subfunction_args.len() >= 13 {
+                    subfunction_args[12].parse::<usize>().unwrap_or(0)
+                } else {
+                    0
+                };
+
                 let save_result = write::write_from_stata(
                     subfunction_args[0],
                     subfunction_args[1],
@@ -155,6 +161,7 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                     subfunction_args[9] == "1",
                     subfunction_args[10] == "1",
                     subfunction_args[11] == "1",
+                    batch_size,
                 );
 
                 match save_result {
