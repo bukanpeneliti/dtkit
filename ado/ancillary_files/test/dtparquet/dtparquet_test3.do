@@ -15,7 +15,7 @@ log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 // Install local versions
 run "ado/dtparquet.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
-capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 if _rc != 0 {
     local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
 }
@@ -83,5 +83,6 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     log close
+    capture erase "dtparquet_test3.log"
     exit 0
 }

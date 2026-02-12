@@ -141,4 +141,5 @@ foreach cs of local sizes {
 }
 
 log close
+capture erase "dtparquet_benchmark_chunksize.log"
 exit 0

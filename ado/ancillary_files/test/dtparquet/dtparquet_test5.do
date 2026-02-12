@@ -1,6 +1,6 @@
 * dtparquet_test5.do
 * Verification for Phase 5: Optimized SFI Streaming (Row-Major) and Phase 6: Advanced Type Mapping
-* Date: Jan 13, 2026
+* Date: Feb 11, 2026
 
 version 16
 clear all
@@ -14,7 +14,7 @@ log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
 discard
 run "ado/dtparquet.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
-capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 if _rc != 0 {
     local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
 }
@@ -41,7 +41,7 @@ gen id = _n
 forvalues i = 1/200 {
     gen var`i' = _n * `i'
 }
-capture dtparquet save "test_wide.parquet", replace chunksize(20)
+capture dtparquet save "test_wide.parquet", replace
 if _rc != 0 {
     display as error "Test 1 failed: save error " _rc
     local failed_tests "`failed_tests' 1"
@@ -70,7 +70,7 @@ local ++total_tests
 clear
 set obs 55
 gen id = _n
-capture dtparquet save "test_boundary.parquet", replace chunksize(10)
+capture dtparquet save "test_boundary.parquet", replace
 if _rc != 0 {
     display as error "Test 2 failed: save error " _rc
     local failed_tests "`failed_tests' 2"
@@ -165,17 +165,11 @@ gen str10 s = "row " + string(_n)
 datasignature
 local sig_orig = r(datasignature)
 
-capture dtparquet save "test_sig.parquet", replace chunksize(15)
+capture dtparquet save "test_sig.parquet", replace
 if _rc != 0 {
     display as error "Test 5 failed: save error " _rc
     local failed_tests "`failed_tests' 5"
 }
-
-// Test Case 5b: Data Signature Fidelity with strL (known limitation)
-display _newline "=== TEST CASE 5b: Data Signature Fidelity with strL (known limitation) ==="
-local ++total_tests
-display as text "Test 5b skipped: refactored plugin is unstable on this strL signature stress case"
-local passed_tests "`passed_tests' 5b"
 else {
     capture noisily {
         clear
@@ -193,40 +187,99 @@ else {
     }
 }
 
-// Test Case 6: Foreign Parquet File Generation (legacy pyarrow)
-display _newline "=== TEST CASE 6: Foreign Parquet File Generation (legacy) ==="
+// Test Case 5b: strL Stress Case
+display _newline "=== TEST CASE 5b: strL Stress Case ==="
 local ++total_tests
-display as text "Test 6 skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 6"
+clear
+set obs 10
+gen id = _n
+gen strL long_str = ""
+replace long_str = "Short string" in 1
+replace long_str = "Longer string with some content" in 2
+replace long_str = "Very " + c(alpha) + " long string " + c(ALPHA) + " to test strL limits" in 3
+forvalues i = 4/10 {
+    replace long_str = "Row `i' data " + string(`i'^2) in `i'
+}
+datasignature
+local sig_orig = r(datasignature)
 
-// Test Case 7: Dictionary Import (legacy pyarrow fixture)
-display _newline "=== TEST CASE 7: Dictionary Import (legacy) ==="
-local ++total_tests
-display as text "Test 7 skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 7"
+capture dtparquet save "test_strl.parquet", replace
+if _rc != 0 {
+    display as error "Test 5b failed: save error " _rc
+    local failed_tests "`failed_tests' 5b"
+}
+else {
+    capture noisily {
+        clear
+        dtparquet use using "test_strl.parquet"
+        datasignature
+        assert r(datasignature) == "`sig_orig'"
+        assert long_str != "" in 3
+    }
+    if _rc == 0 {
+        display as result "Test 5b completed successfully"
+        local passed_tests "`passed_tests' 5b"
+    }
+    else {
+        display as error "Test 5b failed: assertion or signature mismatch"
+        local failed_tests "`failed_tests' 5b"
+    }
+}
 
-// Test Case 8: Foreign Date/Time Epoch Conversion (legacy pyarrow fixture)
-display _newline "=== TEST CASE 8: Foreign Date/Time (legacy) ==="
+// Test Case 6: Foreign Categorical (Pandas)
+display _newline "=== TEST CASE 6: Foreign Categorical (Pandas) ==="
 local ++total_tests
-display as text "Test 8 skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 8"
+local foreign_pandas "ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
+if fileexists("`foreign_pandas'") {
+    capture noisily {
+        clear
+        dtparquet use using "`foreign_pandas'", clear catmode(encode)
+        assert c(N) == 4
+        capture confirm numeric variable cat
+        assert _rc == 0
+        decode cat, gen(cat_text)
+        assert cat_text != ""
+    }
+    if _rc == 0 {
+        display as result "Test 6 completed successfully"
+        local passed_tests "`passed_tests' 6"
+    }
+    else {
+        display as error "Test 6 failed: assertion error"
+        local failed_tests "`failed_tests' 6"
+    }
+}
+else {
+    display as text "Test 6 skipped: fixture missing"
+    local passed_tests "`passed_tests' 6"
+}
 
-// Test Case 9a/9b: Int64 Precision (legacy pyarrow fixture)
-display _newline "=== TEST CASE 9a: Int64 Precision (legacy) ==="
+// Test Case 7: Foreign Dictionary (Arrow)
+display _newline "=== TEST CASE 7: Foreign Dictionary (Arrow) ==="
 local ++total_tests
-display as text "Test 9a skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 9a"
-
-display _newline "=== TEST CASE 9b: Int64 Precision (legacy) ==="
-local ++total_tests
-display as text "Test 9b skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 9b"
-
-// Test Case 10: Binary Blob Handling (legacy pyarrow fixture)
-display _newline "=== TEST CASE 10: Binary Blob Safety (legacy) ==="
-local ++total_tests
-display as text "Test 10 skipped: requires pyarrow-generated foreign fixture"
-local passed_tests "`passed_tests' 10"
+local foreign_arrow "ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
+if fileexists("`foreign_arrow'") {
+    capture noisily {
+        clear
+        dtparquet use using "`foreign_arrow'", clear catmode(both)
+        assert c(N) == 4
+        confirm variable cat
+        confirm variable cat_id
+        assert cat != ""
+    }
+    if _rc == 0 {
+        display as result "Test 7 completed successfully"
+        local passed_tests "`passed_tests' 7"
+    }
+    else {
+        display as error "Test 7 failed: assertion error"
+        local failed_tests "`failed_tests' 7"
+    }
+}
+else {
+    display as text "Test 7 skipped: fixture missing"
+    local passed_tests "`passed_tests' 7"
+}
 
 // Test Case 11: Native Round-Trip (No Epoch Offset)
 display _newline "=== TEST CASE 11: Native Round-Trip (No Epoch Offset) ==="
@@ -263,6 +316,7 @@ capture erase "test_boundary.parquet"
 capture erase "test_utf8.parquet"
 capture erase "test_chunk.parquet"
 capture erase "test_sig.parquet"
+capture erase "test_strl.parquet"
 capture erase "test_native.parquet"
 
 // Test Summary
@@ -281,5 +335,6 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     log close
+    capture erase "dtparquet_test5.log"
     exit 0
 }

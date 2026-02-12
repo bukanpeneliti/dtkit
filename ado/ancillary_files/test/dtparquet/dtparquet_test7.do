@@ -7,16 +7,40 @@ capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
+cap program drop _cleanup_dir_shallow
+program _cleanup_dir_shallow
+    args target_dir
+    if "`target_dir'" == "" {
+        exit
+    }
+
+    local files : dir "`target_dir'" files "*"
+    foreach f of local files {
+        capture erase "`target_dir'/`f'"
+    }
+
+    local subdirs : dir "`target_dir'" dirs "*"
+    foreach d of local subdirs {
+        local subfiles : dir "`target_dir'/`d'" files "*"
+        foreach sf of local subfiles {
+            capture erase "`target_dir'/`d'/`sf'"
+        }
+        capture rmdir "`target_dir'/`d'"
+    }
+
+    capture rmdir "`target_dir'"
+end
+
 * Deterministic pre-clean for generated outputs from prior interrupted runs
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
-capture rmdir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out", all
+capture noisily _cleanup_dir_shallow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
-capture noisily shell powershell -NoProfile -Command "Copy-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll' 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll' -Force"
+capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 local promote_rc = _rc
 if _rc != 0 {
     local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
@@ -149,7 +173,7 @@ assert _rc == 198
 display as result "Test 6e PASSED: catmode invalid value is rejected deterministically"
 
 * Test 6f: fixture-backed pandas categorical in catmode(encode)
-local foreign_pandas "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/fixtures/foreign/foreign_cat_pandas.parquet"
+local foreign_pandas "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
 dtparquet use cat using "`foreign_pandas'", clear catmode(encode)
 count
 assert r(N) == 4
@@ -164,7 +188,7 @@ assert r(N) == 0
 display as result "Test 6f PASSED: fixture-backed pandas categorical encode is deterministic"
 
 * Test 6g: fixture-backed dictionary parquet in catmode(raw)
-local foreign_arrow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/fixtures/foreign/foreign_cat_arrow_dict.parquet"
+local foreign_arrow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
 dtparquet use cat using "`foreign_arrow'", clear catmode(raw)
 count
 assert r(N) == 4
@@ -220,7 +244,7 @@ display as result "Test 7 PASSED: save and read-back roundtrip works"
 
 * Test 8: Plugin save with partition_by + overwrite behavior
 local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
-capture rmdir "`partition_dir'", all
+capture noisily _cleanup_dir_shallow "`partition_dir'"
 capture error 0
 
 dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
@@ -468,7 +492,7 @@ display as result "Test 13 PASSED: metadata behavior is deterministic with and w
 
 * Test 14: partitioned metadata embedding
 local partition_meta_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/partition_meta"
-capture rmdir "`partition_meta_dir'", all
+capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
 
 clear
 set obs 10
@@ -494,7 +518,7 @@ dtparquet use using "`leaf_path'", clear
 local z_var_label : variable label z
 assert "`z_var_label'" == "z label"
 display as result "Test 14 PASSED: partitioned metadata embedding works"
-capture rmdir "`partition_meta_dir'", all
+capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
 
 capture erase "`meta_parquet'"
 capture erase "`roundtrip_file'"
@@ -511,18 +535,25 @@ capture erase "`compress_uncompressed'.tmp"
 capture erase "`compress_default'.tmp"
 capture erase "`compress_bad'.tmp"
 capture erase "`compress_level_bad'.tmp"
-capture rmdir "`partition_dir'", all
+capture noisily _cleanup_dir_shallow "`partition_dir'"
 
 capture erase "`source_dta'"
 capture erase "`export_parquet'"
 capture erase "`import_default_dta'"
 capture erase "`import_allstring_dta'"
-capture rmdir "`export_dir'"
+capture noisily _cleanup_dir_shallow "`export_dir'"
 
-* Cleanup parity with CLI artifact cleanup command
-capture noisily shell powershell -NoProfile -Command "Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet' -Force -ErrorAction SilentlyContinue; Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet' -Force -ErrorAction SilentlyContinue; Remove-Item 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out' -Recurse -Force -ErrorAction SilentlyContinue; Get-ChildItem 'D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data' -Filter '*.tmp' -File -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue"
+* Native deterministic cleanup for tmp artifacts
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_bad.parquet.tmp"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet.tmp"
 
 display _newline(2)
 display as result "All tests completed!"
 display as text "The Rust plugin read and save paths are both validated in batch mode."
 log close
+capture erase "dtparquet_test7.log"
