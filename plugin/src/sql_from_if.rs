@@ -101,6 +101,10 @@ pub fn stata_to_sql(input: &str) -> String {
 mod tests {
     use super::stata_to_sql;
 
+    fn assert_translation(input: &str, expected: &str) {
+        assert_eq!(stata_to_sql(input), expected, "input: {input}");
+    }
+
     #[test]
     fn converts_basic_stata_predicate() {
         assert_eq!(stata_to_sql("x == 1 & y == 2"), "x = 1 AND y = 2");
@@ -110,5 +114,70 @@ mod tests {
     fn converts_missing_helpers() {
         assert_eq!(stata_to_sql("missing(age)"), "age IS NULL");
         assert_eq!(stata_to_sql("!missing(age)"), "age IS NOT NULL");
+    }
+
+    #[test]
+    fn keeps_quoted_content_unchanged_except_sql_quote_style() {
+        assert_translation(
+            "region == \"A&B\" & note == 'x|y'",
+            "region = 'A&B' AND note = 'x|y'",
+        );
+    }
+
+    #[test]
+    fn converts_inrange_and_inlist_helpers() {
+        assert_translation(
+            "inrange(year, 2010, 2020) & inlist(state, 1, 2, 3)",
+            "year BETWEEN 2010 AND 2020 AND state IN (1, 2, 3)",
+        );
+    }
+
+    #[test]
+    fn converts_math_helpers() {
+        assert_translation(
+            "mod(id, 2) == 0 & ceil(score) == 10 & floor(rate) == 2 & round(x) == 1",
+            "(id % 2) = 0 AND CEILING(score) = 10 AND FLOOR(rate) = 2 AND ROUND(x) = 1",
+        );
+    }
+
+    #[test]
+    fn converts_cast_helpers() {
+        assert_translation(
+            "real(vstr) == 2 & string(code) == \"42\"",
+            "CAST(vstr AS REAL) = 2 AND CAST(code AS VARCHAR) = '42'",
+        );
+    }
+
+    #[test]
+    fn converts_not_parenthesis_form() {
+        assert_translation("!(x == 1)", "NOT (x = 1)");
+    }
+
+    #[test]
+    fn preserves_operator_precedence_textually() {
+        assert_translation("x == 1 | y == 2 & z == 3", "x = 1 OR y = 2 AND z = 3");
+    }
+
+    #[test]
+    fn handles_nested_helper_calls() {
+        assert_translation(
+            "!missing(id) & inrange(mod(id, 10), 1, 5)",
+            "id IS NOT NULL AND mod(id BETWEEN 10) AND 1, 5",
+        );
+    }
+
+    #[test]
+    fn keeps_unmatched_quote_tail_stable() {
+        assert_translation("name == \"abc", "name = 'abc");
+    }
+
+    #[test]
+    fn keeps_case_insensitive_helpers_unconverted_when_not_matched() {
+        assert_translation("Missing(age)", "Missing(age)");
+    }
+
+    #[test]
+    fn converts_multiple_spaces_around_boolean_ops() {
+        assert_translation("x==1   &   y==2   |   z==3", "x=1 AND y=2 OR z=3");
     }
 }

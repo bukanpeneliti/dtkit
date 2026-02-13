@@ -103,7 +103,7 @@ program dtparquet_save
         local vallabi : value label `vari'
         local str_length 0
 
-        if ((substr("`typei'", 1, 3) == "str") & ("`typei'" != "strl")) {
+        if ((substr("`typei'", 1, 3) == "str") & (lower("`typei'") != "strl")) {
             local str_length = substr("`typei'", 4, .)
             local typei string
         }
@@ -277,8 +277,15 @@ program dtparquet_use
             local mfmt `dtmeta_varfmt_`m''
             local i_original : list posof "`mname'" in vars_in_file
             if (`i_original' > 0 & `"`mtype'"' != "") {
-                if (substr("`mtype'", 1, 3) == "str" | "`mtype'" == "strl") {
-                    local type_`i_original' `mtype'
+                if (substr("`mtype'", 1, 3) == "str" | lower("`mtype'") == "strl") {
+                    local resolved_mtype `mtype'
+                    if (lower("`mtype'") == "strl") {
+                        local observed_len = real("`string_length_`i_original''")
+                        if (`observed_len' <= 2045) {
+                            local resolved_mtype string
+                        }
+                    }
+                    local type_`i_original' `resolved_mtype'
                     if `"`mfmt'"' != "" local format_`i_original' `mfmt'
                 }
             }
@@ -354,7 +361,7 @@ program dtparquet_use
         if (`i_matched' > 0) {
             local i_original : list posof "`vari'" in vars_in_file
             local read_type `load_type_`i_original''
-            if (substr("`read_type'", 1, 3) == "str" & "`read_type'" != "strl") {
+            if (substr("`read_type'", 1, 3) == "str" & lower("`read_type'") != "strl") {
                 local read_type string
             }
             local v_to_read_index_`i_matched' `i'
@@ -383,6 +390,23 @@ program dtparquet_use
     if (`n_loaded_rows' < `row_to_read') {
         local keep_to = `n_obs_already' + `n_loaded_rows'
         quietly keep in 1/`keep_to'
+    }
+
+    if "`dtmeta_loaded'" == "1" {
+        local nvars_meta = real("`dtmeta_var_count'")
+        forvalues i = 1/`nvars_meta' {
+            local vname `dtmeta_varname_`i''
+            local vtype_meta `dtmeta_vartype_`i''
+            if (lower("`vtype_meta'") == "strl") {
+                capture confirm variable `vname'
+                if _rc == 0 {
+                    local loaded_type: type `vname'
+                    if regexm("`loaded_type'", "^str([0-9]+)$") {
+                        capture recast strL `vname'
+                    }
+                }
+            }
+        }
     }
 
     if `is_nolabel' == 0 {
@@ -831,7 +855,7 @@ program dtparquet_gen_or_recast
             }
         }
     }
-    else if ("`type_new'" == "strl") {
+    else if (lower("`type_new'") == "strl") {
         if `b_gen' {
             quietly gen strL `name' = ""
         }

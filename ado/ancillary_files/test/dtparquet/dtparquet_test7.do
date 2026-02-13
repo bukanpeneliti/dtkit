@@ -60,6 +60,26 @@ program dtparquet_plugin, plugin using("`plugin_dll'")
 plugin call dtparquet_plugin, "setup_check"
 display as result "Test 1 PASSED: Plugin loaded successfully"
 
+* Test 1b: Plugin contract failure paths are deterministic
+capture plugin call dtparquet_plugin, "unknown_subfunction"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "describe"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "save"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "read"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "has_metadata_key"
+assert _rc == 198
+
+capture plugin call dtparquet_plugin, "load_meta"
+assert _rc == 198
+display as result "Test 1b PASSED: plugin subcommand error contracts are deterministic"
+
 * Test 2: Describe contract macros from plugin
 plugin call dtparquet_plugin, "describe" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "1" "0" "" "" "0" "0"
 assert real("`n_rows'") > 0
@@ -259,7 +279,7 @@ foreach vari of local varlist {
     local formati: format `vari'
     local str_length 0
 
-    if ((substr("`typei'", 1, 3) == "str") & ("`typei'" != "strl")) {
+    if ((substr("`typei'", 1, 3) == "str") & (lower("`typei'") != "strl")) {
         local str_length = substr("`typei'", 4, .)
         local typei string
     }

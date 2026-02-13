@@ -687,7 +687,8 @@ fn column_info_from_macros(n_vars: usize) -> Vec<ColumnInfo> {
             - 1;
         let name = get_macro(&format!("v_to_read_name_{}", i + 1), false, None);
         let dtype = get_macro(&format!("v_to_read_p_type_{}", i + 1), false, None);
-        let stata_type = get_macro(&format!("v_to_read_type_{}", i + 1), false, None);
+        let stata_type =
+            get_macro(&format!("v_to_read_type_{}", i + 1), false, None).to_lowercase();
         column_infos.push(ColumnInfo {
             index,
             name,

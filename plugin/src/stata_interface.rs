@@ -44,24 +44,24 @@ pub fn read_string(col: usize, row: usize, max_len: usize) -> String {
 }
 
 pub fn read_string_strl(col: usize, row: usize) -> Result<String, ()> {
-    use std::ffi::{c_char, CStr};
+    use std::ffi::c_char;
     unsafe {
         let len = SF_sdatalen(col as i32, row as i32);
         if len < 0 {
             return Err(());
         }
 
-        let mut buffer: Vec<i8> = vec![0; (len as usize) + 1];
+        let len_usize = len as usize;
+        let mut buffer: Vec<u8> = vec![0; len_usize.saturating_add(1)];
         SF_strldata(
             col as i32,
             row as i32,
             buffer.as_mut_ptr() as *mut c_char,
-            len,
+            len + 1,
         );
 
-        Ok(CStr::from_ptr(buffer.as_ptr() as *const c_char)
-            .to_string_lossy()
-            .into_owned())
+        let end = buffer.iter().position(|&b| b == 0).unwrap_or(len_usize);
+        Ok(String::from_utf8_lossy(&buffer[..end]).into_owned())
     }
 }
 
