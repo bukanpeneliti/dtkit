@@ -56,6 +56,8 @@ else {
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
 
+local failed_tests ""
+
 * Test 1: Check plugin loads
 plugin call dtparquet_plugin, "setup_check"
 display as result "Test 1 PASSED: Plugin loaded successfully"
@@ -573,7 +575,19 @@ capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/tes
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet.tmp"
 
 display _newline(2)
-display as result "All tests completed!"
-display as text "The Rust plugin read and save paths are both validated in batch mode."
-log close
-capture erase "dtparquet_test7.log"
+display "=========================================="
+display "Test Suite Summary"
+display "Failed: " wordcount("`failed_tests'")
+display "=========================================="
+
+if wordcount("`failed_tests'") > 0 {
+    display as error "Failed tests: `failed_tests'"
+    log close
+    exit 1
+}
+else {
+    display as result "All tests passed!"
+    log close
+    capture erase "dtparquet_test7.log"
+    exit 0
+}
