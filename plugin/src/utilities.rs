@@ -4,6 +4,7 @@ pub const TIME_MS: i64 = 1_000;
 pub const TIME_US: i64 = 1_000_000;
 pub const TIME_NS: i64 = 1_000_000_000;
 
+use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::env;
 use std::thread;
 
@@ -43,6 +44,33 @@ fn resolve_thread_count_impl() -> usize {
 
 pub fn get_thread_count() -> usize {
     resolve_thread_count_impl()
+}
+
+pub fn get_io_thread_count() -> usize {
+    let cores = get_hardware_threads();
+    cores.clamp(2, 8)
+}
+
+pub fn get_compute_thread_count() -> usize {
+    get_thread_count()
+}
+
+pub fn create_io_thread_pool() -> ThreadPool {
+    let threads = get_io_thread_count();
+    ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("dtparquet-io-{}", i))
+        .build()
+        .unwrap_or_else(|_| ThreadPoolBuilder::new().num_threads(2).build().unwrap())
+}
+
+pub fn create_compute_thread_pool() -> ThreadPool {
+    let threads = get_compute_thread_count();
+    ThreadPoolBuilder::new()
+        .num_threads(threads)
+        .thread_name(|i| format!("dtparquet-cpu-{}", i))
+        .build()
+        .unwrap_or_else(|_| ThreadPoolBuilder::new().num_threads(1).build().unwrap())
 }
 
 #[derive(Copy, Clone, Debug)]

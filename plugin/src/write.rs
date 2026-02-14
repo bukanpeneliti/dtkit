@@ -128,6 +128,36 @@ impl StataRowSource {
     }
 }
 
+fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn Error>> {
+    let total_rows = count_rows();
+    if total_rows == 0 {
+        return Err("No rows in Stata data to export".into());
+    }
+
+    for info in infos {
+        let col_idx = info.name.parse::<usize>().unwrap_or(0);
+        if col_idx == 0 {
+            continue;
+        }
+
+        if info.dtype == "strl" || info.dtype.starts_with("str") {
+            continue;
+        }
+
+        if let Some(val) = pull_numeric_cell(col_idx, 1) {
+            if val.is_nan() && info.dtype != "float" && info.dtype != "double" {
+                return Err(format!(
+                    "Column '{}' has NaN values but Stata type '{}' cannot store them",
+                    info.name, info.dtype
+                )
+                .into());
+            }
+        }
+    }
+
+    Ok(())
+}
+
 pub fn export_parquet(
     path: &str,
     varlist: &str,
@@ -158,6 +188,8 @@ pub fn export_parquet(
     } else {
         return Err("JSON mapping is not implemented for save path".into());
     };
+
+    validate_stata_schema(&all_columns)?;
 
     let info_by_name: HashMap<&str, &ExportField> = all_columns
         .iter()

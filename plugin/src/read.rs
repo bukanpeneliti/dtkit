@@ -2,7 +2,6 @@
 
 use glob::glob;
 use polars::datatypes::{AnyValue, TimeUnit};
-use polars::error::ErrString;
 use polars::prelude::*;
 use polars_sql::SQLContext;
 use rayon::prelude::*;
@@ -18,9 +17,48 @@ use crate::mapping::FieldSpec;
 use crate::sql_from_if::convert_if_sql;
 use crate::stata_interface::{read_macro, replace_number, replace_string, set_macro, ST_retcode};
 use crate::utilities::{
-    determine_parallelization_strategy, get_thread_count, BatchMode, STATA_DATE_ORIGIN,
-    STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
+    create_compute_thread_pool, determine_parallelization_strategy, get_thread_count, BatchMode,
+    STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
 };
+
+#[allow(dead_code)]
+const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
+
+#[allow(dead_code)]
+pub fn validate_parquet_schema(path: &str, expected_columns: &[&str]) -> Result<(), String> {
+    let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let mut reader = ParquetReader::new(file);
+    let schema = reader
+        .schema()
+        .map_err(|e| format!("Failed to read schema: {:?}", e))?;
+
+    let parquet_columns: HashSet<&str> = schema.iter_names().map(|s| s.as_str()).collect();
+
+    let missing: Vec<&str> = expected_columns
+        .iter()
+        .filter(|col| !parquet_columns.contains(*col))
+        .copied()
+        .collect();
+
+    if !missing.is_empty() {
+        return Err(format!("Missing columns in parquet file: {:?}", missing));
+    }
+
+    Ok(())
+}
+
+#[allow(dead_code)]
+fn sample_parquet_schema(path: &str) -> Result<Schema, String> {
+    let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
+    let reader = ParquetReader::new(file);
+
+    let sample_df = reader
+        .with_slice(Some((0, SCHEMA_VALIDATION_SAMPLE_ROWS)))
+        .finish()
+        .map_err(|e| format!("Failed to read sample: {:?}", e))?;
+
+    Ok(sample_df.schema().as_ref().clone())
+}
 
 pub fn verify_parquet_path(path: &str) -> bool {
     let path_obj = Path::new(path);
@@ -323,6 +361,12 @@ pub fn import_parquet(
         && random_share <= 0.0;
 
     if can_use_eager {
+        if !selected_column_list.is_empty() {
+            if let Err(e) = validate_parquet_schema(path, &selected_column_list) {
+                crate::stata_interface::display(&format!("Schema validation warning: {}", e));
+            }
+        }
+
         let file = File::open(path)?;
         let mut df = ParquetReader::new(file)
             .with_slice(Some((offset, n_rows)))
@@ -722,15 +766,7 @@ fn process_batch_with_strategy(
         return process_row_range(batch, start_index, 0, row_count, all_columns, stata_offset);
     }
 
-    let pool = rayon::ThreadPoolBuilder::new()
-        .num_threads(n_threads)
-        .build()
-        .map_err(|e| {
-            PolarsError::ComputeError(ErrString::from(format!(
-                "Failed to build thread pool: {}",
-                e
-            )))
-        })?;
+    let pool = create_compute_thread_pool();
 
     pool.install(|| match strategy {
         BatchMode::ByRow => {
