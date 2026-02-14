@@ -6,19 +6,19 @@ pub use stata_sys::{
 #[allow(non_camel_case_types)]
 pub type ST_retcode = i32;
 
-pub fn get_macro(macro_name: &str, global: bool, buffer_size: Option<usize>) -> String {
+pub fn read_macro(macro_name: &str, global: bool, buffer_size: Option<usize>) -> String {
     stata_sys::get_macro(macro_name, global, buffer_size).unwrap_or_default()
 }
 
-pub fn n_obs() -> i32 {
+pub fn count_rows() -> i32 {
     unsafe { SF_nobs() }
 }
 
-pub fn n_var() -> i32 {
+pub fn count_vars() -> i32 {
     unsafe { SF_nvar() }
 }
 
-pub fn read_numeric(col: usize, row: usize) -> Option<f64> {
+pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
     let mut value: f64 = 0.0;
     unsafe {
         let result = stata_sys::SF_vdata(col as i32, row as i32, &mut value);
@@ -30,7 +30,7 @@ pub fn read_numeric(col: usize, row: usize) -> Option<f64> {
     }
 }
 
-pub fn read_string(col: usize, row: usize, max_len: usize) -> String {
+pub fn pull_string_cell(col: usize, row: usize, max_len: usize) -> String {
     use std::ffi::{c_char, CStr};
     let mut buffer: Vec<i8> = vec![0; max_len + 1];
 
@@ -43,7 +43,7 @@ pub fn read_string(col: usize, row: usize, max_len: usize) -> String {
     }
 }
 
-pub fn read_string_strl(col: usize, row: usize) -> Result<String, ()> {
+pub fn pull_strl_cell(col: usize, row: usize) -> Result<String, ()> {
     use std::ffi::c_char;
     unsafe {
         let len = SF_sdatalen(col as i32, row as i32);

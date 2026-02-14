@@ -9,20 +9,22 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
-use crate::sql_from_if::stata_to_sql;
-use crate::stata_interface::{get_macro, n_obs, read_numeric, read_string, read_string_strl};
-use crate::utilities::{DAY_SHIFT_SAS_STATA, SEC_MILLISECOND, SEC_SHIFT_SAS_STATA};
+use crate::sql_from_if::convert_if_sql;
+use crate::stata_interface::{
+    count_rows, pull_numeric_cell, pull_string_cell, pull_strl_cell, read_macro,
+};
+use crate::utilities::{STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS};
 
 #[derive(Clone, Debug)]
-pub struct StataColumnInfo {
+pub struct ExportField {
     pub name: String,
     pub dtype: String,
     pub format: String,
     pub str_length: usize,
 }
 
-pub struct StataDataScan {
-    column_info: Vec<StataColumnInfo>,
+pub struct StataRowSource {
+    column_info: Vec<ExportField>,
     start_row: usize,
     n_rows: usize,
     batch_size: usize,
@@ -31,9 +33,9 @@ pub struct StataDataScan {
     stata_api_lock: Mutex<()>,
 }
 
-impl StataDataScan {
+impl StataRowSource {
     pub fn new(
-        column_info: Vec<StataColumnInfo>,
+        column_info: Vec<ExportField>,
         start_row: usize,
         n_rows: usize,
         batch_size: usize,
@@ -59,7 +61,7 @@ impl StataDataScan {
             fields.push(Field::new(PlSmallStr::from(&info.name), dtype));
         }
 
-        StataDataScan {
+        StataRowSource {
             column_info,
             start_row,
             n_rows,
@@ -71,7 +73,7 @@ impl StataDataScan {
     }
 }
 
-impl AnonymousScan for StataDataScan {
+impl AnonymousScan for StataRowSource {
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -109,7 +111,7 @@ impl AnonymousScan for StataDataScan {
     }
 }
 
-impl StataDataScan {
+impl StataRowSource {
     fn read_batch(&self, batch_offset: usize, batch_rows: usize) -> PolarsResult<DataFrame> {
         let mut columns = Vec::with_capacity(self.column_info.len());
         for (idx, info) in self.column_info.iter().enumerate() {
@@ -124,14 +126,14 @@ impl StataDataScan {
     }
 }
 
-pub fn write_from_stata(
+pub fn export_parquet(
     path: &str,
     varlist: &str,
     n_rows: usize,
     offset: usize,
     sql_if: Option<&str>,
     mapping: &str,
-    _parallel_strategy: Option<crate::utilities::ParallelizationStrategy>,
+    _parallel_strategy: Option<crate::utilities::BatchMode>,
     partition_by: &str,
     compression: &str,
     compression_level: Option<usize>,
@@ -142,26 +144,26 @@ pub fn write_from_stata(
 ) -> Result<i32, Box<dyn Error>> {
     let selected_vars_owned;
     let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
-        selected_vars_owned = get_macro("varlist", false, Some(10 * 1024 * 1024));
+        selected_vars_owned = read_macro("varlist", false, Some(10 * 1024 * 1024));
         selected_vars_owned.as_str()
     } else {
         varlist
     };
 
     let all_columns = if mapping.is_empty() || mapping == "from_macros" {
-        let var_count = get_macro("var_count", false, None).parse::<usize>()?;
+        let var_count = read_macro("var_count", false, None).parse::<usize>()?;
         column_info_from_macros(var_count)
     } else {
         return Err("JSON mapping is not implemented for save path".into());
     };
 
-    let info_by_name: HashMap<&str, &StataColumnInfo> = all_columns
+    let info_by_name: HashMap<&str, &ExportField> = all_columns
         .iter()
         .map(|info| (info.name.as_str(), info))
         .collect();
 
     let selected_names: Vec<&str> = selected_vars.split_whitespace().collect();
-    let selected_infos: Vec<StataColumnInfo> = if selected_names.is_empty() {
+    let selected_infos: Vec<ExportField> = if selected_names.is_empty() {
         all_columns.clone()
     } else {
         selected_names
@@ -175,7 +177,7 @@ pub fn write_from_stata(
             .collect()
     };
 
-    let total_rows = n_obs() as usize;
+    let total_rows = count_rows() as usize;
     let start_row = offset.min(total_rows);
     let rows_available = total_rows - start_row;
     let rows_to_read = if n_rows == 0 {
@@ -190,13 +192,13 @@ pub fn write_from_stata(
         batch_size
     };
 
-    let scan = StataDataScan::new(selected_infos, start_row, rows_to_read, final_batch_size);
+    let scan = StataRowSource::new(selected_infos, start_row, rows_to_read, final_batch_size);
     let mut lf = LazyFrame::anonymous_scan(Arc::new(scan), ScanArgsAnonymous::default())?;
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
         ctx.register("df", lf);
-        let translated = stata_to_sql(sql);
+        let translated = convert_if_sql(sql);
         lf = ctx.execute(&format!("select * from df where {}", translated))?;
     }
 
@@ -328,7 +330,7 @@ fn write_partitioned_dataframe(
     Ok(())
 }
 
-fn determine_optimal_batch_size(infos: &[StataColumnInfo]) -> usize {
+fn determine_optimal_batch_size(infos: &[ExportField]) -> usize {
     // Target ~128 MB per batch for a balance between speed and memory overhead
     const TARGET_BATCH_BYTES: usize = 128 * 1024 * 1024;
     const MIN_BATCH_SIZE: usize = 5_000;
@@ -377,13 +379,13 @@ fn parquet_compression(
     }
 }
 
-fn column_info_from_macros(n_vars: usize) -> Vec<StataColumnInfo> {
+fn column_info_from_macros(n_vars: usize) -> Vec<ExportField> {
     (1..=n_vars)
-        .map(|i| StataColumnInfo {
-            name: get_macro(&format!("name_{}", i), false, None),
-            dtype: get_macro(&format!("dtype_{}", i), false, None).to_lowercase(),
-            format: get_macro(&format!("format_{}", i), false, None).to_lowercase(),
-            str_length: get_macro(&format!("str_length_{}", i), false, None)
+        .map(|i| ExportField {
+            name: read_macro(&format!("name_{}", i), false, None),
+            dtype: read_macro(&format!("dtype_{}", i), false, None).to_lowercase(),
+            format: read_macro(&format!("format_{}", i), false, None).to_lowercase(),
+            str_length: read_macro(&format!("str_length_{}", i), false, None)
                 .parse::<usize>()
                 .unwrap_or(0),
         })
@@ -392,13 +394,13 @@ fn column_info_from_macros(n_vars: usize) -> Vec<StataColumnInfo> {
 
 fn series_from_stata_column(
     stata_col_index: usize,
-    info: &StataColumnInfo,
+    info: &ExportField,
     offset: usize,
     n_rows: usize,
 ) -> Result<Series, PolarsError> {
     if info.dtype == "strl" {
         let values: Vec<Option<String>> = (0..n_rows)
-            .map(|row_idx| read_string_strl(stata_col_index, offset + row_idx + 1).ok())
+            .map(|row_idx| pull_strl_cell(stata_col_index, offset + row_idx + 1).ok())
             .collect();
         return Ok(Series::new((&info.name).into(), values));
     }
@@ -406,7 +408,7 @@ fn series_from_stata_column(
     if info.dtype.starts_with("str") {
         let width = info.str_length.max(1);
         let values: Vec<String> = (0..n_rows)
-            .map(|row_idx| read_string(stata_col_index, offset + row_idx + 1, width))
+            .map(|row_idx| pull_string_cell(stata_col_index, offset + row_idx + 1, width))
             .collect();
         return Ok(Series::new((&info.name).into(), values));
     }
@@ -414,8 +416,8 @@ fn series_from_stata_column(
     if info.format.starts_with("%td") {
         let values: Vec<Option<i32>> = (0..n_rows)
             .map(|row_idx| {
-                read_numeric(stata_col_index, offset + row_idx + 1)
-                    .map(|v| v as i32 - DAY_SHIFT_SAS_STATA)
+                pull_numeric_cell(stata_col_index, offset + row_idx + 1)
+                    .map(|v| v as i32 - STATA_DATE_ORIGIN)
             })
             .collect();
         return Series::new((&info.name).into(), values).cast(&DataType::Date);
@@ -424,9 +426,8 @@ fn series_from_stata_column(
     if info.format.starts_with("%tc") {
         let values: Vec<Option<i64>> = (0..n_rows)
             .map(|row_idx| {
-                read_numeric(stata_col_index, offset + row_idx + 1).map(|v| {
-                    v as i64 - ((SEC_SHIFT_SAS_STATA as f64) * (SEC_MILLISECOND as f64)) as i64
-                })
+                pull_numeric_cell(stata_col_index, offset + row_idx + 1)
+                    .map(|v| v as i64 - ((STATA_EPOCH_MS as f64) * (TIME_MS as f64)) as i64)
             })
             .collect();
         return Series::new((&info.name).into(), values)
@@ -436,14 +437,16 @@ fn series_from_stata_column(
     match info.dtype.as_str() {
         "byte" => {
             let values: Vec<Option<i8>> = (0..n_rows)
-                .map(|row_idx| read_numeric(stata_col_index, offset + row_idx + 1).map(|v| v as i8))
+                .map(|row_idx| {
+                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i8)
+                })
                 .collect();
             Ok(Series::new((&info.name).into(), values))
         }
         "int" => {
             let values: Vec<Option<i16>> = (0..n_rows)
                 .map(|row_idx| {
-                    read_numeric(stata_col_index, offset + row_idx + 1).map(|v| v as i16)
+                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i16)
                 })
                 .collect();
             Ok(Series::new((&info.name).into(), values))
@@ -451,7 +454,7 @@ fn series_from_stata_column(
         "long" => {
             let values: Vec<Option<i32>> = (0..n_rows)
                 .map(|row_idx| {
-                    read_numeric(stata_col_index, offset + row_idx + 1).map(|v| v as i32)
+                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i32)
                 })
                 .collect();
             Ok(Series::new((&info.name).into(), values))
@@ -459,14 +462,14 @@ fn series_from_stata_column(
         "float" => {
             let values: Vec<Option<f32>> = (0..n_rows)
                 .map(|row_idx| {
-                    read_numeric(stata_col_index, offset + row_idx + 1).map(|v| v as f32)
+                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as f32)
                 })
                 .collect();
             Ok(Series::new((&info.name).into(), values))
         }
         _ => {
             let values: Vec<Option<f64>> = (0..n_rows)
-                .map(|row_idx| read_numeric(stata_col_index, offset + row_idx + 1))
+                .map(|row_idx| pull_numeric_cell(stata_col_index, offset + row_idx + 1))
                 .collect();
             Ok(Series::new((&info.name).into(), values))
         }

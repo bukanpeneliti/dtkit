@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::File;
 use std::io::BufReader;
 
-use crate::stata_interface::{get_macro, set_macro};
+use crate::stata_interface::{read_macro, set_macro};
 
 pub const DTMETA_KEY: &str = "dtparquet.dtmeta";
 
@@ -49,29 +49,29 @@ pub struct VarNoteMeta {
 }
 
 pub fn extract_dtmeta() -> String {
-    let var_count = get_macro("dtmeta_var_count", false, None)
+    let var_count = read_macro("dtmeta_var_count", false, None)
         .parse::<usize>()
         .unwrap_or(0);
     let vars = (1..=var_count)
         .map(|i| VarMeta {
-            name: get_macro(&format!("dtmeta_varname_{}", i), false, None),
-            stata_type: get_macro(&format!("dtmeta_vartype_{}", i), false, None),
-            format: get_macro(&format!("dtmeta_varfmt_{}", i), false, None),
-            var_label: get_macro(&format!("dtmeta_varlab_{}", i), false, Some(65_536)),
-            value_label: get_macro(&format!("dtmeta_vallab_{}", i), false, None),
+            name: read_macro(&format!("dtmeta_varname_{}", i), false, None),
+            stata_type: read_macro(&format!("dtmeta_vartype_{}", i), false, None),
+            format: read_macro(&format!("dtmeta_varfmt_{}", i), false, None),
+            var_label: read_macro(&format!("dtmeta_varlab_{}", i), false, Some(65_536)),
+            value_label: read_macro(&format!("dtmeta_vallab_{}", i), false, None),
         })
         .collect::<Vec<_>>();
 
-    let lbl_count = get_macro("dtmeta_label_count", false, None)
+    let lbl_count = read_macro("dtmeta_label_count", false, None)
         .parse::<usize>()
         .unwrap_or(0);
     let value_labels = (1..=lbl_count)
         .map(|i| ValueLabelMeta {
-            name: get_macro(&format!("dtmeta_label_name_{}", i), false, None),
-            value: get_macro(&format!("dtmeta_label_value_{}", i), false, None)
+            name: read_macro(&format!("dtmeta_label_name_{}", i), false, None),
+            value: read_macro(&format!("dtmeta_label_value_{}", i), false, None)
                 .parse::<i64>()
                 .unwrap_or(0),
-            text: get_macro(&format!("dtmeta_label_text_{}", i), false, Some(65_536)),
+            text: read_macro(&format!("dtmeta_label_text_{}", i), false, Some(65_536)),
         })
         .collect::<Vec<_>>();
 
@@ -80,30 +80,30 @@ pub fn extract_dtmeta() -> String {
         min_reader_version: 1,
         vars,
         value_labels,
-        dta_label: get_macro("dtmeta_dta_label", false, Some(65_536)),
-        dta_obs: get_macro("dtmeta_dta_obs", false, None)
+        dta_label: read_macro("dtmeta_dta_label", false, Some(65_536)),
+        dta_obs: read_macro("dtmeta_dta_obs", false, None)
             .parse::<i64>()
             .unwrap_or(0),
-        dta_vars: get_macro("dtmeta_dta_vars", false, None)
+        dta_vars: read_macro("dtmeta_dta_vars", false, None)
             .parse::<i64>()
             .unwrap_or(0),
-        dta_ts: get_macro("dtmeta_dta_ts", false, Some(65_536)),
+        dta_ts: read_macro("dtmeta_dta_ts", false, Some(65_536)),
         dta_notes: {
-            let count = get_macro("dtmeta_dta_note_count", false, None)
+            let count = read_macro("dtmeta_dta_note_count", false, None)
                 .parse::<usize>()
                 .unwrap_or(0);
             (1..=count)
-                .map(|i| get_macro(&format!("dtmeta_dta_note_{}", i), false, Some(65_536)))
+                .map(|i| read_macro(&format!("dtmeta_dta_note_{}", i), false, Some(65_536)))
                 .collect::<Vec<_>>()
         },
         var_notes: {
-            let count = get_macro("dtmeta_var_note_count", false, None)
+            let count = read_macro("dtmeta_var_note_count", false, None)
                 .parse::<usize>()
                 .unwrap_or(0);
             (1..=count)
                 .map(|i| VarNoteMeta {
-                    varname: get_macro(&format!("dtmeta_var_note_var_{}", i), false, None),
-                    text: get_macro(&format!("dtmeta_var_note_text_{}", i), false, Some(65_536)),
+                    varname: read_macro(&format!("dtmeta_var_note_var_{}", i), false, None),
+                    text: read_macro(&format!("dtmeta_var_note_text_{}", i), false, Some(65_536)),
                 })
                 .collect::<Vec<_>>()
         },

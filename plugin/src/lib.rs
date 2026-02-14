@@ -13,7 +13,7 @@ pub mod utilities;
 pub mod write;
 
 use stata_interface::{display, set_macro, ST_retcode};
-use utilities::ParallelizationStrategy;
+use utilities::BatchMode;
 
 #[no_mangle]
 pub static mut _stata_: *mut stata_sys::ST_plugin = ptr::null_mut();
@@ -79,7 +79,7 @@ pub struct ReadArgs {
     pub max_rows: usize,
     pub sql_if: Option<String>,
     pub sort_by: String,
-    pub parallel_strategy: Option<ParallelizationStrategy>,
+    pub parallel_strategy: Option<BatchMode>,
     pub safe_relaxed: bool,
     pub asterisk_to_variable_name: Option<String>,
     pub order_by: String,
@@ -137,10 +137,10 @@ pub enum CommandArgs {
     LoadMeta(LoadMetaArgs),
 }
 
-fn parse_parallel_strategy(s: &str) -> Option<ParallelizationStrategy> {
+fn parse_parallel_strategy(s: &str) -> Option<BatchMode> {
     match s {
-        "columns" => Some(ParallelizationStrategy::ByColumn),
-        "rows" => Some(ParallelizationStrategy::ByRow),
+        "columns" => Some(BatchMode::ByColumn),
+        "rows" => Some(BatchMode::ByRow),
         _ => None,
     }
 }
@@ -151,7 +151,7 @@ fn parse_read_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     }
 
     let file_path = args[0].to_string();
-    if !read::data_exists(&file_path) {
+    if !read::verify_parquet_path(&file_path) {
         return Err(CommandError::FileNotFound(file_path));
     }
 
@@ -238,7 +238,7 @@ fn parse_describe_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     }
 
     let file_path = args[0].to_string();
-    if !read::data_exists(&file_path) {
+    if !read::verify_parquet_path(&file_path) {
         return Err(CommandError::FileNotFound(file_path));
     }
 
@@ -269,7 +269,7 @@ fn parse_has_metadata_key_args(args: &[&str]) -> Result<CommandArgs, CommandErro
     }
 
     let file_path = args[0].to_string();
-    if !read::data_exists(&file_path) {
+    if !read::verify_parquet_path(&file_path) {
         return Err(CommandError::FileNotFound(file_path));
     }
 
@@ -312,7 +312,7 @@ fn handle_setup_check() -> ST_retcode {
 }
 
 fn handle_read(args: &ReadArgs) -> ST_retcode {
-    let read_result = read::read_to_stata(
+    let read_result = read::import_parquet(
         &args.file_path,
         &args.varlist,
         args.start_row,
@@ -339,7 +339,7 @@ fn handle_read(args: &ReadArgs) -> ST_retcode {
 }
 
 fn handle_save(args: &SaveArgs) -> ST_retcode {
-    let save_result = write::write_from_stata(
+    let save_result = write::export_parquet(
         &args.file_path,
         &args.varlist,
         args.start_row,

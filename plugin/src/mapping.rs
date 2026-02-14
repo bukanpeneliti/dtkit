@@ -2,7 +2,7 @@ use polars::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ColumnInfo {
+pub struct FieldSpec {
     pub index: usize,
     pub name: String,
     pub dtype: String,

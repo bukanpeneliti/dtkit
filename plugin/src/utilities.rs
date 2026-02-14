@@ -1,8 +1,8 @@
-pub const DAY_SHIFT_SAS_STATA: i32 = 3653;
-pub const SEC_SHIFT_SAS_STATA: i64 = 315619200;
-pub const SEC_MILLISECOND: i64 = 1_000;
-pub const SEC_MICROSECOND: i64 = 1_000_000;
-pub const SEC_NANOSECOND: i64 = 1_000_000_000;
+pub const STATA_DATE_ORIGIN: i32 = 3653;
+pub const STATA_EPOCH_MS: i64 = 315619200;
+pub const TIME_MS: i64 = 1_000;
+pub const TIME_US: i64 = 1_000_000;
+pub const TIME_NS: i64 = 1_000_000_000;
 
 use std::env;
 use std::thread;
@@ -46,7 +46,7 @@ pub fn get_thread_count() -> usize {
 }
 
 #[derive(Copy, Clone, Debug)]
-pub enum ParallelizationStrategy {
+pub enum BatchMode {
     ByRow,
     ByColumn,
 }
@@ -55,11 +55,11 @@ fn determine_parallelization_strategy_impl(
     n_columns: usize,
     n_rows: usize,
     available_cores: usize,
-) -> ParallelizationStrategy {
+) -> BatchMode {
     if n_columns > available_cores * 2 && n_rows < 100_000 {
-        ParallelizationStrategy::ByColumn
+        BatchMode::ByColumn
     } else {
-        ParallelizationStrategy::ByRow
+        BatchMode::ByRow
     }
 }
 
@@ -67,7 +67,7 @@ pub fn determine_parallelization_strategy(
     n_columns: usize,
     n_rows: usize,
     available_cores: usize,
-) -> ParallelizationStrategy {
+) -> BatchMode {
     determine_parallelization_strategy_impl(n_columns, n_rows, available_cores)
 }
 

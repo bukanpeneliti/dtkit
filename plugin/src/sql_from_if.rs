@@ -37,14 +37,14 @@ struct CallNode {
     args: Vec<String>,
 }
 
-pub struct StataToSqlRegexConverter;
+pub struct FilterTranslator;
 
-impl StataToSqlRegexConverter {
+impl FilterTranslator {
     pub fn new() -> Self {
         Self
     }
 
-    pub fn convert(&self, input: &str) -> String {
+    pub fn translate(&self, input: &str) -> String {
         let tokens = tokenize_boolean(input);
         let mut parser = BooleanParser::new(tokens);
         let expr = parser.parse();
@@ -689,27 +689,27 @@ fn char_at(input: &str, idx: usize) -> Option<char> {
     input.get(idx..)?.chars().next()
 }
 
-pub fn stata_to_sql(input: &str) -> String {
-    StataToSqlRegexConverter::new().convert(input)
+pub fn convert_if_sql(input: &str) -> String {
+    FilterTranslator::new().translate(input)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::stata_to_sql;
+    use super::convert_if_sql;
 
     fn assert_translation(input: &str, expected: &str) {
-        assert_eq!(stata_to_sql(input), expected, "input: {input}");
+        assert_eq!(convert_if_sql(input), expected, "input: {input}");
     }
 
     #[test]
     fn converts_basic_stata_predicate() {
-        assert_eq!(stata_to_sql("x == 1 & y == 2"), "x = 1 AND y = 2");
+        assert_eq!(convert_if_sql("x == 1 & y == 2"), "x = 1 AND y = 2");
     }
 
     #[test]
     fn converts_missing_helpers() {
-        assert_eq!(stata_to_sql("missing(age)"), "age IS NULL");
-        assert_eq!(stata_to_sql("!missing(age)"), "age IS NOT NULL");
+        assert_eq!(convert_if_sql("missing(age)"), "age IS NULL");
+        assert_eq!(convert_if_sql("!missing(age)"), "age IS NOT NULL");
     }
 
     #[test]

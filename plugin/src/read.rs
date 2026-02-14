@@ -11,15 +11,15 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 
 use crate::downcast::apply_cast;
-use crate::mapping::ColumnInfo;
-use crate::sql_from_if::stata_to_sql;
-use crate::stata_interface::{get_macro, replace_number, replace_string, set_macro, ST_retcode};
+use crate::mapping::FieldSpec;
+use crate::sql_from_if::convert_if_sql;
+use crate::stata_interface::{read_macro, replace_number, replace_string, set_macro, ST_retcode};
 use crate::utilities::{
-    determine_parallelization_strategy, get_thread_count, ParallelizationStrategy,
-    DAY_SHIFT_SAS_STATA, SEC_MICROSECOND, SEC_MILLISECOND, SEC_NANOSECOND, SEC_SHIFT_SAS_STATA,
+    determine_parallelization_strategy, get_thread_count, BatchMode, STATA_DATE_ORIGIN,
+    STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
 };
 
-pub fn data_exists(path: &str) -> bool {
+pub fn verify_parquet_path(path: &str) -> bool {
     let path_obj = Path::new(path);
     if path_obj.exists() && path_obj.is_file() {
         return true;
@@ -79,7 +79,7 @@ pub fn has_metadata_key(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
         .any(|window| window == key.as_bytes()))
 }
 
-pub fn scan_lazyframe(
+pub fn open_parquet_scan(
     path: &str,
     safe_relaxed: bool,
     asterisk_to_variable_name: Option<&str>,
@@ -270,14 +270,14 @@ fn smart_lit(value: &str) -> Expr {
     lit(value)
 }
 
-pub fn read_to_stata(
+pub fn import_parquet(
     path: &str,
     variables_as_str: &str,
     n_rows: usize,
     offset: usize,
     sql_if: Option<&str>,
     mapping: &str,
-    parallel_strategy: Option<ParallelizationStrategy>,
+    parallel_strategy: Option<BatchMode>,
     safe_relaxed: bool,
     asterisk_var: Option<&str>,
     sort: &str,
@@ -288,15 +288,14 @@ pub fn read_to_stata(
 ) -> Result<i32, Box<dyn Error>> {
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
-        variables_owned = get_macro("matched_vars", false, Some(10 * 1024 * 1024));
+        variables_owned = read_macro("matched_vars", false, Some(10 * 1024 * 1024));
         variables_owned.as_str()
     } else {
         variables_as_str
     };
 
-    let all_columns_unfiltered: Vec<ColumnInfo> = if mapping.is_empty() || mapping == "from_macros"
-    {
-        let n_vars = get_macro("n_matched_vars", false, None)
+    let all_columns_unfiltered: Vec<FieldSpec> = if mapping.is_empty() || mapping == "from_macros" {
+        let n_vars = read_macro("n_matched_vars", false, None)
             .parse::<usize>()
             .unwrap_or(0);
         column_info_from_macros(n_vars)
@@ -306,7 +305,7 @@ pub fn read_to_stata(
 
     let selected_column_list: Vec<&str> = variables_as_str.split_whitespace().collect();
     let selected_column_names: HashSet<&str> = selected_column_list.iter().copied().collect();
-    let all_columns: Vec<ColumnInfo> = all_columns_unfiltered
+    let all_columns: Vec<FieldSpec> = all_columns_unfiltered
         .into_iter()
         .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
         .collect();
@@ -324,7 +323,7 @@ pub fn read_to_stata(
         let file = File::open(path)?;
         let mut df = ParquetReader::new(file).finish()?;
 
-        let cast_json = get_macro("cast_json", false, None);
+        let cast_json = read_macro("cast_json", false, None);
         if !cast_json.is_empty() {
             let cast_mapping: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_str(&cast_json)?;
@@ -397,13 +396,13 @@ pub fn read_to_stata(
         return Ok(0);
     }
 
-    let mut lf = scan_lazyframe(path, safe_relaxed, asterisk_var)?;
+    let mut lf = open_parquet_scan(path, safe_relaxed, asterisk_var)?;
 
-    let cast_json = get_macro("cast_json", false, None);
+    let cast_json = read_macro("cast_json", false, None);
     if !cast_json.is_empty() {
         lf = apply_cast(lf, &cast_json)?;
     }
-    lf = cast_catenum_to_string(&lf)?;
+    lf = normalize_categorical(&lf)?;
 
     let mut batch_source_offset = offset;
     if sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false) {
@@ -414,7 +413,7 @@ pub fn read_to_stata(
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
         ctx.register("df", lf);
-        let translated = stata_to_sql(sql);
+        let translated = convert_if_sql(sql);
         lf = ctx.execute(&format!("select * from df where {}", translated))?;
     }
 
@@ -659,7 +658,7 @@ pub fn file_summary(
     0
 }
 
-pub fn cast_catenum_to_string(lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
+pub fn normalize_categorical(lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
     let schema = lf.clone().collect_schema()?;
     let cat_expressions: Vec<Expr> = schema
         .iter()
@@ -678,18 +677,18 @@ pub fn cast_catenum_to_string(lf: &LazyFrame) -> Result<LazyFrame, PolarsError> 
     }
 }
 
-fn column_info_from_macros(n_vars: usize) -> Vec<ColumnInfo> {
+fn column_info_from_macros(n_vars: usize) -> Vec<FieldSpec> {
     let mut column_infos = Vec::with_capacity(n_vars);
     for i in 0..n_vars {
-        let index = get_macro(&format!("v_to_read_index_{}", i + 1), false, None)
+        let index = read_macro(&format!("v_to_read_index_{}", i + 1), false, None)
             .parse::<usize>()
             .unwrap_or(1)
             - 1;
-        let name = get_macro(&format!("v_to_read_name_{}", i + 1), false, None);
-        let dtype = get_macro(&format!("v_to_read_p_type_{}", i + 1), false, None);
+        let name = read_macro(&format!("v_to_read_name_{}", i + 1), false, None);
+        let dtype = read_macro(&format!("v_to_read_p_type_{}", i + 1), false, None);
         let stata_type =
-            get_macro(&format!("v_to_read_type_{}", i + 1), false, None).to_lowercase();
-        column_infos.push(ColumnInfo {
+            read_macro(&format!("v_to_read_type_{}", i + 1), false, None).to_lowercase();
+        column_infos.push(FieldSpec {
             index,
             name,
             dtype,
@@ -702,8 +701,8 @@ fn column_info_from_macros(n_vars: usize) -> Vec<ColumnInfo> {
 fn process_batch_with_strategy(
     batch: &DataFrame,
     start_index: usize,
-    all_columns: &Vec<ColumnInfo>,
-    strategy: ParallelizationStrategy,
+    all_columns: &Vec<FieldSpec>,
+    strategy: BatchMode,
     n_threads: usize,
     stata_offset: usize,
 ) -> PolarsResult<()> {
@@ -723,7 +722,7 @@ fn process_batch_with_strategy(
         })?;
 
     pool.install(|| match strategy {
-        ParallelizationStrategy::ByRow => {
+        BatchMode::ByRow => {
             let n_workers = rayon::current_num_threads().max(1);
             let chunk_size = std::cmp::max(512, row_count.div_ceil(n_workers * 8));
             (0..row_count)
@@ -742,7 +741,7 @@ fn process_batch_with_strategy(
                     )
                 })
         }
-        ParallelizationStrategy::ByColumn => all_columns.par_iter().try_for_each(|col_info| {
+        BatchMode::ByColumn => all_columns.par_iter().try_for_each(|col_info| {
             let col = batch.column(&col_info.name)?;
             for row_idx in 0..row_count {
                 let global_row_idx = row_idx + start_index;
@@ -758,7 +757,7 @@ fn process_row_range(
     start_index: usize,
     start_row: usize,
     end_row: usize,
-    all_columns: &Vec<ColumnInfo>,
+    all_columns: &Vec<FieldSpec>,
     stata_offset: usize,
 ) -> PolarsResult<()> {
     for col_info in all_columns {
@@ -773,7 +772,7 @@ fn process_row_range(
 
 fn assign_cell(
     col: &Column,
-    col_info: &ColumnInfo,
+    col_info: &FieldSpec,
     row_idx: usize,
     global_row_idx: usize,
     stata_offset: usize,
@@ -792,16 +791,12 @@ fn assign_cell(
         }
         "datetime" => {
             let mills_factor = match col.dtype() {
-                DataType::Datetime(TimeUnit::Nanoseconds, _) => {
-                    (SEC_NANOSECOND / SEC_MILLISECOND) as f64
-                }
-                DataType::Datetime(TimeUnit::Microseconds, _) => {
-                    (SEC_MICROSECOND / SEC_MILLISECOND) as f64
-                }
+                DataType::Datetime(TimeUnit::Nanoseconds, _) => (TIME_NS / TIME_MS) as f64,
+                DataType::Datetime(TimeUnit::Microseconds, _) => (TIME_US / TIME_MS) as f64,
                 DataType::Datetime(TimeUnit::Milliseconds, _) => 1.0,
                 _ => 1.0,
             };
-            let sec_shift_scaled = (SEC_SHIFT_SAS_STATA as f64) * (SEC_MILLISECOND as f64);
+            let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
             let value = match col.get(row_idx) {
                 Ok(AnyValue::Datetime(v, _, _)) => Some(v as f64 / mills_factor + sec_shift_scaled),
                 _ => None,
@@ -822,8 +817,8 @@ fn assign_cell(
                 Ok(AnyValue::UInt64(v)) => Some(v as f64),
                 Ok(AnyValue::Float32(v)) => Some(v as f64),
                 Ok(AnyValue::Float64(v)) => Some(v),
-                Ok(AnyValue::Date(v)) => Some((v + DAY_SHIFT_SAS_STATA) as f64),
-                Ok(AnyValue::Time(v)) => Some((v / SEC_MICROSECOND) as f64),
+                Ok(AnyValue::Date(v)) => Some((v + STATA_DATE_ORIGIN) as f64),
+                Ok(AnyValue::Time(v)) => Some((v / TIME_US) as f64),
                 _ => None,
             };
             replace_number(value, global_row_idx + 1 + stata_offset, col_info.index + 1);
