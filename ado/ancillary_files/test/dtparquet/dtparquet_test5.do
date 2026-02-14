@@ -8,7 +8,7 @@ macro drop _all
 
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
+capture log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
 
 // Install local versions
 discard

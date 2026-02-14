@@ -5,7 +5,7 @@ clear frames
 discard
 capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
-log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
+capture log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
 cap program drop _cleanup_dir_shallow
 program _cleanup_dir_shallow

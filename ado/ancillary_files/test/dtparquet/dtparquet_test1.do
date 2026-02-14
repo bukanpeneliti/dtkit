@@ -4,10 +4,10 @@
 
 version 16
 clear frames
-capture log close
+capture log close _all
 cd d:/OneDrive/MyWork/00personal/stata/dtkit
 
-log using ado/ancillary_files/test/log/dtparquet_test1.log, replace
+capture log using ado/ancillary_files/test/log/dtparquet_test1.log, replace
 
 // Load programs from ado directory
 discard

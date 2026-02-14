@@ -9,7 +9,7 @@ capture log close
 // Set working directory to project root
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
+capture log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
 
 // Load programs from ado directory
 discard

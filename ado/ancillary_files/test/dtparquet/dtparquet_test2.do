@@ -7,7 +7,7 @@ clear frames
 capture log close
 cd d:/OneDrive/MyWork/00personal/stata/dtkit
 
-log using ado/ancillary_files/test/log/dtparquet_test2.log, replace
+capture log using ado/ancillary_files/test/log/dtparquet_test2.log, replace
 
 // Load programs from ado directory
 discard

@@ -10,7 +10,7 @@ capture log close
 
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
+capture log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 
 // Install local versions
 run "ado/dtparquet.ado"
