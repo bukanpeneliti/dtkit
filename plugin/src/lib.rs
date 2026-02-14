@@ -280,7 +280,7 @@ fn parse_has_metadata_key_args(args: &[&str]) -> Result<CommandArgs, CommandErro
 }
 
 fn parse_load_meta_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
-    if args.len() < 1 {
+    if args.is_empty() {
         return Err(CommandError::SubcommandArgCount("load_meta", 1));
     }
 
@@ -421,6 +421,7 @@ fn dispatch_command(cmd: CommandArgs) -> ST_retcode {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retcode {
     std::panic::catch_unwind(|| {
         if argc < 1 || argv.is_null() {

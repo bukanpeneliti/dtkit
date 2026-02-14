@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use glob::glob;
 use polars::datatypes::{AnyValue, TimeUnit};
 use polars::error::ErrString;
@@ -9,6 +11,7 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
 
 use crate::downcast::apply_cast;
 use crate::mapping::FieldSpec;
@@ -27,49 +30,41 @@ pub fn verify_parquet_path(path: &str) -> bool {
     if path_obj.exists() && path_obj.is_dir() {
         return has_parquet_files_in_hive_structure(path);
     }
-    is_valid_glob_pattern(path)
-}
-
-fn has_parquet_files_in_hive_structure(dir_path: &str) -> bool {
-    let mut glob_pattern = String::from(dir_path);
-    if glob_pattern.ends_with('/') {
-        glob_pattern.pop();
-    }
-    if cfg!(windows) {
-        glob_pattern = glob_pattern.replace('\\', "/");
-    }
-    let test_patterns = vec![
-        format!("{}/**/*.parquet", glob_pattern),
-        format!("{}/*/*.parquet", glob_pattern),
-        format!("{}/*/*/*.parquet", glob_pattern),
-        format!("{}/*.parquet", glob_pattern),
-    ];
-    for pattern in test_patterns {
-        if let Ok(mut paths) = glob(&pattern) {
-            if paths.next().is_some() {
-                return true;
-            }
-        }
+    if path.contains('*') || path.contains('?') || path.contains('[') {
+        let normalized_pattern = if cfg!(windows) {
+            path.replace('\\', "/")
+        } else {
+            path.to_string()
+        };
+        return glob(&normalized_pattern)
+            .map(|p| p.filter_map(Result::ok).next().is_some())
+            .unwrap_or(false);
     }
     false
 }
 
-fn is_valid_glob_pattern(glob_path: &str) -> bool {
-    if !glob_path.contains('*') && !glob_path.contains('?') && !glob_path.contains('[') {
+fn has_parquet_files_in_hive_structure(dir_path: &str) -> bool {
+    let dir = Path::new(dir_path);
+    if !dir.is_dir() {
         return false;
     }
-    let mut normalized_pattern = if cfg!(windows) {
-        glob_path.replace('\\', "/")
-    } else {
-        glob_path.to_string()
-    };
-    if normalized_pattern.contains("**.") {
-        normalized_pattern = normalized_pattern.replace("**.", "**/*.");
+
+    for entry in WalkDir::new(dir)
+        .max_depth(3)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(Result::ok)
+    {
+        let path = entry.path();
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                if ext.eq_ignore_ascii_case("parquet") {
+                    return true;
+                }
+            }
+        }
     }
-    match glob(&normalized_pattern) {
-        Ok(paths) => paths.filter_map(Result::ok).next().is_some(),
-        Err(_) => false,
-    }
+    false
 }
 
 pub fn has_metadata_key(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
@@ -101,9 +96,11 @@ pub fn open_parquet_scan(
             if normalized_pattern.contains("**.") {
                 normalized_pattern = normalized_pattern.replace("**.", "**/*.");
             }
-            let mut scan_args = ScanArgsParquet::default();
-            scan_args.allow_missing_columns = true;
-            scan_args.cache = false;
+            let scan_args = ScanArgsParquet {
+                allow_missing_columns: true,
+                cache: false,
+                ..Default::default()
+            };
             LazyFrame::scan_parquet(PlPath::new(&normalized_pattern), scan_args)
         }
     }
@@ -126,9 +123,11 @@ fn scan_hive_partitioned(dir_path: &str) -> Result<LazyFrame, PolarsError> {
         if let Ok(paths) = glob(&pattern) {
             let files: Vec<_> = paths.filter_map(Result::ok).collect();
             if !files.is_empty() {
-                let mut scan_args = ScanArgsParquet::default();
-                scan_args.allow_missing_columns = true;
-                scan_args.cache = false;
+                let scan_args = ScanArgsParquet {
+                    allow_missing_columns: true,
+                    cache: false,
+                    ..Default::default()
+                };
                 return LazyFrame::scan_parquet(PlPath::new(&pattern), scan_args);
             }
         }
@@ -163,9 +162,11 @@ fn scan_with_diagonal_relaxed(glob_path: &str) -> Result<LazyFrame, PolarsError>
         ));
     }
 
-    let mut scan_args = ScanArgsParquet::default();
-    scan_args.allow_missing_columns = true;
-    scan_args.cache = false;
+    let scan_args = ScanArgsParquet {
+        allow_missing_columns: true,
+        cache: false,
+        ..Default::default()
+    };
     let lazy_frames: Result<Vec<LazyFrame>, PolarsError> = file_paths
         .iter()
         .map(|path| {
@@ -224,9 +225,11 @@ fn scan_with_filename_extraction(
         ));
     }
 
-    let mut scan_args = ScanArgsParquet::default();
-    scan_args.allow_missing_columns = true;
-    scan_args.cache = false;
+    let scan_args = ScanArgsParquet {
+        allow_missing_columns: true,
+        cache: false,
+        ..Default::default()
+    };
     let lazy_frames: Result<Vec<LazyFrame>, PolarsError> = file_paths
         .iter()
         .map(|path| {
@@ -321,7 +324,9 @@ pub fn import_parquet(
 
     if can_use_eager {
         let file = File::open(path)?;
-        let mut df = ParquetReader::new(file).finish()?;
+        let mut df = ParquetReader::new(file)
+            .with_slice(Some((offset, n_rows)))
+            .finish()?;
 
         let cast_json = read_macro("cast_json", false, None);
         if !cast_json.is_empty() {
@@ -449,6 +454,8 @@ pub fn import_parquet(
         lf = lf.sort(sort_cols, sort_options);
     }
 
+    let use_streaming = n_rows > 1_000_000;
+
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
     let n_batches = (n_rows as f64 / batch_size as f64).ceil() as usize;
     let n_threads = get_thread_count();
@@ -466,7 +473,11 @@ pub fn import_parquet(
             batch_size
         } as u32;
         lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
-        let batch_df = lf_batch.collect()?;
+        let batch_df = if use_streaming {
+            lf_batch.with_new_streaming(true).collect()?
+        } else {
+            lf_batch.collect()?
+        };
         if batch_df.height() == 0 {
             break;
         }

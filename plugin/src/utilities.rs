@@ -56,7 +56,7 @@ fn determine_parallelization_strategy_impl(
     n_rows: usize,
     available_cores: usize,
 ) -> BatchMode {
-    if n_columns > available_cores * 2 && n_rows < 100_000 {
+    if n_columns > available_cores * 2 && n_rows < 50_000 {
         BatchMode::ByColumn
     } else {
         BatchMode::ByRow
@@ -88,4 +88,21 @@ fn calc_batch_length(batch_index: usize, batch_size: usize, total_rows: usize) -
     } else {
         batch_size
     }
+}
+
+const DEFAULT_MEMORY_BUDGET_MB: usize = 512;
+const ROW_ESTIMATE_BYTES: usize = 64;
+const MIN_BATCH_SIZE: usize = 1_000;
+const MAX_BATCH_SIZE: usize = 100_000;
+
+pub fn calculate_adaptive_batch_size(
+    n_columns: usize,
+    estimated_row_width: usize,
+    memory_budget_mb: Option<usize>,
+) -> usize {
+    let budget = memory_budget_mb.unwrap_or(DEFAULT_MEMORY_BUDGET_MB);
+    let memory_bytes = budget * 1024 * 1024;
+    let row_size = estimated_row_width.max(ROW_ESTIMATE_BYTES * n_columns / 10);
+    let calculated = memory_bytes / row_size.max(1);
+    calculated.clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE)
 }

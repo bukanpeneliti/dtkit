@@ -585,6 +585,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stata-sys",
+ "walkdir",
 ]
 
 [[package]]

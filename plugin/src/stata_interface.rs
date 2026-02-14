@@ -1,3 +1,5 @@
+#![allow(clippy::result_unit_err)]
+
 pub use stata_sys::{
     display, replace_number, replace_string, set_macro, SF_error, SF_is_missing, SF_nobs, SF_nvar,
     SF_sdata, SF_sdatalen, SF_strldata, SF_var_is_binary,

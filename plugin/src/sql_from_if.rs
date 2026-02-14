@@ -39,6 +39,12 @@ struct CallNode {
 
 pub struct FilterTranslator;
 
+impl Default for FilterTranslator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FilterTranslator {
     pub fn new() -> Self {
         Self

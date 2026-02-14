@@ -29,7 +29,8 @@ pub fn stata_to_polars_type(stata_type: &str) -> DataType {
         "long" => DataType::Int32,
         "float" => DataType::Float32,
         "double" => DataType::Float64,
-        "strL" | _ if stata_type.starts_with("str") => DataType::String,
+        "strL" => DataType::String,
+        _ if stata_type.starts_with("str") => DataType::String,
         _ => DataType::String,
     }
 }

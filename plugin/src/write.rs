@@ -1,3 +1,5 @@
+#![allow(clippy::too_many_arguments)]
+
 use polars::prelude::*;
 use polars_sql::SQLContext;
 use std::collections::HashMap;
@@ -266,9 +268,11 @@ fn write_single_dataframe(
     let key_value_metadata =
         KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
 
-    let mut write_options = ParquetWriteOptions::default();
-    write_options.compression = parquet_compression(compression, compression_level)?;
-    write_options.key_value_metadata = Some(key_value_metadata);
+    let write_options = ParquetWriteOptions {
+        compression: parquet_compression(compression, compression_level)?,
+        key_value_metadata: Some(key_value_metadata),
+        ..Default::default()
+    };
 
     let sink_target = SinkTarget::Path(PlPath::new(&tmp_path));
     lf.sink_parquet(sink_target, write_options, None, SinkOptions::default())?
@@ -312,11 +316,13 @@ fn write_partitioned_dataframe(
 
     create_dir_all(out_path)?;
 
-    let mut write_options = ParquetWriteOptions::default();
-    write_options.compression = parquet_compression(compression, compression_level)?;
     let key_value_metadata =
         KeyValueMetadata::from_static(vec![(DTMETA_KEY.to_string(), dtmeta_json.to_string())]);
-    write_options.key_value_metadata = Some(key_value_metadata);
+    let write_options = ParquetWriteOptions {
+        compression: parquet_compression(compression, compression_level)?,
+        key_value_metadata: Some(key_value_metadata),
+        ..Default::default()
+    };
 
     write_partitioned_dataset(
         df,
