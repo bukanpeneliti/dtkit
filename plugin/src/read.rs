@@ -31,6 +31,7 @@ use crate::utilities::{
 #[allow(dead_code)]
 const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
 const ENV_METADATA_LOOKUP_MODE: &str = "DTPARQUET_METADATA_LOOKUP_MODE";
+const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum TransferWriterKind {
@@ -143,6 +144,15 @@ fn metadata_lookup_uses_legacy_scan() -> bool {
         .map(|mode| {
             let mode = mode.trim().to_ascii_lowercase();
             mode == "legacy_scan" || mode == "legacy" || mode == "bytes_scan"
+        })
+        .unwrap_or(false)
+}
+
+fn lazy_execution_uses_legacy_batches() -> bool {
+    env::var(ENV_LAZY_EXECUTION_MODE)
+        .map(|mode| {
+            let mode = mode.trim().to_ascii_lowercase();
+            mode == "legacy_batches" || mode == "legacy" || mode == "clone_slice_collect"
         })
         .unwrap_or(false)
 }
@@ -416,6 +426,7 @@ pub fn import_parquet(
     warm_thread_pools();
     reset_transfer_metrics();
     publish_read_runtime_metrics(0, 0, 0, 0);
+    set_macro("dtpq_read_lazy_mode", "eager_fast_path", true);
 
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
@@ -592,44 +603,99 @@ pub fn import_parquet(
     }
 
     let use_streaming = n_rows > 1_000_000;
-
+    let effective_batch_size = batch_size.max(1);
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
-    let n_batches = (n_rows as f64 / batch_size as f64).ceil() as usize;
     let n_threads = get_compute_thread_pool().current_num_threads().max(1);
-    let strategy = parallel_strategy
-        .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), n_rows, n_threads));
-    set_macro("n_batches", &n_batches.to_string(), false);
 
     let mut loaded_rows = 0usize;
-    for batch_i in 0..n_batches {
-        let mut lf_batch = lf.clone().select(&columns);
-        let batch_offset = batch_source_offset + batch_i * batch_size;
-        let batch_length = if (batch_i + 1) * batch_size > n_rows {
-            n_rows - batch_i * batch_size
-        } else {
-            batch_size
-        } as u32;
-        lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
-        let batch_df = if use_streaming {
-            collect_calls += 1;
-            lf_batch.with_new_streaming(true).collect()?
-        } else {
-            collect_calls += 1;
-            lf_batch.collect()?
-        };
-        if batch_df.height() == 0 {
-            break;
+    let n_batches;
+
+    if lazy_execution_uses_legacy_batches() {
+        set_macro("dtpq_read_lazy_mode", "legacy_batches", true);
+
+        let strategy = parallel_strategy.unwrap_or_else(|| {
+            determine_parallelization_strategy(columns.len(), n_rows, n_threads)
+        });
+        let n_batches_legacy = (n_rows as f64 / effective_batch_size as f64).ceil() as usize;
+        set_macro("n_batches", &n_batches_legacy.to_string(), false);
+
+        for batch_i in 0..n_batches_legacy {
+            let mut lf_batch = lf.clone().select(&columns);
+            let batch_offset = batch_source_offset + batch_i * effective_batch_size;
+            let batch_length = if (batch_i + 1) * effective_batch_size > n_rows {
+                n_rows - batch_i * effective_batch_size
+            } else {
+                effective_batch_size
+            } as u32;
+            lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
+            let batch_df = if use_streaming {
+                collect_calls += 1;
+                lf_batch.with_new_streaming(true).collect()?
+            } else {
+                collect_calls += 1;
+                lf_batch.collect()?
+            };
+            if batch_df.height() == 0 {
+                break;
+            }
+            loaded_rows += batch_df.height();
+            process_batch_with_strategy(
+                &batch_df,
+                batch_offset - batch_source_offset,
+                &transfer_columns,
+                strategy,
+                stata_offset,
+            )?;
+            processed_batches += 1;
         }
-        loaded_rows += batch_df.height();
-        process_batch_with_strategy(
-            &batch_df,
-            batch_offset - batch_source_offset,
-            &transfer_columns,
-            strategy,
-            stata_offset,
-        )?;
-        processed_batches += 1;
+
+        n_batches = n_batches_legacy;
+    } else {
+        set_macro("dtpq_read_lazy_mode", "single_pass", true);
+
+        let mut lf_single_pass = lf.select(&columns);
+        if batch_source_offset > 0 {
+            lf_single_pass = lf_single_pass.slice(batch_source_offset as i64, n_rows as u32);
+        }
+
+        let single_pass_df = if use_streaming {
+            collect_calls += 1;
+            lf_single_pass.with_new_streaming(true).collect()?
+        } else {
+            collect_calls += 1;
+            lf_single_pass.collect()?
+        };
+
+        let total_rows = single_pass_df.height();
+        let n_batches_single = if total_rows == 0 {
+            0
+        } else {
+            total_rows.div_ceil(effective_batch_size)
+        };
+        set_macro("n_batches", &n_batches_single.to_string(), false);
+
+        let strategy = parallel_strategy.unwrap_or_else(|| {
+            determine_parallelization_strategy(columns.len(), total_rows, n_threads)
+        });
+
+        for batch_i in 0..n_batches_single {
+            let batch_offset = batch_i * effective_batch_size;
+            let batch_length = (total_rows - batch_offset).min(effective_batch_size);
+            let batch_df = single_pass_df.slice(batch_offset as i64, batch_length);
+            loaded_rows += batch_df.height();
+            process_batch_with_strategy(
+                &batch_df,
+                batch_offset,
+                &transfer_columns,
+                strategy,
+                stata_offset,
+            )?;
+            processed_batches += 1;
+        }
+
+        n_batches = n_batches_single;
     }
+
     set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
     publish_read_runtime_metrics(
         collect_calls,

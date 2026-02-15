@@ -417,6 +417,50 @@ else {
     local failed_tests "`failed_tests' 13"
 }
 
+// Test Case 14: T06 single-pass lazy execution metrics
+display _newline "=== TEST CASE 14: T06 Single-Pass Lazy Execution Metrics ==="
+local ++total_tests
+local t14_n_rows 120000
+local t14_chunk_size 4000
+
+capture noisily {
+    clear
+    set obs `t14_n_rows'
+    gen long id = _n
+    gen byte grp = mod(_n, 3)
+    gen double value = _n * 1.5
+    gen str16 tag = "r_" + string(_n, "%06.0f")
+
+    dtparquet save "test_t06_lazy.parquet", replace chunksize(`t14_chunk_size')
+
+    clear
+    dtparquet use id grp value tag using "test_t06_lazy.parquet" if grp > 0 in 1/`t14_n_rows', clear chunksize(`t14_chunk_size')
+
+    count
+    assert r(N) == 80000
+    assert c(k) == 4
+    assert id[1] == 1
+    assert id[_N] == 119999
+
+    local t14_collect_calls = real("$dtpq_read_collect_calls")
+    local t14_planned_batches = real("$dtpq_read_planned_batches")
+    local t14_processed_batches = real("$dtpq_read_processed_batches")
+
+    assert `t14_collect_calls' == 1
+    assert `t14_planned_batches' == `t14_processed_batches'
+    assert `t14_planned_batches' > 1
+    assert "$dtpq_read_lazy_mode" == "single_pass"
+}
+
+if _rc == 0 {
+    display as result "Test 14 completed successfully"
+    local passed_tests "`passed_tests' 14"
+}
+else {
+    display as error "Test 14 failed: single-pass lazy execution mismatch"
+    local failed_tests "`failed_tests' 14"
+}
+
 // Cleanup
 capture erase "test_wide.parquet"
 capture erase "test_boundary.parquet"
@@ -425,6 +469,7 @@ capture erase "test_chunk.parquet"
 capture erase "test_sig.parquet"
 capture erase "test_strl.parquet"
 capture erase "test_native.parquet"
+capture erase "test_t06_lazy.parquet"
 
 // Test Summary
 display _newline "=========================================="
