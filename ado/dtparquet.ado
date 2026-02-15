@@ -12,46 +12,141 @@
 program dtparquet
     version 16
     _cleanup_orphaned
-    gettoken sub rest : 0
+
+    // Check for NOTIMER option (supports: notimer, notime, notim, noti, not)
+    local has_notimer 0
+    local cmd_line `"`0'"'
+    local rest_cmd `"`0'"'
+
+    gettoken sub rest : rest_cmd
     local len = length("`sub'")
+    local i = 0
+    local word_count : word count `rest'
+    local new_rest ""
+
+    forvalues j = 1/`word_count' {
+        local word : word `j' of `rest'
+        local word_lower = lower("`word'")
+        local word_len = length("`word_lower'")
+        if "`word_lower'" == substr("notimer", 1, max(5, `word_len')) {
+            local has_notimer 1
+        }
+        else {
+            local new_rest `"`new_rest' `word'"'
+        }
+    }
+    local new_rest = trim("`new_rest'")
+
     if `len' == 0 {
         display as error "Subcommand required: save, use, export, or import"
         exit 198
     }
 
+    local start_time = clock("$S_TIME", "hms")
+    local rc = 0
+    local dtparquet__file ""
+    local dtparquet__sub ""
+
     if "`sub'" == substr("save", 1, max(2, `len')) {
-        dtparquet_save `rest'
+        local dtparquet__sub "save"
+        gettoken fname : new_rest, parse(" ,")
+        local dtparquet__file "`fname'"
+        dtparquet_save `new_rest'
+        local rc = _rc
     }
     else if "`sub'" == substr("use", 1, max(1, `len')) {
-        dtparquet_use `rest'
+        local dtparquet__sub "use"
+        local fpos = strpos(`"`new_rest''"', "using")
+        if `fpos' > 0 {
+            local after_using = substr(`"`new_rest''"', `fpos' + 5, .)
+            gettoken fname : after_using, parse(" ,") bind
+            local dtparquet__file "`fname'"
+        }
+        dtparquet_use `new_rest'
+        local rc = _rc
     }
     else if "`sub'" == substr("export", 1, max(3, `len')) {
-        dtparquet_export `rest'
+        local dtparquet__sub "export"
+        gettoken fname : new_rest, parse(" ")
+        local dtparquet__file "`fname'"
+        dtparquet_export `new_rest'
+        local rc = _rc
     }
     else if "`sub'" == substr("import", 1, max(3, `len')) {
-        dtparquet_import `rest'
+        local dtparquet__sub "import"
+        local fpos = strpos(`"`new_rest''"', "using")
+        if `fpos' > 0 {
+            local after_using = substr(`"`new_rest''"', `fpos' + 5, .)
+            gettoken fname : after_using, parse(" ,") bind
+            local dtparquet__file "`fname'"
+        }
+        dtparquet_import `new_rest'
+        local rc = _rc
     }
     else {
         display as error "Unknown subcommand '`sub''"
         
         // Inference logic
-        local has_using = strpos(`"`rest'"', " using ") > 0 | substr(trim(`"`rest'"'), 1, 5) == "using"
+        local has_using = strpos(`"`rest''"', " using ") > 0 | substr(trim(`"`rest''"'), 1, 5) == "using"
         
         if `has_using' {
-            // If there's a using, it's likely use, export, or import
-            // If the unknown sub looks like a variable or part of a varlist, suggest 'use'
             display as error "Did you mean 'use', 'export', or 'import'?"
             display as error "Try, for example: "
             display as smcl `"{stata dtparquet use `0'}"'
         }
         else {
-            // No using, likely 'save' or a typo in a subcommand
             display as error "Did you mean 'save'?"
             display as error "Try, for example: "
             display as smcl `"{stata dtparquet save `0'}"'
         }
         exit 198
     }
+
+    // Display timing only on success and if notimer not specified
+    if `rc' == 0 & `has_notimer' == 0 {
+        local elapsed = clock("$S_TIME", "hms") - `start_time'
+        local elapsed_sec = `elapsed' / 1000
+
+        // Format time string - decimal only for < 60s
+        if `elapsed_sec' < 60 {
+            local time_str = string(`elapsed_sec', "%9.1f") + "s"
+        }
+        else if `elapsed_sec' < 3600 {
+            local mins = int(`elapsed_sec' / 60)
+            local secs = int(mod(`elapsed_sec', 60))
+            local time_str = "`mins'm `secs's"
+        }
+        else {
+            local hrs = int(`elapsed_sec' / 3600)
+            local mins = int(mod(`elapsed_sec', 3600) / 60)
+            local secs = int(mod(mod(`elapsed_sec', 3600), 60))
+            local time_str = "`hrs'h `mins'm `secs's"
+        }
+
+        // Clean up filename display
+        local display_file = subinstr("`dtparquet__file'", `""', "", .)
+        local display_file = subinstr("`display_file'", "'", "", .)
+        local display_file = trim("`display_file'")
+
+        // Display message based on subcommand
+        if "`dtparquet__sub'" == "save" {
+            display as result "Saved `display_file' in `time_str'"
+        }
+        else if "`dtparquet__sub'" == "use" {
+            display as result "Loaded `display_file' in `time_str'"
+        }
+        else if "`dtparquet__sub'" == "export" {
+            display as result "Exported `display_file' in `time_str'"
+        }
+        else if "`dtparquet__sub'" == "import" {
+            display as result "Imported `display_file' in `time_str'"
+        }
+        else {
+            display as result "Completed in `time_str'"
+        }
+    }
+
+    exit `rc'
 end
 
 cap program drop dtparquet_plugin
