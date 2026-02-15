@@ -225,7 +225,6 @@ pub struct StataRowSource {
     current_offset: AtomicUsize,
     processed_batches: AtomicUsize,
     schema: Arc<Schema>,
-    stata_api_lock: Arc<Mutex<()>>,
     batch_tuner: Arc<Mutex<AdaptiveBatchTuner>>,
     pipeline_mode: WritePipelineMode,
     queue_capacity: usize,
@@ -279,13 +278,16 @@ impl StataRowSource {
         let requested_pipeline_mode = write_pipeline_mode();
         let pipeline_mode = if requested_pipeline_mode == WritePipelineMode::ProducerConsumer
             && n_rows >= write_pipeline_min_rows()
+            && planned_batches > 1
         {
             WritePipelineMode::ProducerConsumer
         } else {
             WritePipelineMode::LegacyDirect
         };
         let queue_capacity = if pipeline_mode == WritePipelineMode::ProducerConsumer {
-            write_pipeline_queue_capacity()
+            let configured = write_pipeline_queue_capacity();
+            let effective_max = planned_batches.saturating_sub(1).max(1);
+            configured.min(effective_max)
         } else {
             0
         };
@@ -293,7 +295,6 @@ impl StataRowSource {
         let batch_size_hint = Arc::new(AtomicUsize::new(safe_batch_size));
         let queue_telemetry = Arc::new(WriteQueueTelemetry::default());
         let stop_requested = Arc::new(AtomicBool::new(false));
-        let stata_api_lock = Arc::new(Mutex::new(()));
 
         let mut pipeline_receiver = None;
         let mut pipeline_worker = None;
@@ -307,7 +308,6 @@ impl StataRowSource {
             let producer_batch_tuner = batch_tuner.clone();
             let producer_telemetry = queue_telemetry.clone();
             let producer_stop_requested = stop_requested.clone();
-            let producer_stata_api_lock = stata_api_lock.clone();
 
             pipeline_worker = Some(thread::spawn(move || {
                 let mut producer_offset = 0usize;
@@ -321,14 +321,11 @@ impl StataRowSource {
                     let read_count = std::cmp::min(requested_batch_size, n_rows - producer_offset);
                     let batch_started_at = Instant::now();
 
-                    let batch_df_result = {
-                        let _lock = producer_stata_api_lock.lock().unwrap();
-                        read_batch_from_columns(
-                            &producer_columns,
-                            start_row + producer_offset,
-                            read_count,
-                        )
-                    };
+                    let batch_df_result = read_batch_from_columns(
+                        &producer_columns,
+                        start_row + producer_offset,
+                        read_count,
+                    );
 
                     let batch_df = match batch_df_result {
                         Ok(df) => df,
@@ -380,7 +377,6 @@ impl StataRowSource {
             current_offset: AtomicUsize::new(0),
             processed_batches: AtomicUsize::new(0),
             schema: Arc::new(Schema::from_iter(fields)),
-            stata_api_lock,
             batch_tuner,
             pipeline_mode,
             queue_capacity,
@@ -473,7 +469,6 @@ impl StataRowSource {
         }
         let read_count = std::cmp::min(requested_batch_size, self.n_rows - offset);
 
-        let _lock = self.stata_api_lock.lock().unwrap();
         let batch_started_at = Instant::now();
         let df = self.read_batch(offset, read_count)?;
         let batch_rows = df.height();
@@ -527,7 +522,6 @@ impl StataRowSource {
         }
         let read_count = std::cmp::min(self.n_rows - offset, self.n_rows);
 
-        let _lock = self.stata_api_lock.lock().unwrap();
         let batch_started_at = Instant::now();
         let df = self.read_batch(offset, read_count)?;
         let batch_rows = df.height();
