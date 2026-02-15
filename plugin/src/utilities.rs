@@ -17,6 +17,9 @@ const ENV_BATCH_MEMORY_MB: &str = "DTPARQUET_BATCH_MEMORY_MB";
 const ENV_BATCH_MIN_ROWS: &str = "DTPARQUET_BATCH_MIN_ROWS";
 const ENV_BATCH_MAX_ROWS: &str = "DTPARQUET_BATCH_MAX_ROWS";
 const ENV_BATCH_TARGET_MS: &str = "DTPARQUET_BATCH_TARGET_MS";
+const ENV_WRITE_PIPELINE_MODE: &str = "DTPARQUET_WRITE_PIPELINE_MODE";
+const ENV_WRITE_PIPELINE_QUEUE_CAPACITY: &str = "DTPARQUET_WRITE_PIPELINE_QUEUE_CAPACITY";
+const ENV_WRITE_PIPELINE_MIN_ROWS: &str = "DTPARQUET_WRITE_PIPELINE_MIN_ROWS";
 
 static IO_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
 static COMPUTE_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
@@ -123,6 +126,39 @@ pub fn compute_pool_init_count() -> usize {
 pub enum BatchMode {
     ByRow,
     ByColumn,
+}
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+pub enum WritePipelineMode {
+    ProducerConsumer,
+    LegacyDirect,
+}
+
+const DEFAULT_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 8;
+const MAX_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 32;
+const DEFAULT_WRITE_PIPELINE_MIN_ROWS: usize = 20_000;
+
+pub fn write_pipeline_mode() -> WritePipelineMode {
+    env::var(ENV_WRITE_PIPELINE_MODE)
+        .map(|raw| {
+            let mode = raw.trim().to_ascii_lowercase();
+            if mode == "legacy" || mode == "direct" || mode == "off" || mode == "fixed" {
+                WritePipelineMode::LegacyDirect
+            } else {
+                WritePipelineMode::ProducerConsumer
+            }
+        })
+        .unwrap_or(WritePipelineMode::ProducerConsumer)
+}
+
+pub fn write_pipeline_queue_capacity() -> usize {
+    parse_env_usize(ENV_WRITE_PIPELINE_QUEUE_CAPACITY)
+        .unwrap_or(DEFAULT_WRITE_PIPELINE_QUEUE_CAPACITY)
+        .clamp(1, MAX_WRITE_PIPELINE_QUEUE_CAPACITY)
+}
+
+pub fn write_pipeline_min_rows() -> usize {
+    parse_env_usize(ENV_WRITE_PIPELINE_MIN_ROWS).unwrap_or(DEFAULT_WRITE_PIPELINE_MIN_ROWS)
 }
 
 fn determine_parallelization_strategy_impl(

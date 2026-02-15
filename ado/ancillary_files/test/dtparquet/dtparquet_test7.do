@@ -582,12 +582,12 @@ display "=========================================="
 
 if wordcount("`failed_tests'") > 0 {
     display as error "Failed tests: `failed_tests'"
-    log close
+    capture log close
     exit 1
 }
 else {
     display as result "All tests passed!"
-    log close
+    capture log close
     capture erase "dtparquet_test7.log"
     exit 0
 }

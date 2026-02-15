@@ -20,22 +20,26 @@ program dtparquet
 
     gettoken sub rest : rest_cmd
     local len = length("`sub'")
-    local i = 0
-    local word_count : word count `rest'
     local new_rest ""
 
-    forvalues j = 1/`word_count' {
-        local word : word `j' of `rest'
-        local word_lower = lower("`word'")
-        local word_len = length("`word_lower'")
-        if "`word_lower'" == substr("notimer", 1, max(5, `word_len')) {
-            local has_notimer 1
-        }
-        else {
-            local new_rest `"`new_rest' `word'"'
-        }
+    if strpos(`"`rest'"', `"""') > 0 {
+        local new_rest = trim(`"`rest'"')
     }
-    local new_rest = trim("`new_rest'")
+    else {
+        local word_count : word count `rest'
+        forvalues j = 1/`word_count' {
+            local word : word `j' of `rest'
+            local word_lower = lower("`word'")
+            local word_len = length("`word_lower'")
+            if "`word_lower'" == substr("notimer", 1, max(5, `word_len')) {
+                local has_notimer 1
+            }
+            else {
+                local new_rest `"`new_rest' `word'"'
+            }
+        }
+        local new_rest = trim("`new_rest'")
+    }
 
     if `len' == 0 {
         display as error "Subcommand required: save, use, export, or import"
@@ -56,11 +60,17 @@ program dtparquet
     }
     else if "`sub'" == substr("use", 1, max(1, `len')) {
         local dtparquet__sub "use"
-        local fpos = strpos(`"`new_rest''"', "using")
-        if `fpos' > 0 {
-            local after_using = substr(`"`new_rest''"', `fpos' + 5, .)
-            gettoken fname : after_using, parse(" ,") bind
-            local dtparquet__file "`fname'"
+        local scan_rest `"`new_rest'"'
+        gettoken tok scan_rest : scan_rest, bind
+        while `"`tok'"' != "" {
+            if lower(`"`tok'"') == "using" {
+                gettoken fname scan_rest : scan_rest, bind
+                local dtparquet__file "`fname'"
+                local tok ""
+            }
+            else {
+                gettoken tok scan_rest : scan_rest, bind
+            }
         }
         dtparquet_use `new_rest'
         local rc = _rc
@@ -74,11 +84,17 @@ program dtparquet
     }
     else if "`sub'" == substr("import", 1, max(3, `len')) {
         local dtparquet__sub "import"
-        local fpos = strpos(`"`new_rest''"', "using")
-        if `fpos' > 0 {
-            local after_using = substr(`"`new_rest''"', `fpos' + 5, .)
-            gettoken fname : after_using, parse(" ,") bind
-            local dtparquet__file "`fname'"
+        local scan_rest `"`new_rest'"'
+        gettoken tok scan_rest : scan_rest, bind
+        while `"`tok'"' != "" {
+            if lower(`"`tok'"') == "using" {
+                gettoken fname scan_rest : scan_rest, bind
+                local dtparquet__file "`fname'"
+                local tok ""
+            }
+            else {
+                gettoken tok scan_rest : scan_rest, bind
+            }
         }
         dtparquet_import `new_rest'
         local rc = _rc
@@ -585,6 +601,8 @@ program dtparquet_use
             }
         }
     }
+
+    capture error 0
 end
 
 capture program drop _apply_foreign_cat_labels
@@ -618,13 +636,19 @@ program _apply_foreign_cat_labels
                     exit 198
                 }
             }
-            rename `dtpq_encoded' `id_name'
+            gen long `id_name' = `dtpq_encoded'
+            label values `id_name' `stable_label'
+            drop `dtpq_encoded'
         }
         else {
             drop `vari'
-            rename `dtpq_encoded' `vari'
+            gen long `vari' = `dtpq_encoded'
+            label values `vari' `stable_label'
+            drop `dtpq_encoded'
         }
     }
+
+    capture error 0
 end
 
 capture program drop dtparquet_export

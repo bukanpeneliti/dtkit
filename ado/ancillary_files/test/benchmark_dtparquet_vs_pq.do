@@ -51,6 +51,12 @@ postfile `posth' ///
     double pull_numeric_calls ///
     double pull_string_calls ///
     double pull_strl_calls ///
+    double queue_capacity ///
+    double queue_peak ///
+    double queue_bp_events ///
+    double queue_wait_ms ///
+    double queue_prod_batches ///
+    double queue_cons_batches ///
     using "`run_results'", replace
 
 foreach scenario in narrow_numeric wide_mixed string_heavy {
@@ -141,6 +147,18 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         if missing(`pull_string_calls') local pull_string_calls = 0
         local pull_strl_calls = real("$dtpq_write_pull_strl_calls")
         if missing(`pull_strl_calls') local pull_strl_calls = 0
+        local queue_capacity = real("$dtpq_write_queue_capacity")
+        if missing(`queue_capacity') local queue_capacity = 0
+        local queue_peak = real("$dtpq_write_queue_peak")
+        if missing(`queue_peak') local queue_peak = 0
+        local queue_bp_events = real("$dtpq_write_queue_bp_events")
+        if missing(`queue_bp_events') local queue_bp_events = 0
+        local queue_wait_ms = real("$dtpq_write_queue_wait_ms")
+        if missing(`queue_wait_ms') local queue_wait_ms = 0
+        local queue_prod_batches = real("$dtpq_write_queue_prod_batches")
+        if missing(`queue_prod_batches') local queue_prod_batches = 0
+        local queue_cons_batches = real("$dtpq_write_queue_cons_batches")
+        if missing(`queue_cons_batches') local queue_cons_batches = 0
 
         post `posth' ///
             ("`scenario'") ///
@@ -159,7 +177,13 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
             (`replace_string_calls') ///
             (`pull_numeric_calls') ///
             (`pull_string_calls') ///
-            (`pull_strl_calls')
+            (`pull_strl_calls') ///
+            (`queue_capacity') ///
+            (`queue_peak') ///
+            (`queue_bp_events') ///
+            (`queue_wait_ms') ///
+            (`queue_prod_batches') ///
+            (`queue_cons_batches')
 
         clear
         timer clear 2
@@ -191,6 +215,12 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         if missing(`pull_string_calls') local pull_string_calls = 0
         local pull_strl_calls = real("$dtpq_read_pull_strl_calls")
         if missing(`pull_strl_calls') local pull_strl_calls = 0
+        local queue_capacity = 0
+        local queue_peak = 0
+        local queue_bp_events = 0
+        local queue_wait_ms = 0
+        local queue_prod_batches = 0
+        local queue_cons_batches = 0
 
         post `posth' ///
             ("`scenario'") ///
@@ -209,7 +239,13 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
             (`replace_string_calls') ///
             (`pull_numeric_calls') ///
             (`pull_string_calls') ///
-            (`pull_strl_calls')
+            (`pull_strl_calls') ///
+            (`queue_capacity') ///
+            (`queue_peak') ///
+            (`queue_bp_events') ///
+            (`queue_wait_ms') ///
+            (`queue_prod_batches') ///
+            (`queue_cons_batches')
     }
 }
 
@@ -234,7 +270,13 @@ collapse (count) n_runs=elapsed ///
     (mean) mean_replace_string_calls=replace_string_calls ///
     (mean) mean_pull_numeric_calls=pull_numeric_calls ///
     (mean) mean_pull_string_calls=pull_string_calls ///
-    (mean) mean_pull_strl_calls=pull_strl_calls, by(scenario operation)
+    (mean) mean_pull_strl_calls=pull_strl_calls ///
+    (mean) mean_queue_capacity=queue_capacity ///
+    (mean) mean_queue_peak=queue_peak ///
+    (mean) mean_queue_bp_events=queue_bp_events ///
+    (mean) mean_queue_wait_ms=queue_wait_ms ///
+    (mean) mean_queue_prod_batches=queue_prod_batches ///
+    (mean) mean_queue_cons_batches=queue_cons_batches, by(scenario operation)
 gen cv_elapsed = cond(mean_elapsed == 0, ., sd_elapsed / mean_elapsed)
 order scenario operation n_runs mean_elapsed p50_elapsed p90_elapsed cv_elapsed
 save "`log_root'/benchmark_baseline_summary.dta", replace

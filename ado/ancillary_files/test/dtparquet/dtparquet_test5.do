@@ -524,6 +524,64 @@ else {
     local failed_tests "`failed_tests' 15"
 }
 
+// Test Case 16: T08 producer-consumer write pipeline metrics
+display _newline "=== TEST CASE 16: T08 Producer-Consumer Write Pipeline Metrics ==="
+local ++total_tests
+local t16_n_rows 180000
+local t16_chunk_size 2000
+
+capture noisily {
+    clear
+    set obs `t16_n_rows'
+    gen long id = _n
+    forvalues j = 1/16 {
+        gen double d`j' = runiform() * `j'
+    }
+    forvalues j = 1/8 {
+        gen str40 s`j' = "q" + string(mod(_n * `j', 100000), "%05.0f")
+    }
+
+    dtparquet save "test_t08_pipeline.parquet", replace chunksize(`t16_chunk_size')
+
+    local t16_mode "$dtpq_write_pipeline_mode"
+    local t16_capacity = real("$dtpq_write_queue_capacity")
+    local t16_peak = real("$dtpq_write_queue_peak")
+    local t16_backpressure = real("$dtpq_write_queue_bp_events")
+    local t16_produced = real("$dtpq_write_queue_prod_batches")
+    local t16_consumed = real("$dtpq_write_queue_cons_batches")
+    local t16_processed = real("$dtpq_write_processed_batches")
+
+    assert inlist("`t16_mode'", "producer_consumer", "legacy_direct")
+    assert !missing(`t16_capacity')
+    assert !missing(`t16_peak')
+    assert !missing(`t16_backpressure')
+    assert !missing(`t16_produced')
+    assert !missing(`t16_consumed')
+    assert `t16_produced' >= 1
+    assert `t16_consumed' >= 1
+    assert `t16_consumed' == `t16_processed'
+
+    if "`t16_mode'" == "producer_consumer" {
+        assert `t16_capacity' >= 1
+        assert `t16_peak' >= 1
+        assert `t16_peak' <= `t16_capacity'
+        assert `t16_produced' == `t16_consumed'
+    }
+
+    clear
+    dtparquet use using "test_t08_pipeline.parquet", clear
+    assert _N == `t16_n_rows'
+}
+
+if _rc == 0 {
+    display as result "Test 16 completed successfully"
+    local passed_tests "`passed_tests' 16"
+}
+else {
+    display as error "Test 16 failed: producer-consumer write pipeline mismatch"
+    local failed_tests "`failed_tests' 16"
+}
+
 // Cleanup
 capture erase "test_wide.parquet"
 capture erase "test_boundary.parquet"
@@ -534,6 +592,7 @@ capture erase "test_strl.parquet"
 capture erase "test_native.parquet"
 capture erase "test_t06_lazy.parquet"
 capture erase "test_t07_autotune.parquet"
+capture erase "test_t08_pipeline.parquet"
 
 // Test Summary
 display _newline "=========================================="
