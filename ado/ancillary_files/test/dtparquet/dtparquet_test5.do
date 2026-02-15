@@ -626,6 +626,36 @@ else {
     local failed_tests "`failed_tests' 17"
 }
 
+// Test Case 18: T12 execution boundaries and typed payload entry points
+display _newline "=== TEST CASE 18: T12 Execution Boundaries ==="
+local ++total_tests
+
+capture noisily {
+    clear
+    set obs 2000
+    gen long id = _n
+    gen double value = _n * 1.25
+    gen str20 label = "row_" + string(_n, "%06.0f")
+
+    dtparquet save "test_t12_boundaries.parquet", replace chunksize(700)
+    assert inlist("$dtpq_write_engine_stage", "execute", "stata_sink")
+
+    clear
+    dtparquet use using "test_t12_boundaries.parquet", clear chunksize(700)
+    count
+    assert r(N) == 2000
+    assert inlist("$dtpq_read_engine_stage", "execute", "stata_sink")
+}
+
+if _rc == 0 {
+    display as result "Test 18 completed successfully"
+    local passed_tests "`passed_tests' 18"
+}
+else {
+    display as error "Test 18 failed: execution boundary mismatch"
+    local failed_tests "`failed_tests' 18"
+}
+
 // Cleanup
 capture erase "test_wide.parquet"
 capture erase "test_boundary.parquet"
@@ -638,6 +668,7 @@ capture erase "test_t06_lazy.parquet"
 capture erase "test_t07_autotune.parquet"
 capture erase "test_t08_pipeline.parquet"
 capture erase "test_t10_strl.parquet"
+capture erase "test_t12_boundaries.parquet"
 
 // Test Summary
 display _newline "=========================================="

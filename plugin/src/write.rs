@@ -146,6 +146,16 @@ struct SchemaHandoff<T> {
     fields: Vec<T>,
 }
 
+#[derive(Clone, Debug)]
+struct WriteScanPlan {
+    selected_infos: Vec<ExportField>,
+    start_row: usize,
+    rows_to_read: usize,
+    row_width_bytes: usize,
+    partition_cols: Vec<PlSmallStr>,
+    dtmeta_json: String,
+}
+
 fn parse_schema_handoff_fields<T: DeserializeOwned>(
     mapping: &str,
     handoff_name: &str,
@@ -172,6 +182,77 @@ fn parse_schema_handoff_fields<T: DeserializeOwned>(
         handoff_name
     )
     .into())
+}
+
+fn build_write_scan_plan(
+    varlist: &str,
+    mapping: &str,
+    n_rows: usize,
+    offset: usize,
+    partition_by: &str,
+) -> Result<WriteScanPlan, Box<dyn Error>> {
+    let selected_vars_owned;
+    let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
+        selected_vars_owned = read_macro("varlist", false, Some(10 * 1024 * 1024));
+        selected_vars_owned.as_str()
+    } else {
+        varlist
+    };
+
+    let all_columns = if mapping.is_empty() || mapping == "from_macros" {
+        let var_count = read_macro("var_count", false, None).parse::<usize>()?;
+        column_info_from_macros(var_count)
+    } else {
+        let (fields, handoff_mode) = parse_schema_handoff_fields::<ExportField>(mapping, "save")?;
+        set_macro("dtpq_write_schema_handoff", handoff_mode, true);
+        fields
+    };
+
+    validate_stata_schema(&all_columns)?;
+
+    let info_by_name: HashMap<&str, &ExportField> = all_columns
+        .iter()
+        .map(|info| (info.name.as_str(), info))
+        .collect();
+    let selected_names: Vec<&str> = selected_vars.split_whitespace().collect();
+    let selected_infos: Vec<ExportField> = if selected_names.is_empty() {
+        all_columns.clone()
+    } else {
+        selected_names
+            .iter()
+            .map(|name| {
+                *info_by_name
+                    .get(*name)
+                    .unwrap_or_else(|| panic!("Missing macro metadata for variable {}", name))
+            })
+            .cloned()
+            .collect()
+    };
+
+    let total_rows = count_rows() as usize;
+    let start_row = offset.min(total_rows);
+    let rows_available = total_rows - start_row;
+    let rows_to_read = if n_rows == 0 {
+        rows_available
+    } else {
+        n_rows.min(rows_available)
+    };
+
+    let row_width_bytes = estimate_export_row_width_bytes(&selected_infos);
+    let partition_cols: Vec<PlSmallStr> = partition_by
+        .split_whitespace()
+        .map(PlSmallStr::from)
+        .collect();
+    let dtmeta_json = extract_dtmeta();
+
+    Ok(WriteScanPlan {
+        selected_infos,
+        start_row,
+        rows_to_read,
+        row_width_bytes,
+        partition_cols,
+        dtmeta_json,
+    })
 }
 
 fn estimate_export_row_width_bytes(infos: &[ExportField]) -> usize {
@@ -707,64 +788,18 @@ pub fn export_parquet(
     set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
     set_macro("dtpq_if_filter_mode", "none", true);
     set_macro("dtpq_write_schema_handoff", "legacy_macros", true);
+    set_macro("dtpq_write_engine_stage", "scan_plan", true);
     publish_write_queue_metrics("legacy_direct", 0, 0, 0, 0, 0, 0);
 
-    let selected_vars_owned;
-    let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
-        selected_vars_owned = read_macro("varlist", false, Some(10 * 1024 * 1024));
-        selected_vars_owned.as_str()
-    } else {
-        varlist
-    };
-
-    let all_columns = if mapping.is_empty() || mapping == "from_macros" {
-        let var_count = read_macro("var_count", false, None).parse::<usize>()?;
-        column_info_from_macros(var_count)
-    } else {
-        let (fields, handoff_mode) = parse_schema_handoff_fields::<ExportField>(mapping, "save")?;
-        set_macro("dtpq_write_schema_handoff", handoff_mode, true);
-        fields
-    };
-
-    validate_stata_schema(&all_columns)?;
-
-    let info_by_name: HashMap<&str, &ExportField> = all_columns
-        .iter()
-        .map(|info| (info.name.as_str(), info))
-        .collect();
-
-    let selected_names: Vec<&str> = selected_vars.split_whitespace().collect();
-    let selected_infos: Vec<ExportField> = if selected_names.is_empty() {
-        all_columns.clone()
-    } else {
-        selected_names
-            .iter()
-            .map(|name| {
-                *info_by_name
-                    .get(*name)
-                    .unwrap_or_else(|| panic!("Missing macro metadata for variable {}", name))
-            })
-            .cloned()
-            .collect()
-    };
-
-    let total_rows = count_rows() as usize;
-    let start_row = offset.min(total_rows);
-    let rows_available = total_rows - start_row;
-    let rows_to_read = if n_rows == 0 {
-        rows_available
-    } else {
-        n_rows.min(rows_available)
-    };
-
-    let row_width_bytes = estimate_export_row_width_bytes(&selected_infos);
+    let plan = build_write_scan_plan(varlist, mapping, n_rows, offset, partition_by)?;
+    set_macro("dtpq_write_engine_stage", "execute", true);
 
     let scan = Arc::new(StataRowSource::new(
-        selected_infos,
-        start_row,
-        rows_to_read,
+        plan.selected_infos,
+        plan.start_row,
+        plan.rows_to_read,
         batch_size,
-        row_width_bytes,
+        plan.row_width_bytes,
     ));
     let mut lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
 
@@ -781,21 +816,14 @@ pub fn export_parquet(
         }
     }
 
-    let partition_cols: Vec<PlSmallStr> = partition_by
-        .split_whitespace()
-        .map(PlSmallStr::from)
-        .collect();
-
-    let dtmeta_json = extract_dtmeta();
-
-    if partition_cols.is_empty() {
+    if plan.partition_cols.is_empty() {
         write_single_dataframe(
             path,
             lf,
             compression,
             compression_level,
             overwrite_partition,
-            &dtmeta_json,
+            &plan.dtmeta_json,
             &mut collect_calls,
         )?;
     } else {
@@ -806,12 +834,13 @@ pub fn export_parquet(
             &mut df,
             compression,
             compression_level,
-            &partition_cols,
+            &plan.partition_cols,
             overwrite_partition,
-            &dtmeta_json,
+            &plan.dtmeta_json,
         )?;
     }
 
+    set_macro("dtpq_write_engine_stage", "stata_sink", true);
     scan.join_pipeline_worker();
 
     let batch_tuner = scan.batch_tuner_snapshot();

@@ -64,6 +64,13 @@ struct DescribeSchemaPayload {
     fields: Vec<DescribeFieldPayload>,
 }
 
+#[derive(Debug)]
+struct ReadScanPlan {
+    selected_column_list: Vec<String>,
+    transfer_columns: Vec<TransferColumnSpec>,
+    can_use_eager: bool,
+}
+
 fn parse_schema_handoff_fields<T: DeserializeOwned>(
     mapping: &str,
     handoff_name: &str,
@@ -90,6 +97,63 @@ fn parse_schema_handoff_fields<T: DeserializeOwned>(
         handoff_name
     )
     .into())
+}
+
+fn build_read_scan_plan(
+    path: &str,
+    variables_as_str: &str,
+    mapping: &str,
+    safe_relaxed: bool,
+    asterisk_var: Option<&str>,
+    sql_if: Option<&str>,
+    sort: &str,
+    random_share: f64,
+) -> Result<ReadScanPlan, Box<dyn Error>> {
+    let variables_owned;
+    let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
+        variables_owned = read_macro("matched_vars", false, Some(10 * 1024 * 1024));
+        variables_owned.as_str()
+    } else {
+        variables_as_str
+    };
+
+    let all_columns_unfiltered: Vec<FieldSpec> = if mapping.is_empty() || mapping == "from_macros" {
+        let n_vars = read_macro("n_matched_vars", false, None)
+            .parse::<usize>()
+            .unwrap_or(0);
+        column_info_from_macros(n_vars)
+    } else {
+        let (fields, handoff_mode) = parse_schema_handoff_fields::<FieldSpec>(mapping, "read")?;
+        set_macro("dtpq_read_schema_handoff", handoff_mode, true);
+        fields
+    };
+
+    let selected_column_list: Vec<String> = variables_as_str
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let selected_column_names: HashSet<&str> =
+        selected_column_list.iter().map(|s| s.as_str()).collect();
+    let all_columns: Vec<FieldSpec> = all_columns_unfiltered
+        .into_iter()
+        .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
+        .collect();
+
+    let transfer_columns = build_transfer_columns(&all_columns);
+    let can_use_eager = Path::new(path).is_file()
+        && !path.contains('*')
+        && !path.contains('?')
+        && !safe_relaxed
+        && asterisk_var.is_none()
+        && sql_if.map(|s| s.trim().is_empty()).unwrap_or(true)
+        && sort.trim().is_empty()
+        && random_share <= 0.0;
+
+    Ok(ReadScanPlan {
+        selected_column_list,
+        transfer_columns,
+        can_use_eager,
+    })
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -536,44 +600,28 @@ pub fn import_parquet(
     set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
     set_macro("dtpq_if_filter_mode", "none", true);
     set_macro("dtpq_read_schema_handoff", "legacy_macros", true);
+    set_macro("dtpq_read_engine_stage", "scan_plan", true);
 
-    let variables_owned;
-    let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
-        variables_owned = read_macro("matched_vars", false, Some(10 * 1024 * 1024));
-        variables_owned.as_str()
-    } else {
-        variables_as_str
-    };
-
-    let all_columns_unfiltered: Vec<FieldSpec> = if mapping.is_empty() || mapping == "from_macros" {
-        let n_vars = read_macro("n_matched_vars", false, None)
-            .parse::<usize>()
-            .unwrap_or(0);
-        column_info_from_macros(n_vars)
-    } else {
-        let (fields, handoff_mode) = parse_schema_handoff_fields::<FieldSpec>(mapping, "read")?;
-        set_macro("dtpq_read_schema_handoff", handoff_mode, true);
-        fields
-    };
-
-    let selected_column_list: Vec<&str> = variables_as_str.split_whitespace().collect();
-    let selected_column_names: HashSet<&str> = selected_column_list.iter().copied().collect();
-    let all_columns: Vec<FieldSpec> = all_columns_unfiltered
-        .into_iter()
-        .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
+    let plan = build_read_scan_plan(
+        path,
+        variables_as_str,
+        mapping,
+        safe_relaxed,
+        asterisk_var,
+        sql_if,
+        sort,
+        random_share,
+    )?;
+    let selected_column_list: Vec<&str> = plan
+        .selected_column_list
+        .iter()
+        .map(|s| s.as_str())
         .collect();
-    let transfer_columns = build_transfer_columns(&all_columns);
+    let transfer_columns = plan.transfer_columns;
 
-    let can_use_eager = Path::new(path).is_file()
-        && !path.contains('*')
-        && !path.contains('?')
-        && !safe_relaxed
-        && asterisk_var.is_none()
-        && sql_if.map(|s| s.trim().is_empty()).unwrap_or(true)
-        && sort.trim().is_empty()
-        && random_share <= 0.0;
+    set_macro("dtpq_read_engine_stage", "execute", true);
 
-    if can_use_eager {
+    if plan.can_use_eager {
         if !selected_column_list.is_empty() {
             if let Err(e) = validate_parquet_schema(path, &selected_column_list) {
                 crate::stata_interface::display(&format!("Schema validation warning: {}", e));
@@ -640,6 +688,7 @@ pub fn import_parquet(
                 break;
             }
             let batch_started_at = Instant::now();
+            set_macro("dtpq_read_engine_stage", "stata_sink", true);
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
@@ -762,6 +811,7 @@ pub fn import_parquet(
                 break;
             }
             let batch_started_at = Instant::now();
+            set_macro("dtpq_read_engine_stage", "stata_sink", true);
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset - batch_source_offset,
@@ -808,6 +858,7 @@ pub fn import_parquet(
                 break;
             }
             let batch_started_at = Instant::now();
+            set_macro("dtpq_read_engine_stage", "stata_sink", true);
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
