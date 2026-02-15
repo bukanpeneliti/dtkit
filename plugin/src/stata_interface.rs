@@ -15,6 +15,8 @@ static REPLACE_STRING_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_NUMERIC_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_STRING_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_STRL_CALLS: AtomicU64 = AtomicU64::new(0);
+static TRANSFER_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
+static TRANSFER_CONVERSION_FAILURES: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct TransferMetrics {
@@ -23,6 +25,8 @@ pub struct TransferMetrics {
     pub pull_numeric_calls: u64,
     pub pull_string_calls: u64,
     pub pull_strl_calls: u64,
+    pub fallback_calls: u64,
+    pub conversion_failures: u64,
 }
 
 pub fn reset_transfer_metrics() {
@@ -31,6 +35,8 @@ pub fn reset_transfer_metrics() {
     PULL_NUMERIC_CALLS.store(0, Ordering::Relaxed);
     PULL_STRING_CALLS.store(0, Ordering::Relaxed);
     PULL_STRL_CALLS.store(0, Ordering::Relaxed);
+    TRANSFER_FALLBACK_CALLS.store(0, Ordering::Relaxed);
+    TRANSFER_CONVERSION_FAILURES.store(0, Ordering::Relaxed);
 }
 
 pub fn read_transfer_metrics() -> TransferMetrics {
@@ -40,6 +46,8 @@ pub fn read_transfer_metrics() -> TransferMetrics {
         pull_numeric_calls: PULL_NUMERIC_CALLS.load(Ordering::Relaxed),
         pull_string_calls: PULL_STRING_CALLS.load(Ordering::Relaxed),
         pull_strl_calls: PULL_STRL_CALLS.load(Ordering::Relaxed),
+        fallback_calls: TRANSFER_FALLBACK_CALLS.load(Ordering::Relaxed),
+        conversion_failures: TRANSFER_CONVERSION_FAILURES.load(Ordering::Relaxed),
     }
 }
 
@@ -81,6 +89,16 @@ pub fn publish_transfer_metrics(prefix: &str) {
         &total_calls.to_string(),
         true,
     );
+    set_macro(
+        &format!("{}_fallback_calls", prefix),
+        &metrics.fallback_calls.to_string(),
+        true,
+    );
+    set_macro(
+        &format!("{}_conversion_failures", prefix),
+        &metrics.conversion_failures.to_string(),
+        true,
+    );
 }
 
 pub fn read_macro(macro_name: &str, global: bool, buffer_size: Option<usize>) -> String {
@@ -95,6 +113,14 @@ pub fn replace_number(value: Option<f64>, row: usize, column: usize) -> i32 {
 pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     REPLACE_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
     stata_sys::replace_string(value, row, column)
+}
+
+pub fn record_transfer_fallback() {
+    TRANSFER_FALLBACK_CALLS.fetch_add(1, Ordering::Relaxed);
+}
+
+pub fn record_transfer_conversion_failure() {
+    TRANSFER_CONVERSION_FAILURES.fetch_add(1, Ordering::Relaxed);
 }
 
 pub fn count_rows() -> i32 {

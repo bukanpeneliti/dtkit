@@ -18,8 +18,9 @@ use crate::downcast::apply_cast;
 use crate::mapping::FieldSpec;
 use crate::sql_from_if::convert_if_sql;
 use crate::stata_interface::{
-    publish_transfer_metrics, read_macro, replace_number, replace_string, reset_transfer_metrics,
-    set_macro, ST_retcode,
+    publish_transfer_metrics, read_macro, record_transfer_conversion_failure,
+    record_transfer_fallback, replace_number, replace_string, reset_transfer_metrics, set_macro,
+    ST_retcode,
 };
 use crate::utilities::{
     compute_pool_init_count, determine_parallelization_strategy, get_compute_thread_pool,
@@ -30,6 +31,24 @@ use crate::utilities::{
 #[allow(dead_code)]
 const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
 const ENV_METADATA_LOOKUP_MODE: &str = "DTPARQUET_METADATA_LOOKUP_MODE";
+
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+enum TransferWriterKind {
+    Numeric,
+    Date,
+    Time,
+    Datetime,
+    String,
+    Strl,
+}
+
+#[derive(Clone, Debug)]
+struct TransferColumnSpec {
+    name: String,
+    stata_col_index: usize,
+    stata_type: String,
+    writer_kind: TransferWriterKind,
+}
 
 #[allow(dead_code)]
 pub fn validate_parquet_schema(path: &str, expected_columns: &[&str]) -> Result<(), String> {
@@ -421,6 +440,7 @@ pub fn import_parquet(
         .into_iter()
         .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
         .collect();
+    let transfer_columns = build_transfer_columns(&all_columns);
 
     let can_use_eager = Path::new(path).is_file()
         && !path.contains('*')
@@ -500,7 +520,7 @@ pub fn import_parquet(
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
-                &all_columns,
+                &transfer_columns,
                 strategy,
                 stata_offset,
             )?;
@@ -604,7 +624,7 @@ pub fn import_parquet(
         process_batch_with_strategy(
             &batch_df,
             batch_offset - batch_source_offset,
-            &all_columns,
+            &transfer_columns,
             strategy,
             stata_offset,
         )?;
@@ -834,17 +854,699 @@ fn column_info_from_macros(n_vars: usize) -> Vec<FieldSpec> {
     column_infos
 }
 
+fn writer_kind_from_stata_type(stata_type: &str) -> TransferWriterKind {
+    match stata_type {
+        "string" => TransferWriterKind::String,
+        "strl" => TransferWriterKind::Strl,
+        "date" => TransferWriterKind::Date,
+        "time" => TransferWriterKind::Time,
+        "datetime" => TransferWriterKind::Datetime,
+        _ => TransferWriterKind::Numeric,
+    }
+}
+
+fn build_transfer_columns(all_columns: &[FieldSpec]) -> Vec<TransferColumnSpec> {
+    all_columns
+        .iter()
+        .map(|col| TransferColumnSpec {
+            name: col.name.clone(),
+            stata_col_index: col.index,
+            stata_type: col.stata_type.clone(),
+            writer_kind: writer_kind_from_stata_type(&col.stata_type),
+        })
+        .collect()
+}
+
+#[derive(Copy, Clone, Debug)]
+enum CellConversion<T> {
+    Value(Option<T>),
+    Mismatch,
+}
+
+fn convert_boolean_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Boolean(v) => CellConversion::Value(Some(if v { 1.0 } else { 0.0 })),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_i8_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Int8(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_i16_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Int16(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_i32_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Int32(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_i64_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Int64(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_u8_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::UInt8(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_u16_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::UInt16(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_u32_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::UInt32(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_u64_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::UInt64(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_f32_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Float32(v) => CellConversion::Value(Some(v as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_f64_to_f64(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Float64(v) => CellConversion::Value(Some(v)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_date_to_stata_days(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Date(v) => CellConversion::Value(Some((v + STATA_DATE_ORIGIN) as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_time_to_stata_millis(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Time(v) => CellConversion::Value(Some((v / TIME_US) as f64)),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn datetime_unit_factor(unit: TimeUnit) -> f64 {
+    match unit {
+        TimeUnit::Nanoseconds => (TIME_NS / TIME_MS) as f64,
+        TimeUnit::Microseconds => (TIME_US / TIME_MS) as f64,
+        TimeUnit::Milliseconds => 1.0,
+    }
+}
+
+fn datetime_to_stata_clock(value: i64, unit: TimeUnit) -> f64 {
+    let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
+    value as f64 / datetime_unit_factor(unit) + sec_shift_scaled
+}
+
+fn convert_datetime_to_stata_clock(value: AnyValue<'_>) -> CellConversion<f64> {
+    match value {
+        AnyValue::Datetime(v, unit, _) => {
+            CellConversion::Value(Some(datetime_to_stata_clock(v, unit)))
+        }
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_strict_string(value: AnyValue<'_>) -> CellConversion<String> {
+    match value {
+        AnyValue::String(v) => CellConversion::Value(Some(v.to_string())),
+        AnyValue::StringOwned(v) => CellConversion::Value(Some(v.to_string())),
+        AnyValue::Null => CellConversion::Value(None),
+        _ => CellConversion::Mismatch,
+    }
+}
+
+fn convert_numeric_legacy(value: AnyValue<'_>) -> Option<f64> {
+    match value {
+        AnyValue::Boolean(v) => Some(if v { 1.0 } else { 0.0 }),
+        AnyValue::Int8(v) => Some(v as f64),
+        AnyValue::Int16(v) => Some(v as f64),
+        AnyValue::Int32(v) => Some(v as f64),
+        AnyValue::Int64(v) => Some(v as f64),
+        AnyValue::UInt8(v) => Some(v as f64),
+        AnyValue::UInt16(v) => Some(v as f64),
+        AnyValue::UInt32(v) => Some(v as f64),
+        AnyValue::UInt64(v) => Some(v as f64),
+        AnyValue::Float32(v) => Some(v as f64),
+        AnyValue::Float64(v) => Some(v),
+        AnyValue::Date(v) => Some((v + STATA_DATE_ORIGIN) as f64),
+        AnyValue::Time(v) => Some((v / TIME_US) as f64),
+        _ => None,
+    }
+}
+
+fn convert_string_legacy(value: AnyValue<'_>) -> Option<String> {
+    match value {
+        AnyValue::String(v) => Some(v.to_string()),
+        AnyValue::StringOwned(v) => Some(v.to_string()),
+        AnyValue::Null => None,
+        v => Some(v.to_string()),
+    }
+}
+
+fn convert_datetime_legacy(value: AnyValue<'_>, dtype: &DataType) -> Option<f64> {
+    let unit_factor = match dtype {
+        DataType::Datetime(TimeUnit::Nanoseconds, _) => (TIME_NS / TIME_MS) as f64,
+        DataType::Datetime(TimeUnit::Microseconds, _) => (TIME_US / TIME_MS) as f64,
+        DataType::Datetime(TimeUnit::Milliseconds, _) => 1.0,
+        _ => 1.0,
+    };
+    let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
+    match value {
+        AnyValue::Datetime(v, _, _) => Some(v as f64 / unit_factor + sec_shift_scaled),
+        _ => None,
+    }
+}
+
+fn assign_cell_legacy(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    row_idx: usize,
+    global_row_idx: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match transfer_column.stata_type.as_str() {
+        "string" | "strl" => {
+            let out = match col.get(row_idx) {
+                Ok(v) => convert_string_legacy(v),
+                Err(_) => None,
+            };
+            replace_string(
+                out,
+                global_row_idx + 1 + stata_offset,
+                transfer_column.stata_col_index + 1,
+            );
+            Ok(())
+        }
+        "datetime" => {
+            let value = match col.get(row_idx) {
+                Ok(v) => convert_datetime_legacy(v, col.dtype()),
+                Err(_) => None,
+            };
+            replace_number(
+                value,
+                global_row_idx + 1 + stata_offset,
+                transfer_column.stata_col_index + 1,
+            );
+            Ok(())
+        }
+        _ => {
+            let value = match col.get(row_idx) {
+                Ok(v) => convert_numeric_legacy(v),
+                Err(_) => None,
+            };
+            replace_number(
+                value,
+                global_row_idx + 1 + stata_offset,
+                transfer_column.stata_col_index + 1,
+            );
+            Ok(())
+        }
+    }
+}
+
+fn assign_fallback_cell(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    row_idx: usize,
+    global_row_idx: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    record_transfer_fallback();
+    assign_cell_legacy(col, transfer_column, row_idx, global_row_idx, stata_offset)
+}
+
+fn write_numeric_with_converter(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
+) -> PolarsResult<()> {
+    for row_idx in start_row..end_row {
+        let global_row_idx = row_idx + start_index;
+        match col.get(row_idx) {
+            Ok(value) => match converter(value) {
+                CellConversion::Value(number) => {
+                    replace_number(
+                        number,
+                        global_row_idx + 1 + stata_offset,
+                        transfer_column.stata_col_index + 1,
+                    );
+                }
+                CellConversion::Mismatch => {
+                    record_transfer_conversion_failure();
+                    assign_fallback_cell(
+                        col,
+                        transfer_column,
+                        row_idx,
+                        global_row_idx,
+                        stata_offset,
+                    )?;
+                }
+            },
+            Err(_) => {
+                record_transfer_conversion_failure();
+                assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_string_with_converter(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+    converter: fn(AnyValue<'_>) -> CellConversion<String>,
+) -> PolarsResult<()> {
+    for row_idx in start_row..end_row {
+        let global_row_idx = row_idx + start_index;
+        match col.get(row_idx) {
+            Ok(value) => match converter(value) {
+                CellConversion::Value(text) => {
+                    replace_string(
+                        text,
+                        global_row_idx + 1 + stata_offset,
+                        transfer_column.stata_col_index + 1,
+                    );
+                }
+                CellConversion::Mismatch => {
+                    record_transfer_conversion_failure();
+                    assign_fallback_cell(
+                        col,
+                        transfer_column,
+                        row_idx,
+                        global_row_idx,
+                        stata_offset,
+                    )?;
+                }
+            },
+            Err(_) => {
+                record_transfer_conversion_failure();
+                assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn write_column_fallback_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    for row_idx in start_row..end_row {
+        let global_row_idx = row_idx + start_index;
+        record_transfer_conversion_failure();
+        assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+    }
+    Ok(())
+}
+
+fn write_numeric_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match col.dtype() {
+        DataType::Boolean => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_boolean_to_f64,
+        ),
+        DataType::Int8 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_i8_to_f64,
+        ),
+        DataType::Int16 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_i16_to_f64,
+        ),
+        DataType::Int32 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_i32_to_f64,
+        ),
+        DataType::Int64 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_i64_to_f64,
+        ),
+        DataType::UInt8 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_u8_to_f64,
+        ),
+        DataType::UInt16 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_u16_to_f64,
+        ),
+        DataType::UInt32 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_u32_to_f64,
+        ),
+        DataType::UInt64 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_u64_to_f64,
+        ),
+        DataType::Float32 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_f32_to_f64,
+        ),
+        DataType::Float64 => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_f64_to_f64,
+        ),
+        DataType::Date => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_date_to_stata_days,
+        ),
+        DataType::Time => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_time_to_stata_millis,
+        ),
+        DataType::Datetime(_, _) => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_datetime_to_stata_clock,
+        ),
+        _ => write_column_fallback_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
+fn write_date_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match col.dtype() {
+        DataType::Date => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_date_to_stata_days,
+        ),
+        _ => write_column_fallback_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
+fn write_time_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match col.dtype() {
+        DataType::Time => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_time_to_stata_millis,
+        ),
+        _ => write_column_fallback_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
+fn write_datetime_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match col.dtype() {
+        DataType::Datetime(_, _) => write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_datetime_to_stata_clock,
+        ),
+        _ => write_column_fallback_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
+fn write_string_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match col.dtype() {
+        DataType::String => write_string_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            convert_strict_string,
+        ),
+        _ => write_column_fallback_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
+fn write_transfer_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    match transfer_column.writer_kind {
+        TransferWriterKind::Numeric => write_numeric_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+        TransferWriterKind::Date => write_date_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+        TransferWriterKind::Time => write_time_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+        TransferWriterKind::Datetime => write_datetime_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+        TransferWriterKind::String | TransferWriterKind::Strl => write_string_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        ),
+    }
+}
+
 fn process_batch_with_strategy(
     batch: &DataFrame,
     start_index: usize,
-    all_columns: &Vec<FieldSpec>,
+    transfer_columns: &[TransferColumnSpec],
     strategy: BatchMode,
     stata_offset: usize,
 ) -> PolarsResult<()> {
     let row_count = batch.height();
     let pool = get_compute_thread_pool();
     if pool.current_num_threads() <= 1 || row_count < 4_096 {
-        return process_row_range(batch, start_index, 0, row_count, all_columns, stata_offset);
+        return process_row_range(
+            batch,
+            start_index,
+            0,
+            row_count,
+            transfer_columns,
+            stata_offset,
+        );
     }
 
     pool.install(|| match strategy {
@@ -862,18 +1564,21 @@ fn process_batch_with_strategy(
                         start_index,
                         start_row,
                         end_row,
-                        all_columns,
+                        transfer_columns,
                         stata_offset,
                     )
                 })
         }
-        BatchMode::ByColumn => all_columns.par_iter().try_for_each(|col_info| {
-            let col = batch.column(&col_info.name)?;
-            for row_idx in 0..row_count {
-                let global_row_idx = row_idx + start_index;
-                assign_cell(col, col_info, row_idx, global_row_idx, stata_offset)?;
-            }
-            Ok(())
+        BatchMode::ByColumn => transfer_columns.par_iter().try_for_each(|transfer_column| {
+            let col = batch.column(&transfer_column.name)?;
+            write_transfer_column_range(
+                col,
+                transfer_column,
+                start_index,
+                0,
+                row_count,
+                stata_offset,
+            )
         }),
     })
 }
@@ -883,72 +1588,19 @@ fn process_row_range(
     start_index: usize,
     start_row: usize,
     end_row: usize,
-    all_columns: &Vec<FieldSpec>,
+    transfer_columns: &[TransferColumnSpec],
     stata_offset: usize,
 ) -> PolarsResult<()> {
-    for col_info in all_columns {
-        let col = batch.column(&col_info.name)?;
-        for row_idx in start_row..end_row {
-            let global_row_idx = row_idx + start_index;
-            assign_cell(col, col_info, row_idx, global_row_idx, stata_offset)?;
-        }
+    for transfer_column in transfer_columns {
+        let col = batch.column(&transfer_column.name)?;
+        write_transfer_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        )?;
     }
     Ok(())
-}
-
-fn assign_cell(
-    col: &Column,
-    col_info: &FieldSpec,
-    row_idx: usize,
-    global_row_idx: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    match col_info.stata_type.as_str() {
-        "string" | "strl" => {
-            let out = match col.get(row_idx) {
-                Ok(AnyValue::String(v)) => Some(v.to_string()),
-                Ok(AnyValue::StringOwned(v)) => Some(v.to_string()),
-                Ok(AnyValue::Null) => None,
-                Ok(v) => Some(v.to_string()),
-                Err(_) => None,
-            };
-            replace_string(out, global_row_idx + 1 + stata_offset, col_info.index + 1);
-            Ok(())
-        }
-        "datetime" => {
-            let mills_factor = match col.dtype() {
-                DataType::Datetime(TimeUnit::Nanoseconds, _) => (TIME_NS / TIME_MS) as f64,
-                DataType::Datetime(TimeUnit::Microseconds, _) => (TIME_US / TIME_MS) as f64,
-                DataType::Datetime(TimeUnit::Milliseconds, _) => 1.0,
-                _ => 1.0,
-            };
-            let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
-            let value = match col.get(row_idx) {
-                Ok(AnyValue::Datetime(v, _, _)) => Some(v as f64 / mills_factor + sec_shift_scaled),
-                _ => None,
-            };
-            replace_number(value, global_row_idx + 1 + stata_offset, col_info.index + 1);
-            Ok(())
-        }
-        _ => {
-            let value = match col.get(row_idx) {
-                Ok(AnyValue::Boolean(v)) => Some(if v { 1.0 } else { 0.0 }),
-                Ok(AnyValue::Int8(v)) => Some(v as f64),
-                Ok(AnyValue::Int16(v)) => Some(v as f64),
-                Ok(AnyValue::Int32(v)) => Some(v as f64),
-                Ok(AnyValue::Int64(v)) => Some(v as f64),
-                Ok(AnyValue::UInt8(v)) => Some(v as f64),
-                Ok(AnyValue::UInt16(v)) => Some(v as f64),
-                Ok(AnyValue::UInt32(v)) => Some(v as f64),
-                Ok(AnyValue::UInt64(v)) => Some(v as f64),
-                Ok(AnyValue::Float32(v)) => Some(v as f64),
-                Ok(AnyValue::Float64(v)) => Some(v),
-                Ok(AnyValue::Date(v)) => Some((v + STATA_DATE_ORIGIN) as f64),
-                Ok(AnyValue::Time(v)) => Some((v / TIME_US) as f64),
-                _ => None,
-            };
-            replace_number(value, global_row_idx + 1 + stata_offset, col_info.index + 1);
-            Ok(())
-        }
-    }
 }
