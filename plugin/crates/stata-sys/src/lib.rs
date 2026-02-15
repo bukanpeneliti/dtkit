@@ -35,7 +35,6 @@ pub unsafe fn SF_vdata(i: i32, j: i32, d: *mut f64) -> i32 {
     }
 }
 
-
 // Dataset information functions
 #[inline]
 pub unsafe fn SF_nobs() -> i32 {
@@ -45,7 +44,6 @@ pub unsafe fn SF_nobs() -> i32 {
         panic!("nobs function is not available")
     }
 }
-
 
 #[inline]
 pub unsafe fn SF_nvar() -> i32 {
@@ -57,7 +55,6 @@ pub unsafe fn SF_nvar() -> i32 {
 }
 
 // Display and error reporting
-
 
 #[inline]
 pub unsafe fn SF_error(s: *mut std::os::raw::c_char) -> i32 {
@@ -110,150 +107,125 @@ pub unsafe fn SF_sdata(i: i32, j: i32, s: *mut std::os::raw::c_char) -> i32 {
 }
 
 #[inline]
-pub fn display(
-    message:&str
-) -> i32 {
+pub fn display(message: &str) -> i32 {
     let message_c = std::ffi::CString::new(format!("{}\n", message)).unwrap();
-    
-    unsafe {
-        SF_display(message_c.as_ptr()  as *mut std::os::raw::c_char)
-    }
+
+    unsafe { SF_display(message_c.as_ptr() as *mut std::os::raw::c_char) }
 }
 
 #[inline]
-pub fn set_macro(
-    macro_name:&str,
-    value:&str,
-    global:bool
-) -> i32 {
-
+pub fn set_macro(macro_name: &str, value: &str, global: bool) -> i32 {
     let macro_name_c = if global {
         std::ffi::CString::new(macro_name)
     } else {
-        std::ffi::CString::new(format!("_{}",macro_name))
-    }.unwrap();
+        std::ffi::CString::new(format!("_{}", macro_name))
+    }
+    .unwrap();
 
     let value_c = std::ffi::CString::new(value).unwrap();
 
     unsafe {
         SF_macro_save(
-            macro_name_c.as_ptr() as *mut std::os::raw::c_char, 
-            value_c.as_ptr() as *mut std::os::raw::c_char
+            macro_name_c.as_ptr() as *mut std::os::raw::c_char,
+            value_c.as_ptr() as *mut std::os::raw::c_char,
         )
     }
 }
 
-
-pub fn get_macro(macro_name: &str, global: bool, buffer_size: Option<usize>) -> Result<String, &'static str> {
+pub fn get_macro(
+    macro_name: &str,
+    global: bool,
+    buffer_size: Option<usize>,
+) -> Result<String, &'static str> {
     // Format the macro name with underscore prefix if not global
     let macro_name_c = if global {
         std::ffi::CString::new(macro_name)
     } else {
         std::ffi::CString::new(format!("_{}", macro_name))
-    }.unwrap();
-    
+    }
+    .unwrap();
+
     // Use provided buffer size or default to a reasonable size
     let buf_size = buffer_size.unwrap_or(1024);
     let mut buffer = vec![0i8; buf_size];
-    
+
     let result = unsafe {
         SF_macro_use(
             macro_name_c.as_ptr() as *mut std::os::raw::c_char,
             buffer.as_mut_ptr(),
-            buf_size as i32
+            buf_size as i32,
         )
     };
-    
+
     if result > 0 {
         // Error occurred
         return Err("Macro not found or other error");
     }
-    
+
     // Convert the C string buffer to a Rust String
     let c_str = unsafe { std::ffi::CStr::from_ptr(buffer.as_ptr()) };
     match c_str.to_str() {
         Ok(s) => Ok(s.to_string()),
-        Err(_) => Err("Invalid UTF-8 in macro value")
+        Err(_) => Err("Invalid UTF-8 in macro value"),
     }
 }
 
 #[inline]
 pub fn set_scalar(
-    scalar_name:&str,
-    value:&f64,
+    scalar_name: &str,
+    value: &f64,
     //  global:bool
 ) -> i32 {
-
     let scalar_name_c = std::ffi::CString::new(scalar_name).unwrap();
-
 
     unsafe {
         SF_scal_save(
-            scalar_name_c.as_ptr() as *mut std::os::raw::c_char, 
-            value.clone()
+            scalar_name_c.as_ptr() as *mut std::os::raw::c_char,
+            value.clone(),
         )
     }
 }
-
-
-
 
 #[inline]
 pub unsafe fn SF_macro_use(
     m: *mut std::os::raw::c_char,
     contents: *mut std::os::raw::c_char,
-    len: i32
+    len: i32,
 ) -> i32 {
     if let Some(func) = (*_stata_).macuse {
-        (func)(m,contents,len)
+        (func)(m, contents, len)
     } else {
         panic!("macuse function is not available")
     }
-}   
-
+}
 
 #[inline]
-pub fn replace_number(
-    value:Option<f64>,
-    row:usize,
-    column:usize
-) -> i32 {
+pub fn replace_number(value: Option<f64>, row: usize, column: usize) -> i32 {
     match value {
-        Some(val) => unsafe {
-            SF_vstore(
-                column as i32,
-                row as i32,
-                val
-            )
-        },
+        Some(val) => unsafe { SF_vstore(column as i32, row as i32, val) },
         //  Do nothing
-        None => 0
+        None => 0,
     }
 }
 
-
 #[inline]
-pub fn replace_string(
-    value:Option<String>,
-    row:usize,
-    column:usize
-) -> i32 {
+pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     match value {
         Some(val) => unsafe {
             SF_sstore(
                 column as i32,
                 row as i32,
-                std::ffi::CString::new(val).unwrap().as_ptr().cast_mut()
+                std::ffi::CString::new(val).unwrap().as_ptr().cast_mut(),
             )
         },
         //  Do nothing
-        None => 0
+        None => 0,
     }
 }
 
 //  Internal wrappers
 #[inline]
-unsafe fn SF_macro_save(m: *mut std::os::raw::c_char, t:*mut std::os::raw::c_char) -> i32 {
+unsafe fn SF_macro_save(m: *mut std::os::raw::c_char, t: *mut std::os::raw::c_char) -> i32 {
     if let Some(func) = (*_stata_).macresave {
         (func)(m, t)
     } else {
@@ -261,9 +233,8 @@ unsafe fn SF_macro_save(m: *mut std::os::raw::c_char, t:*mut std::os::raw::c_cha
     }
 }
 
-
 #[inline]
-unsafe fn SF_scal_save(s: *mut std::os::raw::c_char, d:f64) -> i32 {
+unsafe fn SF_scal_save(s: *mut std::os::raw::c_char, d: f64) -> i32 {
     if let Some(func) = (*_stata_).scalsave {
         (func)(s, d)
     } else {
@@ -280,11 +251,10 @@ unsafe fn SF_display(s: *mut std::os::raw::c_char) -> i32 {
     }
 }
 
-
 #[inline]
 unsafe fn SF_vstore(i: i32, j: i32, v: f64) -> i32 {
     //  if let Some(func) = (*_stata_).safestore {
-        if let Some(func) = (*_stata_).store {
+    if let Some(func) = (*_stata_).store {
         (func)(i, j, v)
     } else {
         panic!("safestore function is not available")
@@ -300,23 +270,18 @@ unsafe fn SF_sstore(i: i32, j: i32, s: *mut std::os::raw::c_char) -> i32 {
     }
 }
 
-
 //  strl functions
 #[inline]
 pub unsafe fn SF_sdatalen(i: i32, j: i32) -> i32 {
     if let Some(func) = (*_stata_).sdatalen {
-        (func)(i,j)
+        (func)(i, j)
     } else {
         panic!("sdatalen function is not available")
     }
 }
 
 #[inline]
-pub unsafe fn SF_strldata(
-    i: i32,
-    j: i32,
-    s: *mut std::os::raw::c_char,
-    len: i32) -> i32 {
+pub unsafe fn SF_strldata(i: i32, j: i32, s: *mut std::os::raw::c_char, len: i32) -> i32 {
     if let Some(func) = (*_stata_).strldata {
         (func)(i, j, s, len)
     } else {
@@ -327,7 +292,7 @@ pub unsafe fn SF_strldata(
 #[inline]
 pub unsafe fn SF_var_is_binary(i: i32, j: i32) -> bool {
     if let Some(func) = (*_stata_).isbinary {
-        (func)(i,j) > 0
+        (func)(i, j) > 0
     } else {
         panic!("isbinary function is not available")
     }
