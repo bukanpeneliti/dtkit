@@ -21,8 +21,9 @@ use crate::stata_interface::{
     set_macro, ST_retcode,
 };
 use crate::utilities::{
-    create_compute_thread_pool, determine_parallelization_strategy, get_thread_count, BatchMode,
-    STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
+    compute_pool_init_count, determine_parallelization_strategy, get_compute_thread_pool,
+    get_io_thread_pool, io_pool_init_count, warm_thread_pools, BatchMode, STATA_DATE_ORIGIN,
+    STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
 };
 
 #[allow(dead_code)]
@@ -333,6 +334,26 @@ fn publish_read_runtime_metrics(
         true,
     );
     set_macro("dtpq_read_elapsed_ms", &elapsed_ms.to_string(), true);
+    set_macro(
+        "dtpq_compute_pool_threads",
+        &get_compute_thread_pool().current_num_threads().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_compute_pool_inits",
+        &compute_pool_init_count().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_io_pool_threads",
+        &get_io_thread_pool().current_num_threads().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_io_pool_inits",
+        &io_pool_init_count().to_string(),
+        true,
+    );
     publish_transfer_metrics("dtpq_read");
 }
 
@@ -355,6 +376,7 @@ pub fn import_parquet(
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
     let mut processed_batches = 0usize;
+    warm_thread_pools();
     reset_transfer_metrics();
     publish_read_runtime_metrics(0, 0, 0, 0);
 
@@ -439,7 +461,7 @@ pub fn import_parquet(
             df.try_apply(&col_name, |s| s.cast(&DataType::String))?;
         }
 
-        let n_threads = get_thread_count();
+        let n_threads = get_compute_thread_pool().current_num_threads().max(1);
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(selected_column_list.len(), df.height(), n_threads)
         });
@@ -462,7 +484,6 @@ pub fn import_parquet(
                 batch_offset,
                 &all_columns,
                 strategy,
-                n_threads,
                 stata_offset,
             )?;
             processed_batches += 1;
@@ -536,7 +557,7 @@ pub fn import_parquet(
 
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
     let n_batches = (n_rows as f64 / batch_size as f64).ceil() as usize;
-    let n_threads = get_thread_count();
+    let n_threads = get_compute_thread_pool().current_num_threads().max(1);
     let strategy = parallel_strategy
         .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), n_rows, n_threads));
     set_macro("n_batches", &n_batches.to_string(), false);
@@ -567,7 +588,6 @@ pub fn import_parquet(
             batch_offset - batch_source_offset,
             &all_columns,
             strategy,
-            n_threads,
             stata_offset,
         )?;
         processed_batches += 1;
@@ -801,15 +821,13 @@ fn process_batch_with_strategy(
     start_index: usize,
     all_columns: &Vec<FieldSpec>,
     strategy: BatchMode,
-    n_threads: usize,
     stata_offset: usize,
 ) -> PolarsResult<()> {
     let row_count = batch.height();
-    if n_threads <= 1 || row_count < 4_096 {
+    let pool = get_compute_thread_pool();
+    if pool.current_num_threads() <= 1 || row_count < 4_096 {
         return process_row_range(batch, start_index, 0, row_count, all_columns, stata_offset);
     }
-
-    let pool = create_compute_thread_pool();
 
     pool.install(|| match strategy {
         BatchMode::ByRow => {

@@ -17,7 +17,10 @@ use crate::stata_interface::{
     count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell, pull_strl_cell,
     read_macro, reset_transfer_metrics, set_macro,
 };
-use crate::utilities::{STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS};
+use crate::utilities::{
+    compute_pool_init_count, get_compute_thread_pool, get_io_thread_pool, io_pool_init_count,
+    warm_thread_pools, STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS,
+};
 
 fn publish_write_runtime_metrics(
     collect_calls: usize,
@@ -37,6 +40,26 @@ fn publish_write_runtime_metrics(
         true,
     );
     set_macro("dtpq_write_elapsed_ms", &elapsed_ms.to_string(), true);
+    set_macro(
+        "dtpq_compute_pool_threads",
+        &get_compute_thread_pool().current_num_threads().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_compute_pool_inits",
+        &compute_pool_init_count().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_io_pool_threads",
+        &get_io_thread_pool().current_num_threads().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_io_pool_inits",
+        &io_pool_init_count().to_string(),
+        true,
+    );
     publish_transfer_metrics("dtpq_write");
 }
 
@@ -220,6 +243,7 @@ pub fn export_parquet(
 ) -> Result<i32, Box<dyn Error>> {
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
+    warm_thread_pools();
     reset_transfer_metrics();
     publish_write_runtime_metrics(0, 0, 0, 0);
 

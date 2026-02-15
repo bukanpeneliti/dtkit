@@ -6,10 +6,17 @@ pub const TIME_NS: i64 = 1_000_000_000;
 
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::env;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::OnceLock;
 use std::thread;
 
 const ENV_DTPARQUET_THREADS: &str = "DTPARQUET_THREADS";
 const ENV_POLARS_MAX_THREADS: &str = "POLARS_MAX_THREADS";
+
+static IO_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
+static COMPUTE_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
+static IO_POOL_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
+static COMPUTE_POOL_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 fn parse_env_usize(var: &str) -> Option<usize> {
     env::var(var).ok().and_then(|s| {
@@ -55,22 +62,56 @@ pub fn get_compute_thread_count() -> usize {
     get_thread_count()
 }
 
-pub fn create_io_thread_pool() -> ThreadPool {
-    let threads = get_io_thread_count();
+fn build_named_pool(
+    threads: usize,
+    pool_kind: &'static str,
+) -> Result<ThreadPool, rayon::ThreadPoolBuildError> {
     ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("dtparquet-io-{}", i))
+        .num_threads(threads.max(1))
+        .thread_name(move |i| format!("dtparquet-{}-{}", pool_kind, i))
         .build()
-        .unwrap_or_else(|_| ThreadPoolBuilder::new().num_threads(2).build().unwrap())
 }
 
-pub fn create_compute_thread_pool() -> ThreadPool {
+fn create_io_thread_pool() -> ThreadPool {
+    let threads = get_io_thread_count();
+    build_named_pool(threads, "io")
+        .or_else(|_| build_named_pool(2, "io"))
+        .or_else(|_| build_named_pool(1, "io"))
+        .unwrap()
+}
+
+fn create_compute_thread_pool() -> ThreadPool {
     let threads = get_compute_thread_count();
-    ThreadPoolBuilder::new()
-        .num_threads(threads)
-        .thread_name(|i| format!("dtparquet-cpu-{}", i))
-        .build()
-        .unwrap_or_else(|_| ThreadPoolBuilder::new().num_threads(1).build().unwrap())
+    build_named_pool(threads, "cpu")
+        .or_else(|_| build_named_pool(1, "cpu"))
+        .unwrap()
+}
+
+pub fn get_io_thread_pool() -> &'static ThreadPool {
+    IO_THREAD_POOL.get_or_init(|| {
+        IO_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
+        create_io_thread_pool()
+    })
+}
+
+pub fn get_compute_thread_pool() -> &'static ThreadPool {
+    COMPUTE_THREAD_POOL.get_or_init(|| {
+        COMPUTE_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
+        create_compute_thread_pool()
+    })
+}
+
+pub fn warm_thread_pools() {
+    let _ = get_compute_thread_pool();
+    let _ = get_io_thread_pool();
+}
+
+pub fn io_pool_init_count() -> usize {
+    IO_POOL_INIT_COUNT.load(Ordering::Relaxed)
+}
+
+pub fn compute_pool_init_count() -> usize {
+    COMPUTE_POOL_INIT_COUNT.load(Ordering::Relaxed)
 }
 
 #[derive(Copy, Clone, Debug)]
