@@ -9,13 +9,36 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::sql_from_if::convert_if_sql;
 use crate::stata_interface::{
-    count_rows, pull_numeric_cell, pull_string_cell, pull_strl_cell, read_macro,
+    count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell, pull_strl_cell,
+    read_macro, reset_transfer_metrics, set_macro,
 };
 use crate::utilities::{STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS};
+
+fn publish_write_runtime_metrics(
+    collect_calls: usize,
+    planned_batches: usize,
+    processed_batches: usize,
+    elapsed_ms: u128,
+) {
+    set_macro("dtpq_write_collect_calls", &collect_calls.to_string(), true);
+    set_macro(
+        "dtpq_write_planned_batches",
+        &planned_batches.to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_processed_batches",
+        &processed_batches.to_string(),
+        true,
+    );
+    set_macro("dtpq_write_elapsed_ms", &elapsed_ms.to_string(), true);
+    publish_transfer_metrics("dtpq_write");
+}
 
 #[derive(Clone, Debug)]
 pub struct ExportField {
@@ -30,7 +53,9 @@ pub struct StataRowSource {
     start_row: usize,
     n_rows: usize,
     batch_size: usize,
+    planned_batches: usize,
     current_offset: AtomicUsize,
+    processed_batches: AtomicUsize,
     schema: Arc<Schema>,
     stata_api_lock: Mutex<()>,
 }
@@ -63,15 +88,32 @@ impl StataRowSource {
             fields.push(Field::new(PlSmallStr::from(&info.name), dtype));
         }
 
+        let safe_batch_size = batch_size.max(1);
+        let planned_batches = if n_rows == 0 {
+            0
+        } else {
+            n_rows.div_ceil(safe_batch_size)
+        };
+
         StataRowSource {
             column_info,
             start_row,
             n_rows,
-            batch_size,
+            batch_size: safe_batch_size,
+            planned_batches,
             current_offset: AtomicUsize::new(0),
+            processed_batches: AtomicUsize::new(0),
             schema: Arc::new(Schema::from_iter(fields)),
             stata_api_lock: Mutex::new(()),
         }
+    }
+
+    pub fn planned_batches(&self) -> usize {
+        self.planned_batches
+    }
+
+    pub fn processed_batches(&self) -> usize {
+        self.processed_batches.load(Ordering::Relaxed)
     }
 }
 
@@ -94,6 +136,7 @@ impl AnonymousScan for StataRowSource {
         let read_count = std::cmp::min(self.n_rows - offset, self.n_rows);
 
         let _lock = self.stata_api_lock.lock().unwrap();
+        self.processed_batches.fetch_add(1, Ordering::Relaxed);
         let df = self.read_batch(offset, read_count)?;
         Ok(df)
     }
@@ -108,6 +151,7 @@ impl AnonymousScan for StataRowSource {
         let read_count = std::cmp::min(self.batch_size, self.n_rows - offset);
 
         let _lock = self.stata_api_lock.lock().unwrap();
+        self.processed_batches.fetch_add(1, Ordering::Relaxed);
         let df = self.read_batch(offset, read_count)?;
         Ok(Some(df))
     }
@@ -174,6 +218,11 @@ pub fn export_parquet(
     _compress_string: bool,
     batch_size: usize,
 ) -> Result<i32, Box<dyn Error>> {
+    let started_at = Instant::now();
+    let mut collect_calls = 0usize;
+    reset_transfer_metrics();
+    publish_write_runtime_metrics(0, 0, 0, 0);
+
     let selected_vars_owned;
     let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
         selected_vars_owned = read_macro("varlist", false, Some(10 * 1024 * 1024));
@@ -226,8 +275,13 @@ pub fn export_parquet(
         batch_size
     };
 
-    let scan = StataRowSource::new(selected_infos, start_row, rows_to_read, final_batch_size);
-    let mut lf = LazyFrame::anonymous_scan(Arc::new(scan), ScanArgsAnonymous::default())?;
+    let scan = Arc::new(StataRowSource::new(
+        selected_infos,
+        start_row,
+        rows_to_read,
+        final_batch_size,
+    ));
+    let mut lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
         let mut ctx = SQLContext::new();
@@ -251,8 +305,10 @@ pub fn export_parquet(
             compression_level,
             overwrite_partition,
             &dtmeta_json,
+            &mut collect_calls,
         )?;
     } else {
+        collect_calls += 1;
         let mut df = lf.collect()?;
         write_partitioned_dataframe(
             path,
@@ -265,6 +321,13 @@ pub fn export_parquet(
         )?;
     }
 
+    publish_write_runtime_metrics(
+        collect_calls,
+        scan.planned_batches(),
+        scan.processed_batches(),
+        started_at.elapsed().as_millis(),
+    );
+
     Ok(0)
 }
 
@@ -275,6 +338,7 @@ fn write_single_dataframe(
     compression_level: Option<usize>,
     overwrite_partition: bool,
     dtmeta_json: &str,
+    collect_calls: &mut usize,
 ) -> Result<(), Box<dyn Error>> {
     let out_path = Path::new(path);
 
@@ -307,6 +371,7 @@ fn write_single_dataframe(
     };
 
     let sink_target = SinkTarget::Path(PlPath::new(&tmp_path));
+    *collect_calls += 1;
     lf.sink_parquet(sink_target, write_options, None, SinkOptions::default())?
         .collect()?;
 

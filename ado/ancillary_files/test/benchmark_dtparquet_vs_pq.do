@@ -1,176 +1,249 @@
 *! benchmark_dtparquet_vs_pq.do
-*! Compare performance of dtparquet vs pq
+*! Baseline benchmark harness for dtparquet
 
 version 16
-clear frames
-capture log close
-cd d:/OneDrive/MyWork/00personal/stata/dtkit
-
-log using ado/ancillary_files/test/log/benchmark_dtparquet_vs_pq.log, replace
-
-// Load programs from ado directory
+clear all
+set more off
 discard
-local ado_plus = c(sysdir_plus)
-capture mkdir "`ado_plus'd"
-copy ado/dtparquet.ado "`ado_plus'd/dtparquet.ado", replace
-copy ado/dtparquet.py "`ado_plus'd/dtparquet.py", replace
 
-// Set up paths
-local parquet_file "d:\OneDrive\MyData\bpom\raw\produk\kosmetika\produk_kosmetika_202601.parquet"
-local dta_file "d:\OneDrive\MyData\bpom\output\dta\produk_kosmetika.dta"
-local log_dir "D:\OneDrive\MyWork\00personal\stata\dtkit\ado\ancillary_files\test\temp"
+local initial_pwd = c(pwd)
+cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-// Verify files exist
-capture confirm file "`parquet_file'"
-if _rc {
-    display as error "Parquet file not found: `parquet_file'"
+if !fileexists("ado/dtparquet.ado") {
+    display as error "Missing ado/dtparquet.ado. Run from repository root."
     exit 601
 }
 
-capture confirm file "`dta_file'"
-if _rc {
-    display as error "DTA file not found: `dta_file'"
+if !fileexists("ado/ancillary_files/dtparquet.dll") {
+    display as error "Missing ado/ancillary_files/dtparquet.dll"
     exit 601
 }
 
-// Create temp directory if needed
-capture mkdir "`log_dir'"
+adopath ++ "ado"
 
-display _newline(2)
-display as text "{hline 80}"
-display as result "BENCHMARK: dtparquet vs pq"
-display as text "{hline 80}"
-display as text "Parquet file: `parquet_file'"
-display as text "DTA file:     `dta_file'"
-display _newline(1)
+local log_root "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log"
 
-// Skip file size display (not critical for benchmark)
+log using "`log_root'/benchmark_dtparquet_vs_pq.log", text replace
 
-// Create temp output files
-tempfile temp_out_dtparquet temp_out_pq
-local temp_parquet_dtparquet "`temp_out_dtparquet'.parquet"
-local temp_parquet_pq "`temp_out_pq'.parquet"
+local warmup_runs 2
+local measured_runs 8
+local total_runs = `warmup_runs' + `measured_runs'
+local chunk_size 50000
 
-display as text "{hline 80}"
-display as result "TEST 1: LOADING PARQUET FILE"
-display as text "{hline 80}"
-display _newline(1)
+tempfile run_results
+tempname posth
 
-// Test 1a: dtparquet use
-display as text "Testing dtparquet use..."
-timer clear 1
-timer on 1
-quietly dtparquet use using "`parquet_file'", clear
-timer off 1
-quietly timer list 1
-local time_dtparquet_use = r(t1)
-local nobs_dtparquet = _N
-local nvars_dtparquet = c(k)
-display as result "  Time: " as text %9.3f `time_dtparquet_use' as result " seconds"
-display as text "  Observations: " as result %12.0fc `nobs_dtparquet'
-display as text "  Variables:    " as result %12.0fc `nvars_dtparquet'
-display _newline(1)
+postfile `posth' ///
+    str20 scenario ///
+    str8 operation ///
+    int run ///
+    byte warmup ///
+    double elapsed ///
+    long src_nobs ///
+    int src_nvars ///
+    long out_nobs ///
+    int out_nvars ///
+    double collect_calls ///
+    double planned_batches ///
+    double processed_batches ///
+    double replace_number_calls ///
+    double replace_string_calls ///
+    double pull_numeric_calls ///
+    double pull_string_calls ///
+    double pull_strl_calls ///
+    using "`run_results'", replace
 
-// Test 1b: pq use
-display as text "Testing pq use..."
-timer clear 2
-timer on 2
-quietly pq use using "`parquet_file'", clear
-timer off 2
-quietly timer list 2
-local time_pq_use = r(t2)
-local nobs_pq = _N
-local nvars_pq = c(k)
-display as result "  Time: " as text %9.3f `time_pq_use' as result " seconds"
-display as text "  Observations: " as result %12.0fc `nobs_pq'
-display as text "  Variables:    " as result %12.0fc `nvars_pq'
-display _newline(1)
+foreach scenario in narrow_numeric wide_mixed string_heavy {
+    display as text "Running scenario: `scenario'"
 
-// Calculate speedup
-local speedup_use = `time_dtparquet_use' / `time_pq_use'
-display as text "Results:"
-display as result "  pq is " as text %5.2f `speedup_use' as result "x faster" as text " for loading"
-display _newline(2)
+    clear
+    set seed 12345
 
-display as text "{hline 80}"
-display as result "TEST 2: SAVING TO PARQUET FILE"
-display as text "{hline 80}"
-display _newline(1)
+    if "`scenario'" == "narrow_numeric" {
+        set obs 500000
+        gen long id = _n
+        forvalues j = 1/6 {
+            gen long int`j' = mod(_n + `j', 1000000)
+        }
+        forvalues j = 1/6 {
+            gen double dbl`j' = (runiform() * 10000) + `j'
+        }
+    }
+    else if "`scenario'" == "wide_mixed" {
+        set obs 100000
+        gen long id = _n
+        forvalues j = 1/80 {
+            gen long i`j' = mod((_n * `j') + 17, 1000000)
+        }
+        forvalues j = 1/60 {
+            gen double d`j' = (runiform() * 1000) + `j'
+        }
+        forvalues j = 1/40 {
+            gen str24 s`j' = "g" + string(mod(_n + `j', 10000), "%04.0f")
+        }
+    }
+    else if "`scenario'" == "string_heavy" {
+        set obs 40000
+        gen long id = _n
+        gen str32 code = "id_" + string(_n, "%08.0f")
+        gen str120 text_short = "entry_" + string(mod(_n, 97)) + "_" + string(mod(_n, 991))
+        gen strL text_long = ""
+        forvalues j = 1/70 {
+            replace text_long = text_long + "abcdefghijklmnopqrstuvwxzy0123456789"
+        }
+        replace text_long = text_long + "_" + string(_n, "%08.0f")
+        forvalues j = 1/10 {
+            gen str80 note`j' = "note_" + string(mod(_n * `j', 100000), "%06.0f")
+        }
+        forvalues j = 1/6 {
+            gen double v`j' = runiform() * (`j' + 1)
+        }
+    }
+    else {
+        display as error "Unknown scenario: `scenario'"
+        exit 198
+    }
 
-// Load the DTA file first
-display as text "Loading DTA file for save tests..."
-quietly use "`dta_file'", clear
-local nobs_save = _N
-local nvars_save = c(k)
-display as text "  Observations: " as result %12.0fc `nobs_save'
-display as text "  Variables:    " as result %12.0fc `nvars_save'
-display _newline(1)
+    local src_nobs = _N
+    local src_nvars = c(k)
 
-// Test 2a: dtparquet save (default chunksize)
-display as text "Testing dtparquet save (default chunksize=50000)..."
-timer clear 3
-timer on 3
-quietly dtparquet save "`temp_parquet_dtparquet'", replace
-timer off 3
-quietly timer list 3
-local time_dtparquet_save = r(t3)
-display as result "  Time: " as text %9.3f `time_dtparquet_save' as result " seconds"
-display _newline(1)
+    tempfile source_data scenario_path
+    quietly save "`source_data'", replace
+    local parquet_file "`scenario_path'.parquet"
 
-// Test 2b: pq save
-display as text "Testing pq save..."
-timer clear 4
-timer on 4
-quietly pq save using "`temp_parquet_pq'", replace
-timer off 4
-quietly timer list 4
-local time_pq_save = r(t4)
-display as result "  Time: " as text %9.3f `time_pq_save' as result " seconds"
-display _newline(1)
+    forvalues run = 1/`total_runs' {
+        local is_warmup = (`run' <= `warmup_runs')
 
-// Calculate speedup
-local speedup_save = `time_dtparquet_save' / `time_pq_save'
-display as text "Results:"
-display as result "  pq is " as text %5.2f `speedup_save' as result "x faster" as text " for saving"
-display _newline(2)
+        quietly use "`source_data'", clear
+        timer clear 1
+        timer on 1
+        quietly dtparquet save "`scenario_path'", replace chunksize(`chunk_size')
+        timer off 1
+        quietly timer list 1
+        local elapsed = r(t1)
 
-// Optional: Test different chunk sizes for dtparquet
-display as text "{hline 80}"
-display as result "TEST 3: DTPARQUET CHUNK SIZE OPTIMIZATION"
-display as text "{hline 80}"
-display _newline(1)
+        local out_nobs = _N
+        local out_nvars = c(k)
 
-foreach chunk in 10000 50000 100000 500000 {
-    display as text "Testing dtparquet save with chunksize=`chunk'..."
-    timer clear 5
-    timer on 5
-    quietly dtparquet save "`temp_parquet_dtparquet'", replace chunksize(`chunk')
-    timer off 5
-    quietly timer list 5
-    local time_chunk = r(t5)
-    display as result "  Chunksize `chunk': " as text %9.3f `time_chunk' as result " seconds"
+        local collect_calls = real("$dtpq_write_collect_calls")
+        if missing(`collect_calls') local collect_calls = 0
+        local planned_batches = real("$dtpq_write_planned_batches")
+        if missing(`planned_batches') local planned_batches = 0
+        local processed_batches = real("$dtpq_write_processed_batches")
+        if missing(`processed_batches') local processed_batches = 0
+        local replace_number_calls = real("$dtpq_write_replace_number_calls")
+        if missing(`replace_number_calls') local replace_number_calls = 0
+        local replace_string_calls = real("$dtpq_write_replace_string_calls")
+        if missing(`replace_string_calls') local replace_string_calls = 0
+        local pull_numeric_calls = real("$dtpq_write_pull_numeric_calls")
+        if missing(`pull_numeric_calls') local pull_numeric_calls = 0
+        local pull_string_calls = real("$dtpq_write_pull_string_calls")
+        if missing(`pull_string_calls') local pull_string_calls = 0
+        local pull_strl_calls = real("$dtpq_write_pull_strl_calls")
+        if missing(`pull_strl_calls') local pull_strl_calls = 0
+
+        post `posth' ///
+            ("`scenario'") ///
+            ("save") ///
+            (`run') ///
+            (`is_warmup') ///
+            (`elapsed') ///
+            (`src_nobs') ///
+            (`src_nvars') ///
+            (`out_nobs') ///
+            (`out_nvars') ///
+            (`collect_calls') ///
+            (`planned_batches') ///
+            (`processed_batches') ///
+            (`replace_number_calls') ///
+            (`replace_string_calls') ///
+            (`pull_numeric_calls') ///
+            (`pull_string_calls') ///
+            (`pull_strl_calls')
+
+        clear
+        timer clear 2
+        timer on 2
+        quietly dtparquet use using "`parquet_file'", clear chunksize(`chunk_size')
+        timer off 2
+        quietly timer list 2
+        local elapsed = r(t2)
+
+        local out_nobs = _N
+        local out_nvars = c(k)
+
+        assert _N == `src_nobs'
+        assert c(k) == `src_nvars'
+
+        local collect_calls = real("$dtpq_read_collect_calls")
+        if missing(`collect_calls') local collect_calls = 0
+        local planned_batches = real("$dtpq_read_planned_batches")
+        if missing(`planned_batches') local planned_batches = 0
+        local processed_batches = real("$dtpq_read_processed_batches")
+        if missing(`processed_batches') local processed_batches = 0
+        local replace_number_calls = real("$dtpq_read_replace_number_calls")
+        if missing(`replace_number_calls') local replace_number_calls = 0
+        local replace_string_calls = real("$dtpq_read_replace_string_calls")
+        if missing(`replace_string_calls') local replace_string_calls = 0
+        local pull_numeric_calls = real("$dtpq_read_pull_numeric_calls")
+        if missing(`pull_numeric_calls') local pull_numeric_calls = 0
+        local pull_string_calls = real("$dtpq_read_pull_string_calls")
+        if missing(`pull_string_calls') local pull_string_calls = 0
+        local pull_strl_calls = real("$dtpq_read_pull_strl_calls")
+        if missing(`pull_strl_calls') local pull_strl_calls = 0
+
+        post `posth' ///
+            ("`scenario'") ///
+            ("use") ///
+            (`run') ///
+            (`is_warmup') ///
+            (`elapsed') ///
+            (`src_nobs') ///
+            (`src_nvars') ///
+            (`out_nobs') ///
+            (`out_nvars') ///
+            (`collect_calls') ///
+            (`planned_batches') ///
+            (`processed_batches') ///
+            (`replace_number_calls') ///
+            (`replace_string_calls') ///
+            (`pull_numeric_calls') ///
+            (`pull_string_calls') ///
+            (`pull_strl_calls')
+    }
 }
-display _newline(2)
 
-// Summary
-display as text "{hline 80}"
-display as result "SUMMARY"
-display as text "{hline 80}"
-display _newline(1)
-display as text "Loading parquet file:"
-display as text "  dtparquet: " as result %9.3f `time_dtparquet_use' as text " seconds"
-display as text "  pq:        " as result %9.3f `time_pq_use' as text " seconds"
-display as text "  Speedup:   " as result %5.2f `speedup_use' as text "x (pq faster)"
-display _newline(1)
-display as text "Saving to parquet file:"
-display as text "  dtparquet: " as result %9.3f `time_dtparquet_save' as text " seconds"
-display as text "  pq:        " as result %9.3f `time_pq_save' as text " seconds"
-display as text "  Speedup:   " as result %5.2f `speedup_use' as text "x (pq faster)"
-display _newline(1)
-display as text "{hline 80}"
+postclose `posth'
 
-// Cleanup temp files
-capture erase "`temp_parquet_dtparquet'"
-capture erase "`temp_parquet_pq'"
+use "`run_results'", clear
+order scenario operation run warmup elapsed src_nobs src_nvars out_nobs out_nvars
+save "`log_root'/benchmark_baseline_runs.dta", replace
+export delimited using "`log_root'/benchmark_baseline_runs.csv", replace
+
+preserve
+keep if warmup == 0
+collapse (count) n_runs=elapsed ///
+    (mean) mean_elapsed=elapsed ///
+    (sd) sd_elapsed=elapsed ///
+    (p50) p50_elapsed=elapsed ///
+    (p90) p90_elapsed=elapsed ///
+    (mean) mean_collect_calls=collect_calls ///
+    (mean) mean_planned_batches=planned_batches ///
+    (mean) mean_processed_batches=processed_batches ///
+    (mean) mean_replace_number_calls=replace_number_calls ///
+    (mean) mean_replace_string_calls=replace_string_calls ///
+    (mean) mean_pull_numeric_calls=pull_numeric_calls ///
+    (mean) mean_pull_string_calls=pull_string_calls ///
+    (mean) mean_pull_strl_calls=pull_strl_calls, by(scenario operation)
+gen cv_elapsed = cond(mean_elapsed == 0, ., sd_elapsed / mean_elapsed)
+order scenario operation n_runs mean_elapsed p50_elapsed p90_elapsed cv_elapsed
+save "`log_root'/benchmark_baseline_summary.dta", replace
+export delimited using "`log_root'/benchmark_baseline_summary.csv", replace
+list scenario operation n_runs mean_elapsed p50_elapsed p90_elapsed cv_elapsed, noobs
+restore
+
+display as result "Run-level output: `log_root'/benchmark_baseline_runs.csv"
+display as result "Summary output:   `log_root'/benchmark_baseline_summary.csv"
 
 log close
+cd "`initial_pwd'"

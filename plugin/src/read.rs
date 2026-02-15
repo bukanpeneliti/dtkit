@@ -10,12 +10,16 @@ use std::collections::HashSet;
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 use walkdir::WalkDir;
 
 use crate::downcast::apply_cast;
 use crate::mapping::FieldSpec;
 use crate::sql_from_if::convert_if_sql;
-use crate::stata_interface::{read_macro, replace_number, replace_string, set_macro, ST_retcode};
+use crate::stata_interface::{
+    publish_transfer_metrics, read_macro, replace_number, replace_string, reset_transfer_metrics,
+    set_macro, ST_retcode,
+};
 use crate::utilities::{
     create_compute_thread_pool, determine_parallelization_strategy, get_thread_count, BatchMode,
     STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
@@ -311,6 +315,27 @@ fn smart_lit(value: &str) -> Expr {
     lit(value)
 }
 
+fn publish_read_runtime_metrics(
+    collect_calls: usize,
+    planned_batches: usize,
+    processed_batches: usize,
+    elapsed_ms: u128,
+) {
+    set_macro("dtpq_read_collect_calls", &collect_calls.to_string(), true);
+    set_macro(
+        "dtpq_read_planned_batches",
+        &planned_batches.to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_read_processed_batches",
+        &processed_batches.to_string(),
+        true,
+    );
+    set_macro("dtpq_read_elapsed_ms", &elapsed_ms.to_string(), true);
+    publish_transfer_metrics("dtpq_read");
+}
+
 pub fn import_parquet(
     path: &str,
     variables_as_str: &str,
@@ -327,6 +352,12 @@ pub fn import_parquet(
     random_seed: u64,
     batch_size: usize,
 ) -> Result<i32, Box<dyn Error>> {
+    let started_at = Instant::now();
+    let mut collect_calls = 0usize;
+    let mut processed_batches = 0usize;
+    reset_transfer_metrics();
+    publish_read_runtime_metrics(0, 0, 0, 0);
+
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
         variables_owned = read_macro("matched_vars", false, Some(10 * 1024 * 1024));
@@ -372,6 +403,12 @@ pub fn import_parquet(
             .with_slice(Some((offset, n_rows)))
             .finish()?;
 
+        let columns_vec: Vec<PlSmallStr> = selected_column_list
+            .iter()
+            .map(|s| PlSmallStr::from(*s))
+            .collect();
+        df = df.select(columns_vec)?;
+
         let cast_json = read_macro("cast_json", false, None);
         if !cast_json.is_empty() {
             let cast_mapping: serde_json::Map<String, serde_json::Value> =
@@ -402,22 +439,11 @@ pub fn import_parquet(
             df.try_apply(&col_name, |s| s.cast(&DataType::String))?;
         }
 
-        let columns_vec: Vec<PlSmallStr> = selected_column_list
-            .iter()
-            .map(|s| PlSmallStr::from(*s))
-            .collect();
-        df = df.select(columns_vec)?;
-
-        let sliced = df.slice(offset as i64, n_rows);
         let n_threads = get_thread_count();
         let strategy = parallel_strategy.unwrap_or_else(|| {
-            determine_parallelization_strategy(
-                selected_column_list.len(),
-                sliced.height(),
-                n_threads,
-            )
+            determine_parallelization_strategy(selected_column_list.len(), df.height(), n_threads)
         });
-        let total_rows = sliced.height();
+        let total_rows = df.height();
         let n_batches = (total_rows as f64 / batch_size as f64).ceil() as usize;
         set_macro("n_batches", &n_batches.to_string(), false);
 
@@ -429,7 +455,7 @@ pub fn import_parquet(
             } else {
                 batch_size
             };
-            let batch_df = sliced.slice(batch_offset as i64, batch_length);
+            let batch_df = df.slice(batch_offset as i64, batch_length);
             loaded_rows += batch_df.height();
             process_batch_with_strategy(
                 &batch_df,
@@ -439,8 +465,15 @@ pub fn import_parquet(
                 n_threads,
                 stata_offset,
             )?;
+            processed_batches += 1;
         }
         set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
+        publish_read_runtime_metrics(
+            collect_calls,
+            n_batches,
+            processed_batches,
+            started_at.elapsed().as_millis(),
+        );
 
         return Ok(0);
     }
@@ -472,6 +505,7 @@ pub fn import_parquet(
         } else {
             Some(random_seed)
         };
+        collect_calls += 1;
         let sampled = lf.collect()?.sample_frac(
             &Series::new("frac".into(), vec![random_share]),
             false,
@@ -518,8 +552,10 @@ pub fn import_parquet(
         } as u32;
         lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
         let batch_df = if use_streaming {
+            collect_calls += 1;
             lf_batch.with_new_streaming(true).collect()?
         } else {
+            collect_calls += 1;
             lf_batch.collect()?
         };
         if batch_df.height() == 0 {
@@ -534,8 +570,15 @@ pub fn import_parquet(
             n_threads,
             stata_offset,
         )?;
+        processed_batches += 1;
     }
     set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
+    publish_read_runtime_metrics(
+        collect_calls,
+        n_batches,
+        processed_batches,
+        started_at.elapsed().as_millis(),
+    );
 
     Ok(0)
 }
