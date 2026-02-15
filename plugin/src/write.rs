@@ -14,8 +14,8 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::Instant;
 
+use crate::if_filter::{compile_if_expr, convert_if_sql};
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
-use crate::sql_from_if::convert_if_sql;
 use crate::stata_interface::{
     count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell, pull_strl_cell,
     read_macro, reset_transfer_metrics, set_macro,
@@ -670,6 +670,7 @@ pub fn export_parquet(
     set_macro("dtpq_write_batch_memory_cap_rows", "0", true);
     set_macro("dtpq_write_batch_adjustments", "0", true);
     set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
+    set_macro("dtpq_if_filter_mode", "none", true);
     publish_write_queue_metrics("legacy_direct", 0, 0, 0, 0, 0, 0);
 
     let selected_vars_owned;
@@ -730,10 +731,16 @@ pub fn export_parquet(
     let mut lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
-        let mut ctx = SQLContext::new();
-        ctx.register("df", lf);
-        let translated = convert_if_sql(sql);
-        lf = ctx.execute(&format!("select * from df where {}", translated))?;
+        if let Some(expr) = compile_if_expr(sql) {
+            lf = lf.filter(expr);
+            set_macro("dtpq_if_filter_mode", "expr", true);
+        } else {
+            let mut ctx = SQLContext::new();
+            ctx.register("df", lf);
+            let translated = convert_if_sql(sql);
+            lf = ctx.execute(&format!("select * from df where {}", translated))?;
+            set_macro("dtpq_if_filter_mode", "sql_fallback", true);
+        }
     }
 
     let partition_cols: Vec<PlSmallStr> = partition_by

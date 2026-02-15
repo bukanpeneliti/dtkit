@@ -4,10 +4,10 @@ use std::ptr;
 use std::slice;
 
 pub mod downcast;
+pub mod if_filter;
 pub mod mapping;
 pub mod metadata;
 pub mod read;
-pub mod sql_from_if;
 pub mod stata_interface;
 pub mod utilities;
 pub mod write;

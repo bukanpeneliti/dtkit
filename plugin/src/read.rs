@@ -15,8 +15,8 @@ use std::time::Instant;
 use walkdir::WalkDir;
 
 use crate::downcast::apply_cast;
+use crate::if_filter::{compile_if_expr, convert_if_sql};
 use crate::mapping::FieldSpec;
-use crate::sql_from_if::convert_if_sql;
 use crate::stata_interface::{
     publish_transfer_metrics, read_macro, record_transfer_conversion_failure,
     record_transfer_fallback, replace_number, replace_string, reset_transfer_metrics, set_macro,
@@ -475,6 +475,7 @@ pub fn import_parquet(
     set_macro("dtpq_read_batch_memory_cap_rows", "0", true);
     set_macro("dtpq_read_batch_adjustments", "0", true);
     set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
+    set_macro("dtpq_if_filter_mode", "none", true);
 
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
@@ -620,10 +621,16 @@ pub fn import_parquet(
     }
 
     if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
-        let mut ctx = SQLContext::new();
-        ctx.register("df", lf);
-        let translated = convert_if_sql(sql);
-        lf = ctx.execute(&format!("select * from df where {}", translated))?;
+        if let Some(expr) = compile_if_expr(sql) {
+            lf = lf.filter(expr);
+            set_macro("dtpq_if_filter_mode", "expr", true);
+        } else {
+            let mut ctx = SQLContext::new();
+            ctx.register("df", lf);
+            let translated = convert_if_sql(sql);
+            lf = ctx.execute(&format!("select * from df where {}", translated))?;
+            set_macro("dtpq_if_filter_mode", "sql_fallback", true);
+        }
     }
 
     if random_share > 0.0 {

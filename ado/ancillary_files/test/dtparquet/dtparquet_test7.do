@@ -122,6 +122,7 @@ assert r(N) > 0
 assert r(N) <= 2000
 summ year, meanonly
 assert r(min) > 2015
+assert "$dtpq_if_filter_mode" == "expr"
 display as result "Test 5b PASSED: if qualifier filtering is pushed down"
 
 * Test 6: allstring path for int64->string cast
