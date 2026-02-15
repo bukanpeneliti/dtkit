@@ -57,6 +57,8 @@ postfile `posth' ///
     double queue_wait_ms ///
     double queue_prod_batches ///
     double queue_cons_batches ///
+    double strl_trunc_events ///
+    double strl_binary_events ///
     using "`run_results'", replace
 
 foreach scenario in narrow_numeric wide_mixed string_heavy {
@@ -159,6 +161,10 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         if missing(`queue_prod_batches') local queue_prod_batches = 0
         local queue_cons_batches = real("$dtpq_write_queue_cons_batches")
         if missing(`queue_cons_batches') local queue_cons_batches = 0
+        local strl_trunc_events = real("$dtpq_write_strl_trunc_events")
+        if missing(`strl_trunc_events') local strl_trunc_events = 0
+        local strl_binary_events = real("$dtpq_write_strl_binary_events")
+        if missing(`strl_binary_events') local strl_binary_events = 0
 
         post `posth' ///
             ("`scenario'") ///
@@ -183,7 +189,9 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
             (`queue_bp_events') ///
             (`queue_wait_ms') ///
             (`queue_prod_batches') ///
-            (`queue_cons_batches')
+            (`queue_cons_batches') ///
+            (`strl_trunc_events') ///
+            (`strl_binary_events')
 
         clear
         timer clear 2
@@ -221,6 +229,8 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         local queue_wait_ms = 0
         local queue_prod_batches = 0
         local queue_cons_batches = 0
+        local strl_trunc_events = 0
+        local strl_binary_events = 0
 
         post `posth' ///
             ("`scenario'") ///
@@ -245,7 +255,9 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
             (`queue_bp_events') ///
             (`queue_wait_ms') ///
             (`queue_prod_batches') ///
-            (`queue_cons_batches')
+            (`queue_cons_batches') ///
+            (`strl_trunc_events') ///
+            (`strl_binary_events')
     }
 }
 
@@ -276,7 +288,9 @@ collapse (count) n_runs=elapsed ///
     (mean) mean_queue_bp_events=queue_bp_events ///
     (mean) mean_queue_wait_ms=queue_wait_ms ///
     (mean) mean_queue_prod_batches=queue_prod_batches ///
-    (mean) mean_queue_cons_batches=queue_cons_batches, by(scenario operation)
+    (mean) mean_queue_cons_batches=queue_cons_batches ///
+    (mean) mean_strl_trunc_events=strl_trunc_events ///
+    (mean) mean_strl_binary_events=strl_binary_events, by(scenario operation)
 gen cv_elapsed = cond(mean_elapsed == 0, ., sd_elapsed / mean_elapsed)
 order scenario operation n_runs mean_elapsed p50_elapsed p90_elapsed cv_elapsed
 save "`log_root'/benchmark_baseline_summary.dta", replace

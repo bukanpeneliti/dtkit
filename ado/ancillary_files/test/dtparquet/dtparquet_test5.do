@@ -582,6 +582,50 @@ else {
     local failed_tests "`failed_tests' 16"
 }
 
+// Test Case 17: T10 strL arena path diagnostics
+display _newline "=== TEST CASE 17: T10 strL Arena Path Diagnostics ==="
+local ++total_tests
+local t17_n_rows 12000
+
+capture noisily {
+    clear
+    set obs `t17_n_rows'
+    gen long id = _n
+    gen strL payload = ""
+    forvalues j = 1/32 {
+        replace payload = payload + "abcdefghijklmnopqrstuvwxyz0123456789"
+    }
+    replace payload = payload + "_" + string(_n, "%08.0f")
+
+    dtparquet save "test_t10_strl.parquet", replace chunksize(4000)
+
+    local t17_pull_strl = real("$dtpq_write_pull_strl_calls")
+    local t17_trunc_events = real("$dtpq_write_strl_trunc_events")
+    local t17_binary_events = real("$dtpq_write_strl_binary_events")
+
+    assert !missing(`t17_pull_strl')
+    assert !missing(`t17_trunc_events')
+    assert !missing(`t17_binary_events')
+    assert `t17_pull_strl' == `t17_n_rows'
+    assert `t17_trunc_events' == 0
+    assert `t17_binary_events' == 0
+
+    clear
+    dtparquet use id payload using "test_t10_strl.parquet", clear
+    count
+    assert r(N) == `t17_n_rows'
+    assert length(payload[1]) > 1100
+}
+
+if _rc == 0 {
+    display as result "Test 17 completed successfully"
+    local passed_tests "`passed_tests' 17"
+}
+else {
+    display as error "Test 17 failed: strL arena path mismatch"
+    local failed_tests "`failed_tests' 17"
+}
+
 // Cleanup
 capture erase "test_wide.parquet"
 capture erase "test_boundary.parquet"
@@ -593,6 +637,7 @@ capture erase "test_native.parquet"
 capture erase "test_t06_lazy.parquet"
 capture erase "test_t07_autotune.parquet"
 capture erase "test_t08_pipeline.parquet"
+capture erase "test_t10_strl.parquet"
 
 // Test Summary
 display _newline "=========================================="

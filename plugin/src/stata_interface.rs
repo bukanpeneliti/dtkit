@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 pub use stata_sys::{
     display, set_macro, SF_error, SF_is_missing, SF_nobs, SF_nvar, SF_sdata, SF_sdatalen,
-    SF_strldata, SF_var_is_binary,
+    SF_strldata,
 };
 
 #[allow(non_camel_case_types)]
@@ -15,6 +15,8 @@ static REPLACE_STRING_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_NUMERIC_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_STRING_CALLS: AtomicU64 = AtomicU64::new(0);
 static PULL_STRL_CALLS: AtomicU64 = AtomicU64::new(0);
+static STRL_TRUNC_EVENTS: AtomicU64 = AtomicU64::new(0);
+static STRL_BINARY_EVENTS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_CONVERSION_FAILURES: AtomicU64 = AtomicU64::new(0);
 
@@ -25,6 +27,8 @@ pub struct TransferMetrics {
     pub pull_numeric_calls: u64,
     pub pull_string_calls: u64,
     pub pull_strl_calls: u64,
+    pub strl_trunc_events: u64,
+    pub strl_binary_events: u64,
     pub fallback_calls: u64,
     pub conversion_failures: u64,
 }
@@ -35,6 +39,8 @@ pub fn reset_transfer_metrics() {
     PULL_NUMERIC_CALLS.store(0, Ordering::Relaxed);
     PULL_STRING_CALLS.store(0, Ordering::Relaxed);
     PULL_STRL_CALLS.store(0, Ordering::Relaxed);
+    STRL_TRUNC_EVENTS.store(0, Ordering::Relaxed);
+    STRL_BINARY_EVENTS.store(0, Ordering::Relaxed);
     TRANSFER_FALLBACK_CALLS.store(0, Ordering::Relaxed);
     TRANSFER_CONVERSION_FAILURES.store(0, Ordering::Relaxed);
 }
@@ -46,6 +52,8 @@ pub fn read_transfer_metrics() -> TransferMetrics {
         pull_numeric_calls: PULL_NUMERIC_CALLS.load(Ordering::Relaxed),
         pull_string_calls: PULL_STRING_CALLS.load(Ordering::Relaxed),
         pull_strl_calls: PULL_STRL_CALLS.load(Ordering::Relaxed),
+        strl_trunc_events: STRL_TRUNC_EVENTS.load(Ordering::Relaxed),
+        strl_binary_events: STRL_BINARY_EVENTS.load(Ordering::Relaxed),
         fallback_calls: TRANSFER_FALLBACK_CALLS.load(Ordering::Relaxed),
         conversion_failures: TRANSFER_CONVERSION_FAILURES.load(Ordering::Relaxed),
     }
@@ -82,6 +90,16 @@ pub fn publish_transfer_metrics(prefix: &str) {
     set_macro(
         &format!("{}_pull_strl_calls", prefix),
         &metrics.pull_strl_calls.to_string(),
+        true,
+    );
+    set_macro(
+        &format!("{}_strl_trunc_events", prefix),
+        &metrics.strl_trunc_events.to_string(),
+        true,
+    );
+    set_macro(
+        &format!("{}_strl_binary_events", prefix),
+        &metrics.strl_binary_events.to_string(),
         true,
     );
     set_macro(
@@ -145,11 +163,18 @@ pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
 }
 
 pub fn pull_string_cell(col: usize, row: usize, max_len: usize) -> String {
+    let mut buffer: Vec<i8> = vec![0; max_len + 1];
+    pull_string_cell_with_buffer(col, row, &mut buffer)
+}
+
+pub fn pull_string_cell_with_buffer(col: usize, row: usize, buffer: &mut Vec<i8>) -> String {
     use std::ffi::{c_char, CStr};
     PULL_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
-    let mut buffer: Vec<i8> = vec![0; max_len + 1];
 
     unsafe {
+        if !buffer.is_empty() {
+            buffer[0] = 0;
+        }
         SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char);
 
         CStr::from_ptr(buffer.as_ptr() as *const c_char)
@@ -158,7 +183,37 @@ pub fn pull_string_cell(col: usize, row: usize, max_len: usize) -> String {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct StrlArena {
+    buffer: Vec<u8>,
+}
+
+impl StrlArena {
+    const CHUNK_BYTES: usize = 16 * 1024;
+
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn reserve_for_len(&mut self, len: usize) {
+        if self.buffer.len() >= len {
+            return;
+        }
+        let rounded = len.div_ceil(Self::CHUNK_BYTES) * Self::CHUNK_BYTES;
+        self.buffer.resize(rounded, 0);
+    }
+}
+
 pub fn pull_strl_cell(col: usize, row: usize) -> Result<String, ()> {
+    let mut arena = StrlArena::new();
+    pull_strl_cell_with_arena(col, row, &mut arena)
+}
+
+pub fn pull_strl_cell_with_arena(
+    col: usize,
+    row: usize,
+    arena: &mut StrlArena,
+) -> Result<String, ()> {
     use std::ffi::c_char;
     PULL_STRL_CALLS.fetch_add(1, Ordering::Relaxed);
     unsafe {
@@ -167,17 +222,33 @@ pub fn pull_strl_cell(col: usize, row: usize) -> Result<String, ()> {
             return Err(());
         }
 
+        let read_len = len.checked_add(1).ok_or(())?;
         let len_usize = len as usize;
-        let mut buffer: Vec<u8> = vec![0; len_usize.saturating_add(1)];
+        arena.reserve_for_len(len_usize.saturating_add(1));
+        let buffer = &mut arena.buffer[..len_usize.saturating_add(1)];
         SF_strldata(
             col as i32,
             row as i32,
             buffer.as_mut_ptr() as *mut c_char,
-            len + 1,
+            read_len,
         );
 
-        let end = buffer.iter().position(|&b| b == 0).unwrap_or(len_usize);
-        Ok(String::from_utf8_lossy(&buffer[..end]).into_owned())
+        let end = buffer[..len_usize]
+            .iter()
+            .position(|&b| b == 0)
+            .unwrap_or(len_usize);
+        if end < len_usize {
+            STRL_TRUNC_EVENTS.fetch_add(1, Ordering::Relaxed);
+        }
+
+        let bytes = &buffer[..end];
+        match std::str::from_utf8(bytes) {
+            Ok(text) => Ok(text.to_owned()),
+            Err(_) => {
+                STRL_BINARY_EVENTS.fetch_add(1, Ordering::Relaxed);
+                Ok(String::from_utf8_lossy(bytes).into_owned())
+            }
+        }
     }
 }
 

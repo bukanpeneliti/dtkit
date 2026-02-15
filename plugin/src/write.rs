@@ -17,8 +17,8 @@ use std::time::Instant;
 use crate::if_filter::{compile_if_expr, convert_if_sql};
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::stata_interface::{
-    count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell, pull_strl_cell,
-    read_macro, reset_transfer_metrics, set_macro,
+    count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell_with_buffer,
+    pull_strl_cell_with_arena, read_macro, reset_transfer_metrics, set_macro, StrlArena,
 };
 use crate::utilities::{
     compute_pool_init_count, get_compute_thread_pool, get_io_thread_pool, io_pool_init_count,
@@ -933,16 +933,23 @@ fn series_from_stata_column(
     n_rows: usize,
 ) -> Result<Series, PolarsError> {
     if info.dtype == "strl" {
+        let mut strl_arena = StrlArena::new();
         let values: Vec<Option<String>> = (0..n_rows)
-            .map(|row_idx| pull_strl_cell(stata_col_index, offset + row_idx + 1).ok())
+            .map(|row_idx| {
+                pull_strl_cell_with_arena(stata_col_index, offset + row_idx + 1, &mut strl_arena)
+                    .ok()
+            })
             .collect();
         return Ok(Series::new((&info.name).into(), values));
     }
 
     if info.dtype.starts_with("str") {
         let width = info.str_length.max(1);
+        let mut str_buffer: Vec<i8> = vec![0; width.saturating_add(1)];
         let values: Vec<String> = (0..n_rows)
-            .map(|row_idx| pull_string_cell(stata_col_index, offset + row_idx + 1, width))
+            .map(|row_idx| {
+                pull_string_cell_with_buffer(stata_col_index, offset + row_idx + 1, &mut str_buffer)
+            })
             .collect();
         return Ok(Series::new((&info.name).into(), values));
     }
