@@ -231,6 +231,16 @@ program dtparquet_save
         local dtmeta_vallab_`i' `vallabi'
     }
 
+    local schema_fields_json ""
+    forvalues j = 1/`var_count' {
+        if (`j' > 1) {
+            local schema_fields_json `"`schema_fields_json',"'
+        }
+        local schema_fields_json `"`schema_fields_json'{""n"":""`name_`j''"",""d"":""`dtype_`j''"",""f"":""`format_`j''"",""l"":`str_length_`j''}"'
+    }
+    local schema_protocol_version 2
+    local schema_payload_json `"{""v"":`schema_protocol_version',""f"":[`schema_fields_json']}"'
+
     local dtmeta_var_count `var_count'
     local dtmeta_label_count 0
     local dtmeta_dta_label ""
@@ -280,7 +290,15 @@ program dtparquet_save
         }
     }
 
-    plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+    if `is_nolabel' {
+        plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+    }
+    else {
+        capture plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "`schema_payload_json'" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+        if _rc != 0 {
+            plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+        }
+    }
 
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
@@ -466,6 +484,7 @@ program dtparquet_use
     local n_matched_vars: word count `matched_vars'
 
     local i = 0
+    local read_fields_json ""
     foreach vari of varlist * {
         local i = `i' + 1
         local i_matched : list posof "`vari'" in matched_vars
@@ -479,12 +498,19 @@ program dtparquet_use
             local v_to_read_name_`i_matched' `vari'
             local v_to_read_type_`i_matched' `read_type'
             local v_to_read_p_type_`i_matched' `polars_type_`i_original''
+
+            local read_index = `i' - 1
+            if (`i_matched' > 1) {
+                local read_fields_json `"`read_fields_json',"'
+            }
+            local read_fields_json `"`read_fields_json'{""i"":`read_index',""n"":""`vari'"",""d"":""`polars_type_`i_original''"",""s"":""`read_type'""}"'
         }
     }
 
     local cast_json ""
 
-    local mapping from_macros
+    local schema_protocol_version 2
+    local mapping `"{""v"":`schema_protocol_version',""f"":[`read_fields_json']}"'
     local parallelize ""
     local vertical_relaxed 0
     local asterisk_to_variable ""
@@ -494,7 +520,10 @@ program dtparquet_use
     local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
     local plugin_offset = max(0, `offset' - 1)
 
-    plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+    if _rc != 0 {
+        plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+    }
 
     local n_loaded_rows = real("`n_loaded_rows'")
     if missing(`n_loaded_rows') local n_loaded_rows = `row_to_read'

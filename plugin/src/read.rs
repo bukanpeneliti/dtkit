@@ -6,6 +6,7 @@ use polars::prelude::*;
 use polars_sql::SQLContext;
 use rayon::prelude::*;
 use regex::Regex;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashSet;
 use std::env;
 use std::error::Error;
@@ -32,6 +33,64 @@ use crate::utilities::{
 const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
 const ENV_METADATA_LOOKUP_MODE: &str = "DTPARQUET_METADATA_LOOKUP_MODE";
 const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
+
+#[derive(Debug, Deserialize)]
+struct SchemaHandoff<T> {
+    #[serde(alias = "v")]
+    protocol_version: u32,
+    #[serde(alias = "f")]
+    fields: Vec<T>,
+}
+
+#[derive(Debug, Serialize)]
+struct DescribeFieldPayload {
+    #[serde(rename = "n")]
+    name: String,
+    #[serde(rename = "s")]
+    stata_type: String,
+    #[serde(rename = "p")]
+    polars_type: String,
+    #[serde(rename = "l")]
+    string_length: usize,
+    #[serde(rename = "r")]
+    rename: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DescribeSchemaPayload {
+    #[serde(rename = "v")]
+    protocol_version: u32,
+    #[serde(rename = "f")]
+    fields: Vec<DescribeFieldPayload>,
+}
+
+fn parse_schema_handoff_fields<T: DeserializeOwned>(
+    mapping: &str,
+    handoff_name: &str,
+) -> Result<(Vec<T>, &'static str), Box<dyn Error>> {
+    if let Ok(payload) = serde_json::from_str::<SchemaHandoff<T>>(mapping) {
+        if payload.protocol_version != crate::SCHEMA_HANDOFF_PROTOCOL_VERSION {
+            return Err(format!(
+                "Schema protocol mismatch for {}: expected version {}, got {}. Update ado and plugin to matching versions or retry with legacy macro handoff.",
+                handoff_name,
+                crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
+                payload.protocol_version
+            )
+            .into());
+        }
+        return Ok((payload.fields, "json_v2"));
+    }
+
+    if let Ok(fields) = serde_json::from_str::<Vec<T>>(mapping) {
+        return Ok((fields, "json_legacy_array"));
+    }
+
+    Err(format!(
+        "Invalid schema mapping payload for {}. Expected JSON object {{\"protocol_version\":...,\"fields\":[...]}}.",
+        handoff_name
+    )
+    .into())
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 enum TransferWriterKind {
@@ -476,6 +535,7 @@ pub fn import_parquet(
     set_macro("dtpq_read_batch_adjustments", "0", true);
     set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
     set_macro("dtpq_if_filter_mode", "none", true);
+    set_macro("dtpq_read_schema_handoff", "legacy_macros", true);
 
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
@@ -491,7 +551,9 @@ pub fn import_parquet(
             .unwrap_or(0);
         column_info_from_macros(n_vars)
     } else {
-        serde_json::from_str(mapping).unwrap_or_default()
+        let (fields, handoff_mode) = parse_schema_handoff_fields::<FieldSpec>(mapping, "read")?;
+        set_macro("dtpq_read_schema_handoff", handoff_mode, true);
+        fields
     };
 
     let selected_column_list: Vec<&str> = variables_as_str.split_whitespace().collect();
@@ -792,6 +854,7 @@ fn set_schema_macros(
         );
     }
 
+    let mut payload_fields = Vec::with_capacity(schema.len());
     for (i, (name, dtype)) in schema.iter().enumerate() {
         let polars_type = match dtype {
             DataType::Boolean => "int8",
@@ -870,7 +933,29 @@ fn set_schema_macros(
             false,
         );
         set_macro(&format!("rename_{}", i + 1), "", false);
+
+        payload_fields.push(DescribeFieldPayload {
+            name: name.to_string(),
+            stata_type: stata_type.to_string(),
+            polars_type: polars_type.to_string(),
+            string_length,
+            rename: String::new(),
+        });
     }
+
+    let payload = DescribeSchemaPayload {
+        protocol_version: crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
+        fields: payload_fields,
+    };
+    let payload_json = serde_json::to_string(&payload).map_err(|e| {
+        PolarsError::ComputeError(format!("failed to encode schema payload: {e}").into())
+    })?;
+    set_macro(
+        "dtpq_schema_protocol_version",
+        &crate::SCHEMA_HANDOFF_PROTOCOL_VERSION.to_string(),
+        false,
+    );
+    set_macro("dtpq_schema_payload", &payload_json, false);
 
     Ok(schema.len())
 }

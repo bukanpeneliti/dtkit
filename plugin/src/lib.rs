@@ -15,6 +15,8 @@ pub mod write;
 use stata_interface::{display, set_macro, ST_retcode};
 use utilities::BatchMode;
 
+pub const SCHEMA_HANDOFF_PROTOCOL_VERSION: u32 = 2;
+
 #[no_mangle]
 pub static mut _stata_: *mut stata_sys::ST_plugin = ptr::null_mut();
 

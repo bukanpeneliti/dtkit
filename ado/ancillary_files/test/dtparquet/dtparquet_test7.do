@@ -34,6 +34,7 @@ end
 * Deterministic pre-clean for generated outputs from prior interrupted runs
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
+capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
 capture noisily _cleanup_dir_shallow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
@@ -90,7 +91,19 @@ assert "`name_1'" != ""
 assert "`type_1'" != ""
 assert "`polars_type_1'" != ""
 assert real("`string_length_1'") >= 0
+assert real("`dtpq_schema_protocol_version'") == 2
+assert `"`dtpq_schema_payload'"' != ""
 display as result "Test 2 PASSED: describe macro contract available"
+
+* Test 2b: schema protocol mismatch is explicit
+clear
+set obs 2
+gen long id = _n
+local bad_schema_payload `"{""protocol_version"":999,""fields"":[{""name"":""id"",""dtype"":""long"",""format"":""%12.0g"",""str_length"":0}]}"'
+capture plugin call dtparquet_plugin, "save" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet" "id" "0" "0" "" "`bad_schema_payload'" "" "zstd" "-1" "1" "0" "1" "1000"
+assert _rc == 198
+assert fileexists("D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet") == 0
+display as result "Test 2b PASSED: protocol mismatch fails fast"
 
 * Test 3: Call read through ado against real parquet fixture
 run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
@@ -98,6 +111,7 @@ cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
 dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear
 display as result "Test 3 PASSED: Read path executed with ado pre-read setup"
+assert inlist("$dtpq_read_schema_handoff", "json_v2", "legacy_macros")
 count
 assert r(N) == 50000
 describe
@@ -255,6 +269,7 @@ local year_first = year[1]
 
 dtparquet save "`roundtrip_file'", replace
 assert fileexists("`roundtrip_file'")
+assert inlist("$dtpq_write_schema_handoff", "json_v2", "legacy_macros")
 
 dtparquet use using "`roundtrip_file'", clear
 count

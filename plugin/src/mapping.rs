@@ -3,9 +3,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FieldSpec {
+    #[serde(alias = "i")]
     pub index: usize,
+    #[serde(alias = "n")]
     pub name: String,
+    #[serde(alias = "d")]
     pub dtype: String,
+    #[serde(alias = "s")]
     pub stata_type: String,
 }
 

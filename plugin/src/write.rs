@@ -2,6 +2,7 @@
 
 use polars::prelude::*;
 use polars_sql::SQLContext;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::create_dir_all;
@@ -125,12 +126,52 @@ fn publish_write_queue_metrics(
     );
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct ExportField {
+    #[serde(alias = "n")]
     pub name: String,
+    #[serde(alias = "d")]
     pub dtype: String,
+    #[serde(alias = "f")]
     pub format: String,
+    #[serde(alias = "l")]
     pub str_length: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemaHandoff<T> {
+    #[serde(alias = "v")]
+    protocol_version: u32,
+    #[serde(alias = "f")]
+    fields: Vec<T>,
+}
+
+fn parse_schema_handoff_fields<T: DeserializeOwned>(
+    mapping: &str,
+    handoff_name: &str,
+) -> Result<(Vec<T>, &'static str), Box<dyn Error>> {
+    if let Ok(payload) = serde_json::from_str::<SchemaHandoff<T>>(mapping) {
+        if payload.protocol_version != crate::SCHEMA_HANDOFF_PROTOCOL_VERSION {
+            return Err(format!(
+                "Schema protocol mismatch for {}: expected version {}, got {}. Update ado and plugin to matching versions or retry with legacy macro handoff.",
+                handoff_name,
+                crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
+                payload.protocol_version
+            )
+            .into());
+        }
+        return Ok((payload.fields, "json_v2"));
+    }
+
+    if let Ok(fields) = serde_json::from_str::<Vec<T>>(mapping) {
+        return Ok((fields, "json_legacy_array"));
+    }
+
+    Err(format!(
+        "Invalid schema mapping payload for {}. Expected JSON object {{\"protocol_version\":...,\"fields\":[...]}}.",
+        handoff_name
+    )
+    .into())
 }
 
 fn estimate_export_row_width_bytes(infos: &[ExportField]) -> usize {
@@ -665,6 +706,7 @@ pub fn export_parquet(
     set_macro("dtpq_write_batch_adjustments", "0", true);
     set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
     set_macro("dtpq_if_filter_mode", "none", true);
+    set_macro("dtpq_write_schema_handoff", "legacy_macros", true);
     publish_write_queue_metrics("legacy_direct", 0, 0, 0, 0, 0, 0);
 
     let selected_vars_owned;
@@ -679,7 +721,9 @@ pub fn export_parquet(
         let var_count = read_macro("var_count", false, None).parse::<usize>()?;
         column_info_from_macros(var_count)
     } else {
-        return Err("JSON mapping is not implemented for save path".into());
+        let (fields, handoff_mode) = parse_schema_handoff_fields::<ExportField>(mapping, "save")?;
+        set_macro("dtpq_write_schema_handoff", handoff_mode, true);
+        fields
     };
 
     validate_stata_schema(&all_columns)?;
