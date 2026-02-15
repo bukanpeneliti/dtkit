@@ -461,6 +461,69 @@ else {
     local failed_tests "`failed_tests' 14"
 }
 
+// Test Case 15: T07 adaptive batch autotuning metrics
+display _newline "=== TEST CASE 15: T07 Adaptive Batch Autotuning Metrics ==="
+local ++total_tests
+local t15_n_rows 150000
+local t15_save_chunk 3000
+local t15_use_chunk 2500
+
+capture noisily {
+    clear
+    set obs `t15_n_rows'
+    gen long id = _n
+    forvalues j = 1/20 {
+        gen double x`j' = runiform() * `j'
+    }
+    forvalues j = 1/10 {
+        gen str32 s`j' = "v" + string(mod(_n * `j', 100000), "%05.0f")
+    }
+
+    dtparquet save "test_t07_autotune.parquet", replace chunksize(`t15_save_chunk')
+
+    local t15_write_selected = real("$dtpq_write_selected_batch_size")
+    local t15_write_row_width = real("$dtpq_write_batch_row_width_bytes")
+    local t15_write_memory_cap = real("$dtpq_write_batch_memory_cap_rows")
+
+    assert !missing(`t15_write_selected')
+    assert !missing(`t15_write_row_width')
+    assert !missing(`t15_write_memory_cap')
+    assert `t15_write_selected' > 0
+    assert `t15_write_row_width' > 0
+    assert `t15_write_memory_cap' > 0
+    assert `t15_write_selected' <= `t15_save_chunk'
+    assert `t15_write_selected' <= `t15_write_memory_cap'
+    assert inlist("$dtpq_write_batch_tuner_mode", "adaptive", "fixed")
+
+    clear
+    dtparquet use using "test_t07_autotune.parquet", clear chunksize(`t15_use_chunk')
+
+    assert _N == `t15_n_rows'
+
+    local t15_read_selected = real("$dtpq_read_selected_batch_size")
+    local t15_read_row_width = real("$dtpq_read_batch_row_width_bytes")
+    local t15_read_memory_cap = real("$dtpq_read_batch_memory_cap_rows")
+
+    assert !missing(`t15_read_selected')
+    assert !missing(`t15_read_row_width')
+    assert !missing(`t15_read_memory_cap')
+    assert `t15_read_selected' > 0
+    assert `t15_read_row_width' > 0
+    assert `t15_read_memory_cap' > 0
+    assert `t15_read_selected' <= `t15_use_chunk'
+    assert `t15_read_selected' <= `t15_read_memory_cap'
+    assert inlist("$dtpq_read_batch_tuner_mode", "adaptive", "fixed")
+}
+
+if _rc == 0 {
+    display as result "Test 15 completed successfully"
+    local passed_tests "`passed_tests' 15"
+}
+else {
+    display as error "Test 15 failed: adaptive batch autotuning mismatch"
+    local failed_tests "`failed_tests' 15"
+}
+
 // Cleanup
 capture erase "test_wide.parquet"
 capture erase "test_boundary.parquet"
@@ -470,6 +533,7 @@ capture erase "test_sig.parquet"
 capture erase "test_strl.parquet"
 capture erase "test_native.parquet"
 capture erase "test_t06_lazy.parquet"
+capture erase "test_t07_autotune.parquet"
 
 // Test Summary
 display _newline "=========================================="

@@ -19,7 +19,7 @@ use crate::stata_interface::{
 };
 use crate::utilities::{
     compute_pool_init_count, get_compute_thread_pool, get_io_thread_pool, io_pool_init_count,
-    warm_thread_pools, STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS,
+    warm_thread_pools, AdaptiveBatchTuner, STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS,
 };
 
 fn publish_write_runtime_metrics(
@@ -63,6 +63,30 @@ fn publish_write_runtime_metrics(
     publish_transfer_metrics("dtpq_write");
 }
 
+fn publish_write_batch_tuner_metrics(tuner: &AdaptiveBatchTuner) {
+    set_macro(
+        "dtpq_write_selected_batch_size",
+        &tuner.selected_batch_size().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_row_width_bytes",
+        &tuner.row_width_bytes().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_memory_cap_rows",
+        &tuner.memory_guardrail_rows().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_adjustments",
+        &tuner.tuning_adjustments().to_string(),
+        true,
+    );
+    set_macro("dtpq_write_batch_tuner_mode", tuner.tuning_mode(), true);
+}
+
 #[derive(Clone, Debug)]
 pub struct ExportField {
     pub name: String,
@@ -71,16 +95,33 @@ pub struct ExportField {
     pub str_length: usize,
 }
 
+fn estimate_export_row_width_bytes(infos: &[ExportField]) -> usize {
+    infos
+        .iter()
+        .map(|info| match info.dtype.as_str() {
+            "byte" => 1,
+            "int" => 2,
+            "long" | "float" => 4,
+            "double" => 8,
+            "strl" => 128,
+            _ if info.dtype.starts_with("str") => info.str_length.max(1) + 1,
+            _ => 8,
+        })
+        .sum::<usize>()
+        .max(1)
+}
+
 pub struct StataRowSource {
     column_info: Vec<ExportField>,
     start_row: usize,
     n_rows: usize,
-    batch_size: usize,
+    batch_size_hint: AtomicUsize,
     planned_batches: usize,
     current_offset: AtomicUsize,
     processed_batches: AtomicUsize,
     schema: Arc<Schema>,
     stata_api_lock: Mutex<()>,
+    batch_tuner: Mutex<AdaptiveBatchTuner>,
 }
 
 impl StataRowSource {
@@ -88,7 +129,8 @@ impl StataRowSource {
         column_info: Vec<ExportField>,
         start_row: usize,
         n_rows: usize,
-        batch_size: usize,
+        configured_batch_size: usize,
+        row_width_bytes: usize,
     ) -> Self {
         let mut fields = Vec::with_capacity(column_info.len());
         for info in &column_info {
@@ -111,7 +153,8 @@ impl StataRowSource {
             fields.push(Field::new(PlSmallStr::from(&info.name), dtype));
         }
 
-        let safe_batch_size = batch_size.max(1);
+        let batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, configured_batch_size, 0);
+        let safe_batch_size = batch_tuner.selected_batch_size().max(1);
         let planned_batches = if n_rows == 0 {
             0
         } else {
@@ -122,21 +165,31 @@ impl StataRowSource {
             column_info,
             start_row,
             n_rows,
-            batch_size: safe_batch_size,
+            batch_size_hint: AtomicUsize::new(safe_batch_size),
             planned_batches,
             current_offset: AtomicUsize::new(0),
             processed_batches: AtomicUsize::new(0),
             schema: Arc::new(Schema::from_iter(fields)),
             stata_api_lock: Mutex::new(()),
+            batch_tuner: Mutex::new(batch_tuner),
         }
     }
 
     pub fn planned_batches(&self) -> usize {
-        self.planned_batches
+        let processed = self.processed_batches.load(Ordering::Relaxed);
+        if processed == 0 {
+            self.planned_batches
+        } else {
+            processed
+        }
     }
 
     pub fn processed_batches(&self) -> usize {
         self.processed_batches.load(Ordering::Relaxed)
+    }
+
+    pub fn batch_tuner_snapshot(&self) -> AdaptiveBatchTuner {
+        self.batch_tuner.lock().unwrap().clone()
     }
 }
 
@@ -159,23 +212,42 @@ impl AnonymousScan for StataRowSource {
         let read_count = std::cmp::min(self.n_rows - offset, self.n_rows);
 
         let _lock = self.stata_api_lock.lock().unwrap();
+        let batch_started_at = Instant::now();
         self.processed_batches.fetch_add(1, Ordering::Relaxed);
         let df = self.read_batch(offset, read_count)?;
+        let batch_rows = df.height();
+        if batch_rows > 0 {
+            let mut tuner = self.batch_tuner.lock().unwrap();
+            let next_batch_size =
+                tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
+            self.batch_size_hint
+                .store(next_batch_size.max(1), Ordering::Relaxed);
+        }
         Ok(df)
     }
 
     fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
+        let requested_batch_size = self.batch_size_hint.load(Ordering::Relaxed).max(1);
         let offset = self
             .current_offset
-            .fetch_add(self.batch_size, Ordering::Relaxed);
+            .fetch_add(requested_batch_size, Ordering::Relaxed);
         if offset >= self.n_rows {
             return Ok(None);
         }
-        let read_count = std::cmp::min(self.batch_size, self.n_rows - offset);
+        let read_count = std::cmp::min(requested_batch_size, self.n_rows - offset);
 
         let _lock = self.stata_api_lock.lock().unwrap();
+        let batch_started_at = Instant::now();
         self.processed_batches.fetch_add(1, Ordering::Relaxed);
         let df = self.read_batch(offset, read_count)?;
+        let batch_rows = df.height();
+        if batch_rows > 0 {
+            let mut tuner = self.batch_tuner.lock().unwrap();
+            let next_batch_size =
+                tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
+            self.batch_size_hint
+                .store(next_batch_size.max(1), Ordering::Relaxed);
+        }
         Ok(Some(df))
     }
 }
@@ -246,6 +318,11 @@ pub fn export_parquet(
     warm_thread_pools();
     reset_transfer_metrics();
     publish_write_runtime_metrics(0, 0, 0, 0);
+    set_macro("dtpq_write_selected_batch_size", "0", true);
+    set_macro("dtpq_write_batch_row_width_bytes", "0", true);
+    set_macro("dtpq_write_batch_memory_cap_rows", "0", true);
+    set_macro("dtpq_write_batch_adjustments", "0", true);
+    set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
 
     let selected_vars_owned;
     let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
@@ -293,17 +370,14 @@ pub fn export_parquet(
         n_rows.min(rows_available)
     };
 
-    let final_batch_size = if batch_size == 0 {
-        determine_optimal_batch_size(&selected_infos)
-    } else {
-        batch_size
-    };
+    let row_width_bytes = estimate_export_row_width_bytes(&selected_infos);
 
     let scan = Arc::new(StataRowSource::new(
         selected_infos,
         start_row,
         rows_to_read,
-        final_batch_size,
+        batch_size,
+        row_width_bytes,
     ));
     let mut lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
 
@@ -344,6 +418,9 @@ pub fn export_parquet(
             &dtmeta_json,
         )?;
     }
+
+    let batch_tuner = scan.batch_tuner_snapshot();
+    publish_write_batch_tuner_metrics(&batch_tuner);
 
     publish_write_runtime_metrics(
         collect_calls,
@@ -455,36 +532,6 @@ fn write_partitioned_dataframe(
     )?;
 
     Ok(())
-}
-
-fn determine_optimal_batch_size(infos: &[ExportField]) -> usize {
-    // Target ~128 MB per batch for a balance between speed and memory overhead
-    const TARGET_BATCH_BYTES: usize = 128 * 1024 * 1024;
-    const MIN_BATCH_SIZE: usize = 5_000;
-    const MAX_BATCH_SIZE: usize = 500_000;
-
-    let row_width: usize = infos
-        .iter()
-        .map(|info| match info.dtype.as_str() {
-            "byte" => 1,
-            "int" => 2,
-            "long" | "float" => 4,
-            "double" => 8,
-            "strl" => 128, // Conservatively estimate average strL size
-            _ if info.dtype.starts_with("str") => info.str_length + 1,
-            _ => 8,
-        })
-        .sum();
-
-    if row_width == 0 {
-        return 100_000;
-    }
-
-    let batch_size = TARGET_BATCH_BYTES / row_width;
-    let clamped = batch_size.clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE);
-
-    // Round to nearest 5,000 for cleaner boundaries
-    (clamped / 5000) * 5000
 }
 
 fn parquet_compression(

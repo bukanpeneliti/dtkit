@@ -24,8 +24,8 @@ use crate::stata_interface::{
 };
 use crate::utilities::{
     compute_pool_init_count, determine_parallelization_strategy, get_compute_thread_pool,
-    get_io_thread_pool, io_pool_init_count, warm_thread_pools, BatchMode, STATA_DATE_ORIGIN,
-    STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
+    get_io_thread_pool, io_pool_init_count, warm_thread_pools, AdaptiveBatchTuner, BatchMode,
+    STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS, TIME_NS, TIME_US,
 };
 
 #[allow(dead_code)]
@@ -49,6 +49,49 @@ struct TransferColumnSpec {
     stata_col_index: usize,
     stata_type: String,
     writer_kind: TransferWriterKind,
+}
+
+fn estimated_writer_row_bytes(kind: TransferWriterKind) -> usize {
+    match kind {
+        TransferWriterKind::Numeric => 8,
+        TransferWriterKind::Date => 4,
+        TransferWriterKind::Time => 8,
+        TransferWriterKind::Datetime => 8,
+        TransferWriterKind::String => 48,
+        TransferWriterKind::Strl => 128,
+    }
+}
+
+fn estimate_transfer_row_width_bytes(transfer_columns: &[TransferColumnSpec]) -> usize {
+    transfer_columns
+        .iter()
+        .map(|col| estimated_writer_row_bytes(col.writer_kind))
+        .sum::<usize>()
+        .max(1)
+}
+
+fn publish_read_batch_tuner_metrics(tuner: &AdaptiveBatchTuner) {
+    set_macro(
+        "dtpq_read_selected_batch_size",
+        &tuner.selected_batch_size().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_read_batch_row_width_bytes",
+        &tuner.row_width_bytes().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_read_batch_memory_cap_rows",
+        &tuner.memory_guardrail_rows().to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_read_batch_adjustments",
+        &tuner.tuning_adjustments().to_string(),
+        true,
+    );
+    set_macro("dtpq_read_batch_tuner_mode", tuner.tuning_mode(), true);
 }
 
 #[allow(dead_code)]
@@ -427,6 +470,11 @@ pub fn import_parquet(
     reset_transfer_metrics();
     publish_read_runtime_metrics(0, 0, 0, 0);
     set_macro("dtpq_read_lazy_mode", "eager_fast_path", true);
+    set_macro("dtpq_read_selected_batch_size", "0", true);
+    set_macro("dtpq_read_batch_row_width_bytes", "0", true);
+    set_macro("dtpq_read_batch_memory_cap_rows", "0", true);
+    set_macro("dtpq_read_batch_adjustments", "0", true);
+    set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
 
     let variables_owned;
     let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
@@ -510,24 +558,25 @@ pub fn import_parquet(
             df.try_apply(&col_name, |s| s.cast(&DataType::String))?;
         }
 
+        let row_width_bytes = estimate_transfer_row_width_bytes(&transfer_columns);
+        let mut batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, batch_size, 0);
+
         let n_threads = get_compute_thread_pool().current_num_threads().max(1);
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(selected_column_list.len(), df.height(), n_threads)
         });
         let total_rows = df.height();
-        let n_batches = (total_rows as f64 / batch_size as f64).ceil() as usize;
-        set_macro("n_batches", &n_batches.to_string(), false);
-
         let mut loaded_rows = 0usize;
-        for batch_i in 0..n_batches {
-            let batch_offset = batch_i * batch_size;
-            let batch_length = if (batch_i + 1) * batch_size > total_rows {
-                total_rows - batch_i * batch_size
-            } else {
-                batch_size
-            };
+        let mut batch_offset = 0usize;
+        let mut n_batches = 0usize;
+
+        while batch_offset < total_rows {
+            let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
             let batch_df = df.slice(batch_offset as i64, batch_length);
-            loaded_rows += batch_df.height();
+            if batch_df.height() == 0 {
+                break;
+            }
+            let batch_started_at = Instant::now();
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
@@ -535,9 +584,17 @@ pub fn import_parquet(
                 strategy,
                 stata_offset,
             )?;
+            let batch_rows = batch_df.height();
+            loaded_rows += batch_rows;
             processed_batches += 1;
+            n_batches += 1;
+            batch_offset += batch_rows;
+            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
         }
+
+        set_macro("n_batches", &n_batches.to_string(), false);
         set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
+        publish_read_batch_tuner_metrics(&batch_tuner);
         publish_read_runtime_metrics(
             collect_calls,
             n_batches,
@@ -603,9 +660,10 @@ pub fn import_parquet(
     }
 
     let use_streaming = n_rows > 1_000_000;
-    let effective_batch_size = batch_size.max(1);
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
     let n_threads = get_compute_thread_pool().current_num_threads().max(1);
+    let row_width_bytes = estimate_transfer_row_width_bytes(&transfer_columns);
+    let mut batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, batch_size, 0);
 
     let mut loaded_rows = 0usize;
     let n_batches;
@@ -616,18 +674,14 @@ pub fn import_parquet(
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(columns.len(), n_rows, n_threads)
         });
-        let n_batches_legacy = (n_rows as f64 / effective_batch_size as f64).ceil() as usize;
-        set_macro("n_batches", &n_batches_legacy.to_string(), false);
 
-        for batch_i in 0..n_batches_legacy {
+        let mut n_batches_legacy = 0usize;
+        let mut requested_offset = 0usize;
+        while requested_offset < n_rows {
             let mut lf_batch = lf.clone().select(&columns);
-            let batch_offset = batch_source_offset + batch_i * effective_batch_size;
-            let batch_length = if (batch_i + 1) * effective_batch_size > n_rows {
-                n_rows - batch_i * effective_batch_size
-            } else {
-                effective_batch_size
-            } as u32;
-            lf_batch = lf_batch.slice(batch_offset as i64, batch_length);
+            let batch_offset = batch_source_offset + requested_offset;
+            let batch_length = (n_rows - requested_offset).min(batch_tuner.selected_batch_size());
+            lf_batch = lf_batch.slice(batch_offset as i64, batch_length as u32);
             let batch_df = if use_streaming {
                 collect_calls += 1;
                 lf_batch.with_new_streaming(true).collect()?
@@ -638,7 +692,7 @@ pub fn import_parquet(
             if batch_df.height() == 0 {
                 break;
             }
-            loaded_rows += batch_df.height();
+            let batch_started_at = Instant::now();
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset - batch_source_offset,
@@ -646,7 +700,12 @@ pub fn import_parquet(
                 strategy,
                 stata_offset,
             )?;
+            let batch_rows = batch_df.height();
+            loaded_rows += batch_rows;
             processed_batches += 1;
+            n_batches_legacy += 1;
+            requested_offset += batch_length;
+            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
         }
 
         n_batches = n_batches_legacy;
@@ -667,22 +726,19 @@ pub fn import_parquet(
         };
 
         let total_rows = single_pass_df.height();
-        let n_batches_single = if total_rows == 0 {
-            0
-        } else {
-            total_rows.div_ceil(effective_batch_size)
-        };
-        set_macro("n_batches", &n_batches_single.to_string(), false);
-
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(columns.len(), total_rows, n_threads)
         });
 
-        for batch_i in 0..n_batches_single {
-            let batch_offset = batch_i * effective_batch_size;
-            let batch_length = (total_rows - batch_offset).min(effective_batch_size);
+        let mut n_batches_single = 0usize;
+        let mut batch_offset = 0usize;
+        while batch_offset < total_rows {
+            let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
             let batch_df = single_pass_df.slice(batch_offset as i64, batch_length);
-            loaded_rows += batch_df.height();
+            if batch_df.height() == 0 {
+                break;
+            }
+            let batch_started_at = Instant::now();
             process_batch_with_strategy(
                 &batch_df,
                 batch_offset,
@@ -690,13 +746,20 @@ pub fn import_parquet(
                 strategy,
                 stata_offset,
             )?;
+            let batch_rows = batch_df.height();
+            loaded_rows += batch_rows;
             processed_batches += 1;
+            n_batches_single += 1;
+            batch_offset += batch_rows;
+            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
         }
 
         n_batches = n_batches_single;
     }
 
+    set_macro("n_batches", &n_batches.to_string(), false);
     set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
+    publish_read_batch_tuner_metrics(&batch_tuner);
     publish_read_runtime_metrics(
         collect_calls,
         n_batches,
