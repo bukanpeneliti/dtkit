@@ -7,6 +7,7 @@ use polars_sql::SQLContext;
 use rayon::prelude::*;
 use regex::Regex;
 use std::collections::HashSet;
+use std::env;
 use std::error::Error;
 use std::fs::File;
 use std::path::{Path, PathBuf};
@@ -28,6 +29,7 @@ use crate::utilities::{
 
 #[allow(dead_code)]
 const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
+const ENV_METADATA_LOOKUP_MODE: &str = "DTPARQUET_METADATA_LOOKUP_MODE";
 
 #[allow(dead_code)]
 pub fn validate_parquet_schema(path: &str, expected_columns: &[&str]) -> Result<(), String> {
@@ -111,6 +113,22 @@ fn has_parquet_files_in_hive_structure(dir_path: &str) -> bool {
 }
 
 pub fn has_metadata_key(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
+    if metadata_lookup_uses_legacy_scan() {
+        return has_metadata_key_legacy_scan(path, key);
+    }
+    crate::metadata::has_parquet_metadata_key(path, key)
+}
+
+fn metadata_lookup_uses_legacy_scan() -> bool {
+    env::var(ENV_METADATA_LOOKUP_MODE)
+        .map(|mode| {
+            let mode = mode.trim().to_ascii_lowercase();
+            mode == "legacy_scan" || mode == "legacy" || mode == "bytes_scan"
+        })
+        .unwrap_or(false)
+}
+
+fn has_metadata_key_legacy_scan(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
     let bytes = std::fs::read(path)?;
     Ok(bytes
         .windows(key.len())

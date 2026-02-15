@@ -1,5 +1,6 @@
 use parquet_footer::read::read_metadata;
 use serde::{Deserialize, Serialize};
+use std::error::Error;
 use std::fs::File;
 use std::io::BufReader;
 
@@ -122,6 +123,26 @@ pub fn load_dtmeta_from_parquet(parquet_path: &str) -> Option<DtMeta> {
         .find(|entry| entry.key == DTMETA_KEY)
         .and_then(|entry| entry.value.as_deref())?;
     serde_json::from_str::<DtMeta>(dtmeta_text).ok()
+}
+
+pub fn has_parquet_metadata_key(parquet_path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
+    let file = File::open(parquet_path)?;
+    let mut reader = BufReader::new(file);
+    let metadata = read_metadata(&mut reader).map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "Failed to read parquet footer metadata: {:?}. Set DTPARQUET_METADATA_LOOKUP_MODE=legacy_scan to use legacy byte scan fallback.",
+                e
+            ),
+        )
+    })?;
+
+    Ok(metadata
+        .key_value_metadata
+        .as_ref()
+        .map(|kv| kv.iter().any(|entry| entry.key == key))
+        .unwrap_or(false))
 }
 
 pub fn expose_dtmeta_to_macros(meta: &DtMeta) {
