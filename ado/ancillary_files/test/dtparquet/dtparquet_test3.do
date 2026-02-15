@@ -64,8 +64,47 @@ local ++total_tests
 display as text "Test 2 skipped: requires pyarrow metadata mutation helper"
 local passed_tests "`passed_tests' 2"
 
+// Test 3: Footer metadata key lookup behavior (T04)
+display _newline "=== TEST 3: Footer metadata key lookup behavior (T04) ==="
+local ++total_tests
+clear
+set obs 30
+gen long id = _n
+gen str20 tag = "row_" + string(_n, "%03.0f")
+tempfile with_meta_stub
+local with_meta_file "`with_meta_stub'.parquet"
+capture dtparquet save "`with_meta_stub'", replace
+
+if _rc != 0 {
+    display as error "Test 3 failed: save error " _rc
+    local failed_tests "`failed_tests' 3"
+}
+else {
+    local t3_err 0
+
+    plugin call dtparquet_plugin, "has_metadata_key" "`with_meta_file'" "dtparquet.dtmeta"
+    if "`has_metadata_key'" != "1" local ++t3_err
+
+    plugin call dtparquet_plugin, "has_metadata_key" "`with_meta_file'" "does.not.exist"
+    if "`has_metadata_key'" != "0" local ++t3_err
+
+    local fixture_no_meta "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet"
+    plugin call dtparquet_plugin, "has_metadata_key" "`fixture_no_meta'" "dtparquet.dtmeta"
+    if "`has_metadata_key'" != "0" local ++t3_err
+
+    if `t3_err' == 0 {
+        display as result "Test 3 completed successfully"
+        local passed_tests "`passed_tests' 3"
+    }
+    else {
+        display as error "Test 3 failed: footer metadata key checks did not match expected values"
+        local failed_tests "`failed_tests' 3"
+    }
+}
+
 // Cleanup
 capture erase "`test_file'"
+capture erase "`with_meta_file'"
 
 // Test Summary
 display _newline "=========================================="
