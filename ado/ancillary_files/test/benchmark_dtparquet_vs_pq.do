@@ -133,37 +133,37 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         local out_nobs = _N
         local out_nvars = c(k)
 
-        local collect_calls = real("$dtpq_write_collect_calls")
+        local collect_calls = real("$write_collect_calls")
         if missing(`collect_calls') local collect_calls = 0
-        local planned_batches = real("$dtpq_write_planned_batches")
+        local planned_batches = real("$write_planned_batches")
         if missing(`planned_batches') local planned_batches = 0
-        local processed_batches = real("$dtpq_write_processed_batches")
+        local processed_batches = real("$write_processed_batches")
         if missing(`processed_batches') local processed_batches = 0
-        local replace_number_calls = real("$dtpq_write_replace_number_calls")
+        local replace_number_calls = real("$write_replace_number_calls")
         if missing(`replace_number_calls') local replace_number_calls = 0
-        local replace_string_calls = real("$dtpq_write_replace_string_calls")
+        local replace_string_calls = real("$write_replace_string_calls")
         if missing(`replace_string_calls') local replace_string_calls = 0
-        local pull_numeric_calls = real("$dtpq_write_pull_numeric_calls")
+        local pull_numeric_calls = real("$write_pull_numeric_calls")
         if missing(`pull_numeric_calls') local pull_numeric_calls = 0
-        local pull_string_calls = real("$dtpq_write_pull_string_calls")
+        local pull_string_calls = real("$write_pull_string_calls")
         if missing(`pull_string_calls') local pull_string_calls = 0
-        local pull_strl_calls = real("$dtpq_write_pull_strl_calls")
+        local pull_strl_calls = real("$write_pull_strl_calls")
         if missing(`pull_strl_calls') local pull_strl_calls = 0
-        local queue_capacity = real("$dtpq_write_queue_capacity")
+        local queue_capacity = real("$write_queue_capacity")
         if missing(`queue_capacity') local queue_capacity = 0
-        local queue_peak = real("$dtpq_write_queue_peak")
+        local queue_peak = real("$write_queue_peak")
         if missing(`queue_peak') local queue_peak = 0
-        local queue_bp_events = real("$dtpq_write_queue_bp_events")
+        local queue_bp_events = real("$write_queue_bp_events")
         if missing(`queue_bp_events') local queue_bp_events = 0
-        local queue_wait_ms = real("$dtpq_write_queue_wait_ms")
+        local queue_wait_ms = real("$write_queue_wait_ms")
         if missing(`queue_wait_ms') local queue_wait_ms = 0
-        local queue_prod_batches = real("$dtpq_write_queue_prod_batches")
+        local queue_prod_batches = real("$write_queue_prod_batches")
         if missing(`queue_prod_batches') local queue_prod_batches = 0
-        local queue_cons_batches = real("$dtpq_write_queue_cons_batches")
+        local queue_cons_batches = real("$write_queue_cons_batches")
         if missing(`queue_cons_batches') local queue_cons_batches = 0
-        local strl_trunc_events = real("$dtpq_write_strl_trunc_events")
+        local strl_trunc_events = real("$write_strl_trunc_events")
         if missing(`strl_trunc_events') local strl_trunc_events = 0
-        local strl_binary_events = real("$dtpq_write_strl_binary_events")
+        local strl_binary_events = real("$write_strl_binary_events")
         if missing(`strl_binary_events') local strl_binary_events = 0
 
         post `posth' ///
@@ -207,21 +207,21 @@ foreach scenario in narrow_numeric wide_mixed string_heavy {
         assert _N == `src_nobs'
         assert c(k) == `src_nvars'
 
-        local collect_calls = real("$dtpq_read_collect_calls")
+        local collect_calls = real("$read_collect_calls")
         if missing(`collect_calls') local collect_calls = 0
-        local planned_batches = real("$dtpq_read_planned_batches")
+        local planned_batches = real("$read_planned_batches")
         if missing(`planned_batches') local planned_batches = 0
-        local processed_batches = real("$dtpq_read_processed_batches")
+        local processed_batches = real("$read_processed_batches")
         if missing(`processed_batches') local processed_batches = 0
-        local replace_number_calls = real("$dtpq_read_replace_number_calls")
+        local replace_number_calls = real("$read_replace_number_calls")
         if missing(`replace_number_calls') local replace_number_calls = 0
-        local replace_string_calls = real("$dtpq_read_replace_string_calls")
+        local replace_string_calls = real("$read_replace_string_calls")
         if missing(`replace_string_calls') local replace_string_calls = 0
-        local pull_numeric_calls = real("$dtpq_read_pull_numeric_calls")
+        local pull_numeric_calls = real("$read_pull_numeric_calls")
         if missing(`pull_numeric_calls') local pull_numeric_calls = 0
-        local pull_string_calls = real("$dtpq_read_pull_string_calls")
+        local pull_string_calls = real("$read_pull_string_calls")
         if missing(`pull_string_calls') local pull_string_calls = 0
-        local pull_strl_calls = real("$dtpq_read_pull_strl_calls")
+        local pull_strl_calls = real("$read_pull_strl_calls")
         if missing(`pull_strl_calls') local pull_strl_calls = 0
         local queue_capacity = 0
         local queue_peak = 0

@@ -1,34 +1,24 @@
-pub mod reader {
-    use crate::mapping::TransferWriterKind;
+use polars::datatypes::{AnyValue, TimeUnit};
+use polars::prelude::*;
+use rayon::prelude::*;
+use std::time::Instant;
 
-    #[derive(Clone, Debug)]
-    pub struct TransferColumnSpec {
-        pub name: String,
-        pub stata_type: u32,
-        pub writer_kind: TransferWriterKind,
-        pub strls: Vec<String>,
-        pub max_string_len: usize,
-    }
+use crate::mapping::{is_stata_date_format, is_stata_datetime_format, is_stata_string_dtype};
+use crate::mapping::{transfer_writer_kind_from_stata_type, FieldSpec, TransferWriterKind};
+use crate::stata_interface::{
+    pull_numeric_cell, pull_string_cell_with_buffer, pull_strl_cell_with_arena,
+    record_transfer_conversion_failure, replace_number, replace_string, StrlArena,
+};
+use crate::utilities::{
+    get_compute_thread_pool, AdaptiveBatchTuner, BatchMode, STATA_DATE_ORIGIN, STATA_EPOCH_MS,
+    TIME_MS, TIME_NS, TIME_US,
+};
 
-    pub use crate::read::build_transfer_columns;
-    pub use crate::read::estimate_transfer_row_width_bytes;
-    pub use crate::read::sink_dataframe_in_batches;
-    pub use crate::read::write_numeric_column_range;
-    pub use crate::read::write_string_column_range;
-}
+#[path = "transfer_reader.rs"]
+pub mod reader;
 
-pub mod writer {
-    #[derive(Clone, Debug)]
-    pub struct ExportField {
-        pub name: String,
-        pub stata_type: u32,
-        pub width: usize,
-    }
-
-    pub use crate::write::read_batch_from_columns;
-    pub use crate::write::series_from_stata_column;
-    pub use crate::write::validate_stata_schema;
-}
+#[path = "transfer_writer.rs"]
+pub mod writer;
 
 pub use reader::TransferColumnSpec;
 pub use writer::ExportField;

@@ -14,6 +14,8 @@ pub struct ReadArgs {
     pub order_by: String,
     pub order_by_type: usize,
     pub order_descending: f64,
+    pub stata_offset: usize,
+    pub random_share: f64,
     pub random_seed: u64,
     pub batch_size: usize,
 }

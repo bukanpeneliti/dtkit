@@ -328,8 +328,8 @@ capture noisily {
     dtparquet save "`t12_pool_stub'", replace chunksize(`t12_chunk_size')
 
     local t12_parquet_file "`t12_pool_stub'.parquet"
-    local t12_compute_after_save = real("$dtpq_compute_pool_inits")
-    local t12_io_after_save = real("$dtpq_io_pool_inits")
+    local t12_compute_after_save = real("$compute_pool_inits")
+    local t12_io_after_save = real("$io_pool_inits")
     assert !missing(`t12_compute_after_save')
     assert !missing(`t12_io_after_save')
     assert `t12_compute_after_save' >= 1
@@ -337,10 +337,10 @@ capture noisily {
 
     clear
     dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size')
-    local t12_compute_after_use1 = real("$dtpq_compute_pool_inits")
-    local t12_io_after_use1 = real("$dtpq_io_pool_inits")
-    local t12_planned_batches = real("$dtpq_read_planned_batches")
-    local t12_processed_batches = real("$dtpq_read_processed_batches")
+    local t12_compute_after_use1 = real("$compute_pool_inits")
+    local t12_io_after_use1 = real("$io_pool_inits")
+    local t12_planned_batches = real("$read_planned_batches")
+    local t12_processed_batches = real("$read_processed_batches")
     assert `t12_compute_after_use1' == `t12_compute_after_save'
     assert `t12_io_after_use1' == `t12_io_after_save'
     assert `t12_planned_batches' > 1
@@ -348,8 +348,8 @@ capture noisily {
 
     clear
     dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size')
-    local t12_compute_after_use2 = real("$dtpq_compute_pool_inits")
-    local t12_io_after_use2 = real("$dtpq_io_pool_inits")
+    local t12_compute_after_use2 = real("$compute_pool_inits")
+    local t12_io_after_use2 = real("$io_pool_inits")
     assert `t12_compute_after_use2' == `t12_compute_after_save'
     assert `t12_io_after_use2' == `t12_io_after_save'
 }
@@ -393,10 +393,10 @@ capture noisily {
     assert _N == `t13_n_rows'
     assert c(k) == 9
 
-    local t13_fallback = real("$dtpq_read_fallback_calls")
-    local t13_conversion_failures = real("$dtpq_read_conversion_failures")
-    local t13_number_calls = real("$dtpq_read_replace_number_calls")
-    local t13_string_calls = real("$dtpq_read_replace_string_calls")
+    local t13_fallback = real("$read_fallback_calls")
+    local t13_conversion_failures = real("$read_conversion_failures")
+    local t13_number_calls = real("$read_replace_number_calls")
+    local t13_string_calls = real("$read_replace_string_calls")
 
     assert !missing(`t13_fallback')
     assert !missing(`t13_conversion_failures')
@@ -442,14 +442,14 @@ capture noisily {
     assert id[1] == 1
     assert id[_N] == 119999
 
-    local t14_collect_calls = real("$dtpq_read_collect_calls")
-    local t14_planned_batches = real("$dtpq_read_planned_batches")
-    local t14_processed_batches = real("$dtpq_read_processed_batches")
+    local t14_collect_calls = real("$read_collect_calls")
+    local t14_planned_batches = real("$read_planned_batches")
+    local t14_processed_batches = real("$read_processed_batches")
 
     assert `t14_collect_calls' == 1
     assert `t14_planned_batches' == `t14_processed_batches'
     assert `t14_planned_batches' > 1
-    assert "$dtpq_read_lazy_mode" == "single_pass"
+    assert "$read_lazy_mode" == "single_pass"
 }
 
 if _rc == 0 {
@@ -481,9 +481,9 @@ capture noisily {
 
     dtparquet save "test_t07_autotune.parquet", replace chunksize(`t15_save_chunk')
 
-    local t15_write_selected = real("$dtpq_write_selected_batch_size")
-    local t15_write_row_width = real("$dtpq_write_batch_row_width_bytes")
-    local t15_write_memory_cap = real("$dtpq_write_batch_memory_cap_rows")
+    local t15_write_selected = real("$write_selected_batch_size")
+    local t15_write_row_width = real("$write_batch_row_width_bytes")
+    local t15_write_memory_cap = real("$write_batch_memory_cap_rows")
 
     assert !missing(`t15_write_selected')
     assert !missing(`t15_write_row_width')
@@ -493,16 +493,16 @@ capture noisily {
     assert `t15_write_memory_cap' > 0
     assert `t15_write_selected' <= `t15_save_chunk'
     assert `t15_write_selected' <= `t15_write_memory_cap'
-    assert inlist("$dtpq_write_batch_tuner_mode", "adaptive", "fixed")
+    assert inlist("$write_batch_tuner_mode", "adaptive", "fixed")
 
     clear
     dtparquet use using "test_t07_autotune.parquet", clear chunksize(`t15_use_chunk')
 
     assert _N == `t15_n_rows'
 
-    local t15_read_selected = real("$dtpq_read_selected_batch_size")
-    local t15_read_row_width = real("$dtpq_read_batch_row_width_bytes")
-    local t15_read_memory_cap = real("$dtpq_read_batch_memory_cap_rows")
+    local t15_read_selected = real("$read_selected_batch_size")
+    local t15_read_row_width = real("$read_batch_row_width_bytes")
+    local t15_read_memory_cap = real("$read_batch_memory_cap_rows")
 
     assert !missing(`t15_read_selected')
     assert !missing(`t15_read_row_width')
@@ -512,7 +512,7 @@ capture noisily {
     assert `t15_read_memory_cap' > 0
     assert `t15_read_selected' <= `t15_use_chunk'
     assert `t15_read_selected' <= `t15_read_memory_cap'
-    assert inlist("$dtpq_read_batch_tuner_mode", "adaptive", "fixed")
+    assert inlist("$read_batch_tuner_mode", "adaptive", "fixed")
 }
 
 if _rc == 0 {
@@ -543,13 +543,13 @@ capture noisily {
 
     dtparquet save "test_t08_pipeline.parquet", replace chunksize(`t16_chunk_size')
 
-    local t16_mode "$dtpq_write_pipeline_mode"
-    local t16_capacity = real("$dtpq_write_queue_capacity")
-    local t16_peak = real("$dtpq_write_queue_peak")
-    local t16_backpressure = real("$dtpq_write_queue_bp_events")
-    local t16_produced = real("$dtpq_write_queue_prod_batches")
-    local t16_consumed = real("$dtpq_write_queue_cons_batches")
-    local t16_processed = real("$dtpq_write_processed_batches")
+    local t16_mode "$write_pipeline_mode"
+    local t16_capacity = real("$write_queue_capacity")
+    local t16_peak = real("$write_queue_peak")
+    local t16_backpressure = real("$write_queue_bp_events")
+    local t16_produced = real("$write_queue_prod_batches")
+    local t16_consumed = real("$write_queue_cons_batches")
+    local t16_processed = real("$write_processed_batches")
 
     assert inlist("`t16_mode'", "producer_consumer", "legacy_direct")
     assert !missing(`t16_capacity')
@@ -599,9 +599,9 @@ capture noisily {
 
     dtparquet save "test_t10_strl.parquet", replace chunksize(4000)
 
-    local t17_pull_strl = real("$dtpq_write_pull_strl_calls")
-    local t17_trunc_events = real("$dtpq_write_strl_trunc_events")
-    local t17_binary_events = real("$dtpq_write_strl_binary_events")
+    local t17_pull_strl = real("$write_pull_strl_calls")
+    local t17_trunc_events = real("$write_strl_trunc_events")
+    local t17_binary_events = real("$write_strl_binary_events")
 
     assert !missing(`t17_pull_strl')
     assert !missing(`t17_trunc_events')
@@ -638,13 +638,13 @@ capture noisily {
     gen str20 label = "row_" + string(_n, "%06.0f")
 
     dtparquet save "test_t12_boundaries.parquet", replace chunksize(700)
-    assert inlist("$dtpq_write_engine_stage", "execute", "stata_sink")
+    assert inlist("$write_engine_stage", "execute", "stata_sink")
 
     clear
     dtparquet use using "test_t12_boundaries.parquet", clear chunksize(700)
     count
     assert r(N) == 2000
-    assert inlist("$dtpq_read_engine_stage", "execute", "stata_sink")
+    assert inlist("$read_engine_stage", "execute", "stata_sink")
 }
 
 if _rc == 0 {

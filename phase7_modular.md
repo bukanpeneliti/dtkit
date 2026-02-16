@@ -553,12 +553,12 @@ Kimi's review suggested a simpler flat structure instead of nested directories:
 
 ## Verification Checklist (Per Kimi's Review)
 
-- [ ] Each file < 500 lines (except filter.rs ~1000)
-- [ ] No directories deeper than 1 level
-- [ ] `pub use` re-exports maintain backward compatibility
-- [ ] FFI symbols unchanged (_stata_*)
-- [ ] All 7 tests pass after each phase
-- [ ] Performance regression < 5%
+- [x] Each file < 500 lines (except filter.rs ~1000)
+- [x] No directories deeper than 1 level
+- [x] `pub use` re-exports maintain backward compatibility
+- [x] FFI symbols unchanged (_stata_*)
+- [x] All 7 tests pass after each phase
+- [ ] Performance regression < 5% (skipped per user instruction)
 
 ## Testing Strategy
 

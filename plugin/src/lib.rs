@@ -5,6 +5,7 @@ use std::slice;
 
 pub mod boundary;
 pub mod commands;
+pub mod config;
 pub mod downcast;
 pub mod error;
 pub mod filter;
@@ -31,7 +32,7 @@ pub use parse::parse_command;
 
 use stata_interface::{display, ST_retcode};
 
-pub const SCHEMA_HANDOFF_PROTOCOL_VERSION: u32 = 2;
+pub use config::SCHEMA_HANDOFF_PROTOCOL_VERSION;
 
 #[no_mangle]
 pub static mut _stata_: *mut stata_sys::ST_plugin = ptr::null_mut();

@@ -3,6 +3,7 @@ use crate::commands::{
 };
 use crate::metadata;
 use crate::read;
+use crate::schema;
 use crate::stata_interface::{display, set_macro, ST_retcode};
 use crate::write;
 
@@ -25,6 +26,8 @@ fn handle_read(args: &ReadArgs) -> ST_retcode {
         &args.order_by,
         args.order_by_type,
         args.order_descending,
+        args.stata_offset,
+        args.random_share,
         args.random_seed,
         args.batch_size,
     );
@@ -66,7 +69,7 @@ fn handle_save(args: &SaveArgs) -> ST_retcode {
 }
 
 fn handle_describe(args: &DescribeArgs) -> ST_retcode {
-    read::file_summary(
+    schema::file_summary(
         &args.file_path,
         args.detailed,
         args.memory_savvy,
@@ -79,7 +82,7 @@ fn handle_describe(args: &DescribeArgs) -> ST_retcode {
 }
 
 fn handle_has_metadata_key(args: &HasMetadataKeyArgs) -> ST_retcode {
-    match read::has_metadata_key(&args.file_path, &args.key) {
+    match metadata::has_parquet_metadata_key(&args.file_path, &args.key) {
         Ok(found) => {
             set_macro("has_metadata_key", if found { "1" } else { "0" }, false);
             0

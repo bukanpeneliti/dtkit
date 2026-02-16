@@ -1,6 +1,9 @@
 use std::time::Instant;
 
-use crate::utilities::{get_compute_thread_pool, get_io_thread_pool, AdaptiveBatchTuner};
+use crate::utilities::{
+    compute_pool_init_count, get_compute_thread_pool, get_io_thread_pool, io_pool_init_count,
+    AdaptiveBatchTuner,
+};
 
 pub trait RuntimeMetrics: Default {
     fn zero() -> Self;
@@ -57,6 +60,10 @@ impl RuntimeMetrics for CommonRuntimeMetrics {
 
     fn collect(&mut self, started_at: Instant) {
         self.elapsed_ms = started_at.elapsed().as_millis();
+        self.compute_pool_threads = get_compute_thread_pool().current_num_threads();
+        self.compute_pool_inits = compute_pool_init_count();
+        self.io_pool_threads = get_io_thread_pool().current_num_threads();
+        self.io_pool_inits = io_pool_init_count();
     }
 
     fn emit_to_macros(&self, prefix: &str) {
@@ -101,6 +108,81 @@ impl RuntimeMetrics for CommonRuntimeMetrics {
             &self.io_pool_inits.to_string(),
             true,
         );
+        set_macro(
+            "compute_pool_inits",
+            &self.compute_pool_inits.to_string(),
+            true,
+        );
+        set_macro("io_pool_inits", &self.io_pool_inits.to_string(), true);
         publish_transfer_metrics(prefix);
+    }
+}
+
+pub struct CommonBatchTunerMetrics {
+    pub selected_batch_size: usize,
+    pub row_width_bytes: usize,
+    pub memory_cap_rows: usize,
+    pub adjustments: usize,
+    pub tuner_mode: &'static str,
+}
+
+impl BatchTunerMetrics for CommonBatchTunerMetrics {
+    fn from_tuner(tuner: &AdaptiveBatchTuner) -> Self {
+        Self {
+            selected_batch_size: tuner.selected_batch_size(),
+            row_width_bytes: tuner.row_width_bytes(),
+            memory_cap_rows: tuner.memory_guardrail_rows(),
+            adjustments: tuner.tuning_adjustments(),
+            tuner_mode: tuner.tuning_mode(),
+        }
+    }
+
+    fn selected_batch_size(&self) -> usize {
+        self.selected_batch_size
+    }
+
+    fn row_width_bytes(&self) -> usize {
+        self.row_width_bytes
+    }
+
+    fn memory_cap_rows(&self) -> usize {
+        self.memory_cap_rows
+    }
+
+    fn adjustments(&self) -> usize {
+        self.adjustments
+    }
+
+    fn tuner_mode(&self) -> &'static str {
+        self.tuner_mode
+    }
+
+    fn emit_to_macros(&self, prefix: &str) {
+        use crate::stata_interface::set_macro;
+        set_macro(
+            &format!("{}_selected_batch_size", prefix),
+            &self.selected_batch_size.to_string(),
+            true,
+        );
+        set_macro(
+            &format!("{}_batch_row_width_bytes", prefix),
+            &self.row_width_bytes.to_string(),
+            true,
+        );
+        set_macro(
+            &format!("{}_batch_memory_cap_rows", prefix),
+            &self.memory_cap_rows.to_string(),
+            true,
+        );
+        set_macro(
+            &format!("{}_batch_adjustments", prefix),
+            &self.adjustments.to_string(),
+            true,
+        );
+        set_macro(
+            &format!("{}_batch_tuner_mode", prefix),
+            self.tuner_mode,
+            true,
+        );
     }
 }

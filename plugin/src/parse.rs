@@ -1,8 +1,9 @@
 use crate::commands::{
     CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs, ReadArgs, SaveArgs,
 };
+use crate::config::DEFAULT_BATCH_SIZE;
 use crate::error::DtparquetError;
-use crate::read;
+use crate::schema;
 use crate::utilities::BatchMode;
 
 pub type ParseResult<T> = Result<T, DtparquetError>;
@@ -34,12 +35,12 @@ fn parse_f64_arg(field: &'static str, value: &str) -> ParseResult<f64> {
 }
 
 pub fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
-    if args.len() < 13 {
-        return Err(DtparquetError::SubcommandArgCount("read", 13));
+    if args.len() < 16 {
+        return Err(DtparquetError::SubcommandArgCount("read", 16));
     }
 
     let file_path = args[0].to_string();
-    if !read::verify_parquet_path(&file_path) {
+    if !schema::verify_parquet_path(&file_path) {
         return Err(DtparquetError::FileNotFound(file_path));
     }
 
@@ -49,12 +50,6 @@ pub fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
         None
     } else {
         Some(args[8].to_string())
-    };
-
-    let batch_size = if args.len() >= 14 {
-        parse_usize_arg("batch_size", args[13])?
-    } else {
-        50_000
     };
 
     Ok(CommandArgs::Read(ReadArgs {
@@ -74,8 +69,14 @@ pub fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
         order_by: args[9].to_string(),
         order_by_type: parse_usize_arg("order_by_type", args[10])?,
         order_descending: parse_f64_arg("order_descending", args[11])?,
-        random_seed: parse_u64_arg("random_seed", args[12])?,
-        batch_size,
+        stata_offset: parse_usize_arg("stata_offset", args[12])?,
+        random_share: parse_f64_arg("random_share", args[13])?,
+        random_seed: parse_u64_arg("random_seed", args[14])?,
+        batch_size: if args.len() >= 16 {
+            parse_usize_arg("batch_size", args[15])?
+        } else {
+            DEFAULT_BATCH_SIZE
+        },
     }))
 }
 
@@ -126,7 +127,7 @@ pub fn parse_describe_args(args: &[&str]) -> ParseResult<CommandArgs> {
     }
 
     let file_path = args[0].to_string();
-    if !read::verify_parquet_path(&file_path) {
+    if !schema::verify_parquet_path(&file_path) {
         return Err(DtparquetError::FileNotFound(file_path));
     }
 
@@ -157,7 +158,7 @@ pub fn parse_has_metadata_key_args(args: &[&str]) -> ParseResult<CommandArgs> {
     }
 
     let file_path = args[0].to_string();
-    if !read::verify_parquet_path(&file_path) {
+    if !schema::verify_parquet_path(&file_path) {
         return Err(DtparquetError::FileNotFound(file_path));
     }
 

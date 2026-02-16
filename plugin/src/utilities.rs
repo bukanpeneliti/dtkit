@@ -1,26 +1,19 @@
-pub const STATA_DATE_ORIGIN: i32 = 3653;
-pub const STATA_EPOCH_MS: i64 = 315619200;
-pub const TIME_MS: i64 = 1_000;
-pub const TIME_US: i64 = 1_000_000;
-pub const TIME_NS: i64 = 1_000_000_000;
-
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::env;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::OnceLock;
 use std::thread;
 
-const ENV_DTPARQUET_THREADS: &str = "DTPARQUET_THREADS";
-const ENV_POLARS_MAX_THREADS: &str = "POLARS_MAX_THREADS";
-const ENV_BATCH_AUTOTUNE_MODE: &str = "DTPARQUET_BATCH_AUTOTUNE_MODE";
-const ENV_BATCH_MEMORY_MB: &str = "DTPARQUET_BATCH_MEMORY_MB";
-const ENV_BATCH_MIN_ROWS: &str = "DTPARQUET_BATCH_MIN_ROWS";
-const ENV_BATCH_MAX_ROWS: &str = "DTPARQUET_BATCH_MAX_ROWS";
-const ENV_BATCH_TARGET_MS: &str = "DTPARQUET_BATCH_TARGET_MS";
-const ENV_WRITE_PIPELINE_MODE: &str = "DTPARQUET_WRITE_PIPELINE_MODE";
-const ENV_WRITE_PIPELINE_QUEUE_CAPACITY: &str = "DTPARQUET_WRITE_PIPELINE_QUEUE_CAPACITY";
-const ENV_WRITE_PIPELINE_MIN_ROWS: &str = "DTPARQUET_WRITE_PIPELINE_MIN_ROWS";
+use crate::config::*;
 
+// --- Temporal Utilities ---
+pub const STATA_DATE_ORIGIN: i32 = 3653;
+pub const STATA_EPOCH_MS: i64 = 315619200;
+pub const TIME_MS: i64 = 1_000;
+pub const TIME_US: i64 = 1_000_000;
+pub const TIME_NS: i64 = 1_000_000_000;
+
+// --- Thread Pool Management ---
 static IO_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
 static COMPUTE_THREAD_POOL: OnceLock<ThreadPool> = OnceLock::new();
 static IO_POOL_INIT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -124,9 +117,6 @@ pub fn compute_pool_init_count() -> usize {
 
 #[derive(Copy, Clone, Debug)]
 /// Batch processing mode for parallel data transfer.
-///
-/// - `ByRow`: Process row-wise (default for most cases)
-/// - `ByColumn`: Process column-wise (optimized for wide tables with few rows)
 pub enum BatchMode {
     ByRow,
     ByColumn,
@@ -134,17 +124,10 @@ pub enum BatchMode {
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 /// Write pipeline execution mode.
-///
-/// - `ProducerConsumer`: Multi-threaded with queue (default for large datasets)
-/// - `LegacyDirect`: Single-threaded direct write (legacy compatibility)
 pub enum WritePipelineMode {
     ProducerConsumer,
     LegacyDirect,
 }
-
-const DEFAULT_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 8;
-const MAX_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 32;
-const DEFAULT_WRITE_PIPELINE_MIN_ROWS: usize = 20_000;
 
 pub fn write_pipeline_mode() -> WritePipelineMode {
     env::var(ENV_WRITE_PIPELINE_MODE)
@@ -169,7 +152,7 @@ pub fn write_pipeline_min_rows() -> usize {
     parse_env_usize(ENV_WRITE_PIPELINE_MIN_ROWS).unwrap_or(DEFAULT_WRITE_PIPELINE_MIN_ROWS)
 }
 
-fn determine_parallelization_strategy_impl(
+pub fn determine_parallelization_strategy(
     n_columns: usize,
     n_rows: usize,
     available_cores: usize,
@@ -180,38 +163,6 @@ fn determine_parallelization_strategy_impl(
         BatchMode::ByRow
     }
 }
-
-pub fn determine_parallelization_strategy(
-    n_columns: usize,
-    n_rows: usize,
-    available_cores: usize,
-) -> BatchMode {
-    determine_parallelization_strategy_impl(n_columns, n_rows, available_cores)
-}
-
-// --- Batch calculation helpers (internal use only) ---
-// These are preparatory for future refactoring slices; they are not called yet.
-#[allow(dead_code)]
-fn calc_n_batches(total_rows: usize, batch_size: usize) -> usize {
-    (total_rows as f64 / batch_size as f64).ceil() as usize
-}
-#[allow(dead_code)]
-fn calc_batch_offset(batch_index: usize, batch_size: usize) -> usize {
-    batch_index * batch_size
-}
-#[allow(dead_code)]
-fn calc_batch_length(batch_index: usize, batch_size: usize, total_rows: usize) -> usize {
-    if (batch_index + 1) * batch_size > total_rows {
-        total_rows - batch_index * batch_size
-    } else {
-        batch_size
-    }
-}
-
-const DEFAULT_MEMORY_BUDGET_MB: usize = 512;
-const ROW_ESTIMATE_BYTES: usize = 64;
-const MIN_BATCH_SIZE: usize = 1_000;
-const MAX_BATCH_SIZE: usize = 100_000;
 
 pub fn calculate_adaptive_batch_size(
     n_columns: usize,
@@ -247,10 +198,6 @@ fn round_batch_size(value: usize) -> usize {
     };
     ((value + unit / 2) / unit).max(1) * unit
 }
-
-const DEFAULT_BATCH_MIN_ROWS: usize = 10_000;
-const DEFAULT_BATCH_MAX_ROWS: usize = 250_000;
-const DEFAULT_BATCH_TARGET_MS: usize = 200;
 
 #[derive(Clone, Debug)]
 pub struct AdaptiveBatchTuner {

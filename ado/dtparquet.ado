@@ -318,6 +318,7 @@ program dtparquet_use
     local if_exp ""
     local in_exp ""
     local filename ""
+    local offset 0
     
     local rest `"`anything'"'
     while `"`rest'"' != "" {
@@ -391,8 +392,8 @@ program dtparquet_use
     plugin call dtparquet_plugin, "describe" "`file'" "1" "1" "" "" "0" "0"
     plugin call dtparquet_plugin, "load_meta" "`file'"
 
-    local n_rows = `n_rows'
-    local n_columns = `n_columns'
+    local n_rows = real("`n_rows'")
+    local n_columns = real("`n_columns'")
     local vars_in_file
     forvalues i = 1/`n_columns' {
         local vars_in_file `vars_in_file' `name_`i''
@@ -518,11 +519,13 @@ program dtparquet_use
     local sql_if "`if_exp'"
     local sql_if = trim(subinstr(`"`sql_if'"', "if", "", 1))
     local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
+    local order_by_type 0
+    local order_descending 0
     local plugin_offset = max(0, `offset' - 1)
 
-    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     if _rc != 0 {
-        plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`n_obs_already'" "0" "0" "`batch_size'"
+        plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     }
 
     local n_loaded_rows = real("`n_loaded_rows'")
@@ -646,13 +649,13 @@ program _apply_foreign_cat_labels
             continue
         }
 
-        tempvar dtpq_encoded
-        quietly encode `vari', gen(`dtpq_encoded')
-        local tmp_label : value label `dtpq_encoded'
-        local stable_label = "dtpq_cat_`i'"
+        tempvar encoded
+        quietly encode `vari', gen(`encoded')
+        local tmp_label : value label `encoded'
+        local stable_label = "cat_`i'"
         capture label drop `stable_label'
         label copy `tmp_label' `stable_label', replace
-        label values `dtpq_encoded' `stable_label'
+        label values `encoded' `stable_label'
 
         if "`mode'" == "both" {
             local id_name `vari'_id
@@ -665,15 +668,15 @@ program _apply_foreign_cat_labels
                     exit 198
                 }
             }
-            gen long `id_name' = `dtpq_encoded'
+            gen long `id_name' = `encoded'
             label values `id_name' `stable_label'
-            drop `dtpq_encoded'
+            drop `encoded'
         }
         else {
             drop `vari'
-            gen long `vari' = `dtpq_encoded'
+            gen long `vari' = `encoded'
             label values `vari' `stable_label'
-            drop `dtpq_encoded'
+            drop `encoded'
         }
     }
 

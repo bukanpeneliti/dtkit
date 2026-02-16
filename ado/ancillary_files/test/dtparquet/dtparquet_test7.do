@@ -91,8 +91,8 @@ assert "`name_1'" != ""
 assert "`type_1'" != ""
 assert "`polars_type_1'" != ""
 assert real("`string_length_1'") >= 0
-assert real("`dtpq_schema_protocol_version'") == 2
-assert `"`dtpq_schema_payload'"' != ""
+assert real("`schema_protocol_version'") == 2
+assert `"`schema_payload'"' != ""
 display as result "Test 2 PASSED: describe macro contract available"
 
 * Test 2b: schema protocol mismatch is explicit
@@ -111,7 +111,7 @@ cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
 dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear
 display as result "Test 3 PASSED: Read path executed with ado pre-read setup"
-assert inlist("$dtpq_read_schema_handoff", "json_v2", "legacy_macros")
+assert inlist("$read_schema_handoff", "json_v2", "legacy_macros")
 count
 assert r(N) == 50000
 describe
@@ -136,7 +136,7 @@ assert r(N) > 0
 assert r(N) <= 2000
 summ year, meanonly
 assert r(min) > 2015
-assert "$dtpq_if_filter_mode" == "expr"
+assert "$if_filter_mode" == "expr"
 display as result "Test 5b PASSED: if qualifier filtering is pushed down"
 
 * Test 6: allstring path for int64->string cast
@@ -160,7 +160,7 @@ local cat_type: type cat
 local cat_vallab: value label cat
 capture confirm numeric variable cat
 assert _rc == 0
-assert "`cat_vallab'" == "dtpq_cat_1"
+assert "`cat_vallab'" == "cat_1"
 assert cat[1] == 3
 assert cat[2] == 1
 assert cat[3] == 3
@@ -195,7 +195,7 @@ assert _rc == 0
 capture confirm numeric variable cat_id
 assert _rc == 0
 local cat_id_vallab: value label cat_id
-assert "`cat_id_vallab'" == "dtpq_cat_1"
+assert "`cat_id_vallab'" == "cat_1"
 tempvar cat_id_text
 decode cat_id, gen(`cat_id_text')
 assert `cat_id_text'[1] == cat[1]
@@ -217,7 +217,7 @@ assert r(N) == 4
 capture confirm numeric variable cat
 assert _rc == 0
 local cat_vallab_foreign: value label cat
-assert "`cat_vallab_foreign'" == "dtpq_cat_1"
+assert "`cat_vallab_foreign'" == "cat_1"
 tempvar cat_foreign_text
 decode cat, gen(`cat_foreign_text')
 count if missing(`cat_foreign_text')
@@ -249,7 +249,7 @@ assert _rc == 0
 capture confirm numeric variable cat_id
 assert _rc == 0
 local cat_id_vallab_fixture: value label cat_id
-assert "`cat_id_vallab_fixture'" == "dtpq_cat_1"
+assert "`cat_id_vallab_fixture'" == "cat_1"
 tempvar cat_id_fixture_text
 decode cat_id, gen(`cat_id_fixture_text')
 assert `cat_id_fixture_text'[1] == cat[1]
@@ -269,7 +269,7 @@ local year_first = year[1]
 
 dtparquet save "`roundtrip_file'", replace
 assert fileexists("`roundtrip_file'")
-assert inlist("$dtpq_write_schema_handoff", "json_v2", "legacy_macros")
+assert inlist("$write_schema_handoff", "json_v2", "legacy_macros")
 
 dtparquet use using "`roundtrip_file'", clear
 count
