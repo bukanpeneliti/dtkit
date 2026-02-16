@@ -705,7 +705,7 @@ impl StataRowSource {
     }
 }
 
-fn read_batch_from_columns(
+pub fn read_batch_from_columns(
     column_info: &[ExportField],
     offset: usize,
     n_rows: usize,
@@ -717,7 +717,7 @@ fn read_batch_from_columns(
     Ok(DataFrame::from_iter(columns))
 }
 
-fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn Error>> {
+pub fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn Error>> {
     let total_rows = count_rows();
     if total_rows == 0 {
         return Err("No rows in Stata data to export".into());
@@ -932,7 +932,7 @@ fn column_info_from_macros(n_vars: usize) -> Result<Vec<ExportField>, Box<dyn Er
         .collect()
 }
 
-fn series_from_stata_column(
+pub fn series_from_stata_column(
     stata_col_index: usize,
     info: &ExportField,
     offset: usize,

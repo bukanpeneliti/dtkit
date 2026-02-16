@@ -4,12 +4,16 @@ use std::ptr;
 use std::slice;
 
 pub mod boundary;
+pub mod config;
 pub mod downcast;
+pub mod error;
 pub mod if_filter;
 pub mod mapping;
 pub mod metadata;
+pub mod metrics;
 pub mod read;
 pub mod stata_interface;
+pub mod transfer;
 pub mod utilities;
 pub mod write;
 

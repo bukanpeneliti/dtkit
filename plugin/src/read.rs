@@ -377,7 +377,7 @@ fn apply_sort_transform(mut lf: LazyFrame, sort: &str) -> LazyFrame {
     lf
 }
 
-fn sink_dataframe_in_batches(
+pub fn sink_dataframe_in_batches(
     df: &DataFrame,
     start_index_base: usize,
     transfer_columns: &[TransferColumnSpec],
@@ -498,7 +498,7 @@ fn run_lazy_single_pass(
 }
 
 #[derive(Clone, Debug)]
-struct TransferColumnSpec {
+pub struct TransferColumnSpec {
     name: String,
     stata_col_index: usize,
     stata_type: String,
@@ -516,7 +516,7 @@ fn estimated_writer_row_bytes(kind: TransferWriterKind) -> usize {
     }
 }
 
-fn estimate_transfer_row_width_bytes(transfer_columns: &[TransferColumnSpec]) -> usize {
+pub fn estimate_transfer_row_width_bytes(transfer_columns: &[TransferColumnSpec]) -> usize {
     transfer_columns
         .iter()
         .map(|col| estimated_writer_row_bytes(col.writer_kind))
@@ -1257,7 +1257,7 @@ fn column_info_from_macros(n_vars: usize) -> Result<Vec<FieldSpec>, Box<dyn Erro
     Ok(column_infos)
 }
 
-fn build_transfer_columns(all_columns: &[FieldSpec]) -> Vec<TransferColumnSpec> {
+pub fn build_transfer_columns(all_columns: &[FieldSpec]) -> Vec<TransferColumnSpec> {
     all_columns
         .iter()
         .map(|col| TransferColumnSpec {
@@ -1524,7 +1524,7 @@ fn write_all_missing_string_range(
     }
 }
 
-fn write_numeric_column_range(
+pub fn write_numeric_column_range(
     col: &Column,
     transfer_column: &TransferColumnSpec,
     start_index: usize,
@@ -1785,7 +1785,7 @@ fn write_datetime_column_range(
     }
 }
 
-fn write_string_column_range(
+pub fn write_string_column_range(
     col: &Column,
     transfer_column: &TransferColumnSpec,
     start_index: usize,

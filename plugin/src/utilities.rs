@@ -123,12 +123,20 @@ pub fn compute_pool_init_count() -> usize {
 }
 
 #[derive(Copy, Clone, Debug)]
+/// Batch processing mode for parallel data transfer.
+///
+/// - `ByRow`: Process row-wise (default for most cases)
+/// - `ByColumn`: Process column-wise (optimized for wide tables with few rows)
 pub enum BatchMode {
     ByRow,
     ByColumn,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
+/// Write pipeline execution mode.
+///
+/// - `ProducerConsumer`: Multi-threaded with queue (default for large datasets)
+/// - `LegacyDirect`: Single-threaded direct write (legacy compatibility)
 pub enum WritePipelineMode {
     ProducerConsumer,
     LegacyDirect,
