@@ -148,7 +148,7 @@ pub fn write_pipeline_mode() -> WritePipelineMode {
                 WritePipelineMode::ProducerConsumer
             }
         })
-        .unwrap_or(WritePipelineMode::ProducerConsumer)
+        .unwrap_or(WritePipelineMode::LegacyDirect)
 }
 
 pub fn write_pipeline_queue_capacity() -> usize {

@@ -1,4 +1,27 @@
 use polars::prelude::{col, lit, DataType, Expr};
+use std::error::Error;
+use std::fmt::{Display, Formatter};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilterError {
+    message: String,
+}
+
+impl FilterError {
+    fn unsupported(input: &str) -> Self {
+        Self {
+            message: format!("Unsupported if expression: {input}"),
+        }
+    }
+}
+
+impl Display for FilterError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl Error for FilterError {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TokenKind {
@@ -701,11 +724,11 @@ pub fn convert_if_sql(input: &str) -> String {
     FilterTranslator::new().translate(input)
 }
 
-pub fn compile_if_expr(input: &str) -> Option<Expr> {
+pub fn compile_if_expr(input: &str) -> Result<Expr, FilterError> {
     let tokens = tokenize_boolean(input);
     let mut parser = BooleanParser::new(tokens);
     let expr = parser.parse();
-    compile_bool_expr(&expr)
+    compile_bool_expr(&expr).ok_or_else(|| FilterError::unsupported(input.trim()))
 }
 
 fn compile_bool_expr(expr: &BoolExpr) -> Option<Expr> {
@@ -1015,19 +1038,19 @@ mod tests {
 
     #[test]
     fn compiles_basic_comparison_to_expr() {
-        assert!(compile_if_expr("year > 2015").is_some());
+        assert!(compile_if_expr("year > 2015").is_ok());
     }
 
     #[test]
     fn compiles_missing_inrange_and_inlist_helpers() {
-        assert!(compile_if_expr("missing(age)").is_some());
-        assert!(compile_if_expr("inrange(year, 2010, 2020)").is_some());
-        assert!(compile_if_expr("inlist(code, 1, 2, 3)").is_some());
+        assert!(compile_if_expr("missing(age)").is_ok());
+        assert!(compile_if_expr("inrange(year, 2010, 2020)").is_ok());
+        assert!(compile_if_expr("inlist(code, 1, 2, 3)").is_ok());
     }
 
     #[test]
-    fn falls_back_when_expr_compiler_cannot_compile() {
-        assert!(compile_if_expr("mod(id, 2) == 0").is_none());
-        assert!(compile_if_expr("Missing(age)").is_none());
+    fn errors_when_expr_compiler_cannot_compile() {
+        assert!(compile_if_expr("mod(id, 2) == 0").is_err());
+        assert!(compile_if_expr("Missing(age)").is_err());
     }
 }

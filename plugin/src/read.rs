@@ -3,10 +3,9 @@
 use glob::glob;
 use polars::datatypes::{AnyValue, TimeUnit};
 use polars::prelude::*;
-use polars_sql::SQLContext;
 use rayon::prelude::*;
 use regex::Regex;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashSet;
 use std::env;
 use std::error::Error;
@@ -15,13 +14,13 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use walkdir::WalkDir;
 
+use crate::boundary::{resolve_arg_or_macro, resolve_schema_handoff};
 use crate::downcast::apply_cast;
-use crate::if_filter::{compile_if_expr, convert_if_sql};
-use crate::mapping::FieldSpec;
+use crate::if_filter::compile_if_expr;
+use crate::mapping::{transfer_writer_kind_from_stata_type, FieldSpec, TransferWriterKind};
 use crate::stata_interface::{
-    publish_transfer_metrics, read_macro, record_transfer_conversion_failure,
-    record_transfer_fallback, replace_number, replace_string, reset_transfer_metrics, set_macro,
-    ST_retcode,
+    publish_transfer_metrics, read_macro, record_transfer_conversion_failure, replace_number,
+    replace_string, reset_transfer_metrics, set_macro, ST_retcode,
 };
 use crate::utilities::{
     compute_pool_init_count, determine_parallelization_strategy, get_compute_thread_pool,
@@ -31,16 +30,7 @@ use crate::utilities::{
 
 #[allow(dead_code)]
 const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
-const ENV_METADATA_LOOKUP_MODE: &str = "DTPARQUET_METADATA_LOOKUP_MODE";
 const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
-
-#[derive(Debug, Deserialize)]
-struct SchemaHandoff<T> {
-    #[serde(alias = "v")]
-    protocol_version: u32,
-    #[serde(alias = "f")]
-    fields: Vec<T>,
-}
 
 #[derive(Debug, Serialize)]
 struct DescribeFieldPayload {
@@ -69,64 +59,206 @@ struct ReadScanPlan {
     selected_column_list: Vec<String>,
     transfer_columns: Vec<TransferColumnSpec>,
     can_use_eager: bool,
+    schema_handoff_mode: &'static str,
 }
 
-fn parse_schema_handoff_fields<T: DeserializeOwned>(
-    mapping: &str,
-    handoff_name: &str,
-) -> Result<(Vec<T>, &'static str), Box<dyn Error>> {
-    if let Ok(payload) = serde_json::from_str::<SchemaHandoff<T>>(mapping) {
-        if payload.protocol_version != crate::SCHEMA_HANDOFF_PROTOCOL_VERSION {
-            return Err(format!(
-                "Schema protocol mismatch for {}: expected version {}, got {}. Update ado and plugin to matching versions or retry with legacy macro handoff.",
-                handoff_name,
-                crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
-                payload.protocol_version
-            )
-            .into());
+struct ReadBoundaryInputs {
+    variables_as_str: String,
+    all_columns_unfiltered: Vec<FieldSpec>,
+    schema_handoff_mode: &'static str,
+    cast_json: String,
+}
+
+#[derive(Copy, Clone)]
+enum ReadFilterMode {
+    None,
+    Expr,
+}
+
+enum ReadLazyMode {
+    EagerFastPath,
+    LegacyBatches,
+    SinglePass,
+}
+
+impl ReadLazyMode {
+    fn as_macro_value(&self) -> &'static str {
+        match self {
+            ReadLazyMode::EagerFastPath => "eager_fast_path",
+            ReadLazyMode::LegacyBatches => "legacy_batches",
+            ReadLazyMode::SinglePass => "single_pass",
         }
-        return Ok((payload.fields, "json_v2"));
     }
+}
 
-    if let Ok(fields) = serde_json::from_str::<Vec<T>>(mapping) {
-        return Ok((fields, "json_legacy_array"));
+enum ReadEngineStage {
+    ScanPlan,
+    Execute,
+    StataSink,
+}
+
+impl ReadEngineStage {
+    fn as_macro_value(&self) -> &'static str {
+        match self {
+            ReadEngineStage::ScanPlan => "scan_plan",
+            ReadEngineStage::Execute => "execute",
+            ReadEngineStage::StataSink => "stata_sink",
+        }
     }
+}
 
-    Err(format!(
-        "Invalid schema mapping payload for {}. Expected JSON object {{\"protocol_version\":...,\"fields\":[...]}}.",
-        handoff_name
-    )
-    .into())
+fn set_read_lazy_mode(mode: ReadLazyMode) {
+    set_macro("dtpq_read_lazy_mode", mode.as_macro_value(), true);
+}
+
+fn set_read_engine_stage(stage: ReadEngineStage) {
+    set_macro("dtpq_read_engine_stage", stage.as_macro_value(), true);
+}
+
+fn emit_read_init_macros() {
+    set_read_lazy_mode(ReadLazyMode::EagerFastPath);
+    set_macro("dtpq_read_selected_batch_size", "0", true);
+    set_macro("dtpq_read_batch_row_width_bytes", "0", true);
+    set_macro("dtpq_read_batch_memory_cap_rows", "0", true);
+    set_macro("dtpq_read_batch_adjustments", "0", true);
+    set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
+    set_macro("dtpq_if_filter_mode", "none", true);
+    set_macro("dtpq_read_schema_handoff", "legacy_macros", true);
+    set_read_engine_stage(ReadEngineStage::ScanPlan);
+}
+
+fn emit_read_result_macros(n_batches: usize, loaded_rows: usize) {
+    set_macro("n_batches", &n_batches.to_string(), false);
+    set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
+}
+
+fn emit_read_plan_macros(schema_handoff_mode: &str) {
+    set_macro("dtpq_read_schema_handoff", schema_handoff_mode, true);
+    set_read_engine_stage(ReadEngineStage::Execute);
+}
+
+fn finalize_read_runtime(
+    n_batches: usize,
+    loaded_rows: usize,
+    collect_calls: usize,
+    processed_batches: usize,
+    batch_tuner: &AdaptiveBatchTuner,
+    started_at: Instant,
+) {
+    emit_read_result_macros(n_batches, loaded_rows);
+    let batch_metrics = ReadBatchTunerMetrics::from_tuner(batch_tuner);
+    emit_read_batch_tuner_metrics(&batch_metrics);
+    let metrics =
+        snapshot_read_runtime_metrics(collect_calls, n_batches, processed_batches, started_at);
+    emit_read_runtime_metrics(&metrics);
+}
+
+struct ReadRuntimeMetrics {
+    collect_calls: usize,
+    planned_batches: usize,
+    processed_batches: usize,
+    elapsed_ms: u128,
+    compute_pool_threads: usize,
+    compute_pool_inits: usize,
+    io_pool_threads: usize,
+    io_pool_inits: usize,
+}
+
+impl ReadRuntimeMetrics {
+    fn zero() -> Self {
+        Self {
+            collect_calls: 0,
+            planned_batches: 0,
+            processed_batches: 0,
+            elapsed_ms: 0,
+            compute_pool_threads: get_compute_thread_pool().current_num_threads(),
+            compute_pool_inits: compute_pool_init_count(),
+            io_pool_threads: get_io_thread_pool().current_num_threads(),
+            io_pool_inits: io_pool_init_count(),
+        }
+    }
+}
+
+struct ReadBatchTunerMetrics {
+    selected_batch_size: usize,
+    row_width_bytes: usize,
+    memory_cap_rows: usize,
+    adjustments: usize,
+    tuner_mode: &'static str,
+}
+
+impl ReadBatchTunerMetrics {
+    fn from_tuner(tuner: &AdaptiveBatchTuner) -> Self {
+        Self {
+            selected_batch_size: tuner.selected_batch_size(),
+            row_width_bytes: tuner.row_width_bytes(),
+            memory_cap_rows: tuner.memory_guardrail_rows(),
+            adjustments: tuner.tuning_adjustments(),
+            tuner_mode: tuner.tuning_mode(),
+        }
+    }
+}
+
+fn snapshot_read_runtime_metrics(
+    collect_calls: usize,
+    planned_batches: usize,
+    processed_batches: usize,
+    started_at: Instant,
+) -> ReadRuntimeMetrics {
+    ReadRuntimeMetrics {
+        collect_calls,
+        planned_batches,
+        processed_batches,
+        elapsed_ms: started_at.elapsed().as_millis(),
+        compute_pool_threads: get_compute_thread_pool().current_num_threads(),
+        compute_pool_inits: compute_pool_init_count(),
+        io_pool_threads: get_io_thread_pool().current_num_threads(),
+        io_pool_inits: io_pool_init_count(),
+    }
+}
+
+fn resolve_read_boundary_inputs(
+    variables_as_str: &str,
+    mapping: &str,
+) -> Result<ReadBoundaryInputs, Box<dyn Error>> {
+    let variables_as_str = resolve_arg_or_macro(
+        variables_as_str,
+        "from_macro",
+        "matched_vars",
+        Some(10 * 1024 * 1024),
+    );
+
+    let (all_columns_unfiltered, schema_handoff_mode): (Vec<FieldSpec>, &'static str) =
+        resolve_schema_handoff(
+            mapping,
+            "read",
+            crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
+            || {
+                let n_vars = read_macro("n_matched_vars", false, None)
+                    .parse::<usize>()
+                    .map_err(|_| "Invalid macro n_matched_vars: expected usize")?;
+                column_info_from_macros(n_vars)
+            },
+        )?;
+
+    Ok(ReadBoundaryInputs {
+        variables_as_str,
+        all_columns_unfiltered,
+        schema_handoff_mode,
+        cast_json: read_macro("cast_json", false, None),
+    })
 }
 
 fn build_read_scan_plan(
     path: &str,
-    variables_as_str: &str,
-    mapping: &str,
+    boundary_inputs: &ReadBoundaryInputs,
     safe_relaxed: bool,
     asterisk_var: Option<&str>,
     sql_if: Option<&str>,
     sort: &str,
     random_share: f64,
 ) -> Result<ReadScanPlan, Box<dyn Error>> {
-    let variables_owned;
-    let variables_as_str = if variables_as_str.is_empty() || variables_as_str == "from_macro" {
-        variables_owned = read_macro("matched_vars", false, Some(10 * 1024 * 1024));
-        variables_owned.as_str()
-    } else {
-        variables_as_str
-    };
-
-    let all_columns_unfiltered: Vec<FieldSpec> = if mapping.is_empty() || mapping == "from_macros" {
-        let n_vars = read_macro("n_matched_vars", false, None)
-            .parse::<usize>()
-            .unwrap_or(0);
-        column_info_from_macros(n_vars)
-    } else {
-        let (fields, handoff_mode) = parse_schema_handoff_fields::<FieldSpec>(mapping, "read")?;
-        set_macro("dtpq_read_schema_handoff", handoff_mode, true);
-        fields
-    };
+    let variables_as_str = boundary_inputs.variables_as_str.as_str();
 
     let selected_column_list: Vec<String> = variables_as_str
         .split_whitespace()
@@ -134,7 +266,10 @@ fn build_read_scan_plan(
         .collect();
     let selected_column_names: HashSet<&str> =
         selected_column_list.iter().map(|s| s.as_str()).collect();
-    let all_columns: Vec<FieldSpec> = all_columns_unfiltered
+    let all_columns: Vec<FieldSpec> = boundary_inputs
+        .all_columns_unfiltered
+        .iter()
+        .cloned()
         .into_iter()
         .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
         .collect();
@@ -153,17 +288,213 @@ fn build_read_scan_plan(
         selected_column_list,
         transfer_columns,
         can_use_eager,
+        schema_handoff_mode: boundary_inputs.schema_handoff_mode,
     })
 }
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
-enum TransferWriterKind {
-    Numeric,
-    Date,
-    Time,
-    Datetime,
-    String,
-    Strl,
+fn compile_read_filter(
+    sql_if: Option<&str>,
+) -> Result<(Option<Expr>, ReadFilterMode), Box<dyn Error>> {
+    match sql_if.filter(|s| !s.trim().is_empty()) {
+        Some(raw) => Ok((Some(compile_if_expr(raw)?), ReadFilterMode::Expr)),
+        None => Ok((None, ReadFilterMode::None)),
+    }
+}
+
+fn collect_lazy(lf: LazyFrame, use_streaming: bool) -> PolarsResult<DataFrame> {
+    if use_streaming {
+        lf.collect_with_engine(Engine::Streaming)
+    } else {
+        lf.collect()
+    }
+}
+
+fn apply_read_filter(
+    lf: LazyFrame,
+    sql_if: Option<&str>,
+) -> Result<(LazyFrame, ReadFilterMode), Box<dyn Error>> {
+    let (filter_expr, filter_mode) = compile_read_filter(sql_if)?;
+    let filtered = match filter_expr {
+        Some(expr) => lf.filter(expr),
+        None => lf,
+    };
+    Ok((filtered, filter_mode))
+}
+
+fn set_read_filter_mode_macro(mode: ReadFilterMode) {
+    match mode {
+        ReadFilterMode::None => {}
+        ReadFilterMode::Expr => {
+            set_macro("dtpq_if_filter_mode", "expr", true);
+        }
+    }
+}
+
+fn apply_random_sample(
+    lf: LazyFrame,
+    random_share: f64,
+    random_seed: u64,
+    collect_calls: &mut usize,
+) -> Result<LazyFrame, Box<dyn Error>> {
+    if random_share <= 0.0 {
+        return Ok(lf);
+    }
+
+    let random_seed_option = if random_seed == 0 {
+        None
+    } else {
+        Some(random_seed)
+    };
+    *collect_calls += 1;
+    let sampled = lf.collect()?.sample_frac(
+        &Series::new("frac".into(), vec![random_share]),
+        false,
+        false,
+        random_seed_option,
+    )?;
+    Ok(sampled.lazy())
+}
+
+fn apply_sort_transform(mut lf: LazyFrame, sort: &str) -> LazyFrame {
+    if sort.is_empty() {
+        return lf;
+    }
+
+    let mut sort_options = SortMultipleOptions::default();
+    let mut sort_cols: Vec<PlSmallStr> = Vec::new();
+    let mut descending: Vec<bool> = Vec::new();
+    for token in sort.split_whitespace() {
+        if token.starts_with('-') && token.len() > 1 {
+            sort_cols.push(PlSmallStr::from(&token[1..]));
+            descending.push(true);
+        } else {
+            sort_cols.push(PlSmallStr::from(token));
+            descending.push(false);
+        }
+    }
+    sort_options.descending = descending;
+    lf = lf.sort(sort_cols, sort_options);
+    lf
+}
+
+fn sink_dataframe_in_batches(
+    df: &DataFrame,
+    start_index_base: usize,
+    transfer_columns: &[TransferColumnSpec],
+    strategy: BatchMode,
+    stata_offset: usize,
+    batch_tuner: &mut AdaptiveBatchTuner,
+    processed_batches: &mut usize,
+) -> PolarsResult<(usize, usize)> {
+    let total_rows = df.height();
+    let mut loaded_rows = 0usize;
+    let mut n_batches = 0usize;
+    let mut batch_offset = 0usize;
+
+    while batch_offset < total_rows {
+        let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
+        let batch_df = df.slice(batch_offset as i64, batch_length);
+        if batch_df.height() == 0 {
+            break;
+        }
+
+        let batch_started_at = Instant::now();
+        process_batch_with_strategy(
+            &batch_df,
+            start_index_base + batch_offset,
+            transfer_columns,
+            strategy,
+            stata_offset,
+        )?;
+
+        let batch_rows = batch_df.height();
+        loaded_rows += batch_rows;
+        *processed_batches += 1;
+        n_batches += 1;
+        batch_offset += batch_rows;
+        batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
+    }
+
+    Ok((loaded_rows, n_batches))
+}
+
+fn run_lazy_legacy_batches(
+    lf: LazyFrame,
+    columns: &[Expr],
+    n_rows: usize,
+    batch_source_offset: usize,
+    use_streaming: bool,
+    transfer_columns: &[TransferColumnSpec],
+    strategy: BatchMode,
+    stata_offset: usize,
+    batch_tuner: &mut AdaptiveBatchTuner,
+    processed_batches: &mut usize,
+    collect_calls: &mut usize,
+) -> PolarsResult<(usize, usize)> {
+    let mut requested_offset = 0usize;
+    let mut loaded_rows = 0usize;
+    let mut n_batches = 0usize;
+
+    while requested_offset < n_rows {
+        let mut lf_batch = lf.clone().select(columns);
+        let batch_offset = batch_source_offset + requested_offset;
+        let batch_length = (n_rows - requested_offset).min(batch_tuner.selected_batch_size());
+        lf_batch = lf_batch.slice(batch_offset as i64, batch_length as u32);
+        *collect_calls += 1;
+        let batch_df = collect_lazy(lf_batch, use_streaming)?;
+        if batch_df.height() == 0 {
+            break;
+        }
+
+        let batch_started_at = Instant::now();
+        process_batch_with_strategy(
+            &batch_df,
+            batch_offset - batch_source_offset,
+            transfer_columns,
+            strategy,
+            stata_offset,
+        )?;
+
+        let batch_rows = batch_df.height();
+        loaded_rows += batch_rows;
+        *processed_batches += 1;
+        n_batches += 1;
+        requested_offset += batch_length;
+        batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
+    }
+
+    Ok((loaded_rows, n_batches))
+}
+
+fn run_lazy_single_pass(
+    mut lf: LazyFrame,
+    columns: &[Expr],
+    n_rows: usize,
+    batch_source_offset: usize,
+    use_streaming: bool,
+    transfer_columns: &[TransferColumnSpec],
+    strategy: BatchMode,
+    stata_offset: usize,
+    batch_tuner: &mut AdaptiveBatchTuner,
+    processed_batches: &mut usize,
+    collect_calls: &mut usize,
+) -> PolarsResult<(usize, usize)> {
+    lf = lf.select(columns);
+    if batch_source_offset > 0 {
+        lf = lf.slice(batch_source_offset as i64, n_rows as u32);
+    }
+
+    *collect_calls += 1;
+    let single_pass_df = collect_lazy(lf, use_streaming)?;
+    sink_dataframe_in_batches(
+        &single_pass_df,
+        0,
+        transfer_columns,
+        strategy,
+        stata_offset,
+        batch_tuner,
+        processed_batches,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -193,28 +524,28 @@ fn estimate_transfer_row_width_bytes(transfer_columns: &[TransferColumnSpec]) ->
         .max(1)
 }
 
-fn publish_read_batch_tuner_metrics(tuner: &AdaptiveBatchTuner) {
+fn emit_read_batch_tuner_metrics(metrics: &ReadBatchTunerMetrics) {
     set_macro(
         "dtpq_read_selected_batch_size",
-        &tuner.selected_batch_size().to_string(),
+        &metrics.selected_batch_size.to_string(),
         true,
     );
     set_macro(
         "dtpq_read_batch_row_width_bytes",
-        &tuner.row_width_bytes().to_string(),
+        &metrics.row_width_bytes.to_string(),
         true,
     );
     set_macro(
         "dtpq_read_batch_memory_cap_rows",
-        &tuner.memory_guardrail_rows().to_string(),
+        &metrics.memory_cap_rows.to_string(),
         true,
     );
     set_macro(
         "dtpq_read_batch_adjustments",
-        &tuner.tuning_adjustments().to_string(),
+        &metrics.adjustments.to_string(),
         true,
     );
-    set_macro("dtpq_read_batch_tuner_mode", tuner.tuning_mode(), true);
+    set_macro("dtpq_read_batch_tuner_mode", metrics.tuner_mode, true);
 }
 
 #[allow(dead_code)]
@@ -299,19 +630,7 @@ fn has_parquet_files_in_hive_structure(dir_path: &str) -> bool {
 }
 
 pub fn has_metadata_key(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
-    if metadata_lookup_uses_legacy_scan() {
-        return has_metadata_key_legacy_scan(path, key);
-    }
     crate::metadata::has_parquet_metadata_key(path, key)
-}
-
-fn metadata_lookup_uses_legacy_scan() -> bool {
-    env::var(ENV_METADATA_LOOKUP_MODE)
-        .map(|mode| {
-            let mode = mode.trim().to_ascii_lowercase();
-            mode == "legacy_scan" || mode == "legacy" || mode == "bytes_scan"
-        })
-        .unwrap_or(false)
 }
 
 fn lazy_execution_uses_legacy_batches() -> bool {
@@ -323,125 +642,43 @@ fn lazy_execution_uses_legacy_batches() -> bool {
         .unwrap_or(false)
 }
 
-fn has_metadata_key_legacy_scan(path: &str, key: &str) -> Result<bool, Box<dyn Error>> {
-    let bytes = std::fs::read(path)?;
-    Ok(bytes
-        .windows(key.len())
-        .any(|window| window == key.as_bytes()))
-}
-
 pub fn open_parquet_scan(
     path: &str,
-    safe_relaxed: bool,
+    _safe_relaxed: bool,
     asterisk_to_variable_name: Option<&str>,
 ) -> Result<LazyFrame, PolarsError> {
+    if let Some(var_name) = asterisk_to_variable_name {
+        return scan_with_filename_extraction(path, var_name);
+    }
+
     let path_obj = Path::new(path);
-    if path_obj.is_dir() {
-        return scan_hive_partitioned(path);
-    }
-
-    match (safe_relaxed, asterisk_to_variable_name) {
-        (_, Some(var_name)) => scan_with_filename_extraction(path, var_name),
-        (true, _) => scan_with_diagonal_relaxed(path),
-        _ => {
-            let mut normalized_pattern = if cfg!(windows) {
-                path.replace('\\', "/")
-            } else {
-                path.to_string()
-            };
-            if normalized_pattern.contains("**.") {
-                normalized_pattern = normalized_pattern.replace("**.", "**/*.");
-            }
-            let scan_args = ScanArgsParquet {
-                allow_missing_columns: true,
-                cache: false,
-                ..Default::default()
-            };
-            LazyFrame::scan_parquet(PlPath::new(&normalized_pattern), scan_args)
-        }
-    }
-}
-
-fn scan_hive_partitioned(dir_path: &str) -> Result<LazyFrame, PolarsError> {
-    let mut glob_pattern = String::from(dir_path);
-    if glob_pattern.ends_with('/') {
-        glob_pattern.pop();
-    }
-    if cfg!(windows) {
-        glob_pattern = glob_pattern.replace('\\', "/");
-    }
-    let test_patterns = vec![
-        format!("{}/**/*.parquet", glob_pattern),
-        format!("{}/*/*.parquet", glob_pattern),
-        format!("{}/*/*/*.parquet", glob_pattern),
-    ];
-    for pattern in test_patterns {
-        if let Ok(paths) = glob(&pattern) {
-            let files: Vec<_> = paths.filter_map(Result::ok).collect();
-            if !files.is_empty() {
-                let scan_args = ScanArgsParquet {
-                    allow_missing_columns: true,
-                    cache: false,
-                    ..Default::default()
-                };
-                return LazyFrame::scan_parquet(PlPath::new(&pattern), scan_args);
-            }
-        }
-    }
-    Err(PolarsError::ComputeError(
-        format!(
-            "No parquet files found in hive partitioned structure: {}",
-            dir_path
-        )
-        .into(),
-    ))
-}
-
-fn scan_with_diagonal_relaxed(glob_path: &str) -> Result<LazyFrame, PolarsError> {
-    let mut normalized_pattern = if cfg!(windows) {
-        glob_path.replace('\\', "/")
+    let source = if path_obj.is_dir() {
+        format!("{}/**/*.parquet", normalize_scan_pattern(path))
     } else {
-        glob_path.to_string()
+        normalize_scan_pattern(path)
+    };
+    scan_parquet_native(&source)
+}
+
+fn normalize_scan_pattern(path: &str) -> String {
+    let mut normalized_pattern = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
     };
     if normalized_pattern.contains("**.") {
         normalized_pattern = normalized_pattern.replace("**.", "**/*.");
     }
-    let paths = glob(&normalized_pattern)
-        .map_err(|e| PolarsError::ComputeError(format!("Invalid glob pattern: {}", e).into()))?;
-    let file_paths: Result<Vec<PathBuf>, _> = paths.collect();
-    let file_paths = file_paths.map_err(|e| {
-        PolarsError::ComputeError(format!("Failed to read glob results: {}", e).into())
-    })?;
-    if file_paths.is_empty() {
-        return Err(PolarsError::ComputeError(
-            format!("No files found matching pattern: {}", normalized_pattern).into(),
-        ));
-    }
+    normalized_pattern
+}
 
+fn scan_parquet_native(normalized_pattern: &str) -> Result<LazyFrame, PolarsError> {
     let scan_args = ScanArgsParquet {
         allow_missing_columns: true,
         cache: false,
         ..Default::default()
     };
-    let lazy_frames: Result<Vec<LazyFrame>, PolarsError> = file_paths
-        .iter()
-        .map(|path| {
-            let path_string = path.to_string_lossy().to_string();
-            LazyFrame::scan_parquet(PlPath::new(&path_string), scan_args.clone())
-        })
-        .collect();
-
-    concat(
-        lazy_frames?,
-        UnionArgs {
-            parallel: true,
-            rechunk: false,
-            to_supertypes: true,
-            diagonal: true,
-            from_partitioned_ds: true,
-            maintain_order: true,
-        },
-    )
+    LazyFrame::scan_parquet(PlPath::new(normalized_pattern), scan_args)
 }
 
 fn scan_with_filename_extraction(
@@ -529,42 +766,45 @@ fn smart_lit(value: &str) -> Expr {
     lit(value)
 }
 
-fn publish_read_runtime_metrics(
-    collect_calls: usize,
-    planned_batches: usize,
-    processed_batches: usize,
-    elapsed_ms: u128,
-) {
-    set_macro("dtpq_read_collect_calls", &collect_calls.to_string(), true);
+fn emit_read_runtime_metrics(metrics: &ReadRuntimeMetrics) {
+    set_macro(
+        "dtpq_read_collect_calls",
+        &metrics.collect_calls.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_read_planned_batches",
-        &planned_batches.to_string(),
+        &metrics.planned_batches.to_string(),
         true,
     );
     set_macro(
         "dtpq_read_processed_batches",
-        &processed_batches.to_string(),
+        &metrics.processed_batches.to_string(),
         true,
     );
-    set_macro("dtpq_read_elapsed_ms", &elapsed_ms.to_string(), true);
+    set_macro(
+        "dtpq_read_elapsed_ms",
+        &metrics.elapsed_ms.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_compute_pool_threads",
-        &get_compute_thread_pool().current_num_threads().to_string(),
+        &metrics.compute_pool_threads.to_string(),
         true,
     );
     set_macro(
         "dtpq_compute_pool_inits",
-        &compute_pool_init_count().to_string(),
+        &metrics.compute_pool_inits.to_string(),
         true,
     );
     set_macro(
         "dtpq_io_pool_threads",
-        &get_io_thread_pool().current_num_threads().to_string(),
+        &metrics.io_pool_threads.to_string(),
         true,
     );
     set_macro(
         "dtpq_io_pool_inits",
-        &io_pool_init_count().to_string(),
+        &metrics.io_pool_inits.to_string(),
         true,
     );
     publish_transfer_metrics("dtpq_read");
@@ -591,21 +831,14 @@ pub fn import_parquet(
     let mut processed_batches = 0usize;
     warm_thread_pools();
     reset_transfer_metrics();
-    publish_read_runtime_metrics(0, 0, 0, 0);
-    set_macro("dtpq_read_lazy_mode", "eager_fast_path", true);
-    set_macro("dtpq_read_selected_batch_size", "0", true);
-    set_macro("dtpq_read_batch_row_width_bytes", "0", true);
-    set_macro("dtpq_read_batch_memory_cap_rows", "0", true);
-    set_macro("dtpq_read_batch_adjustments", "0", true);
-    set_macro("dtpq_read_batch_tuner_mode", "fixed", true);
-    set_macro("dtpq_if_filter_mode", "none", true);
-    set_macro("dtpq_read_schema_handoff", "legacy_macros", true);
-    set_macro("dtpq_read_engine_stage", "scan_plan", true);
+    emit_read_runtime_metrics(&ReadRuntimeMetrics::zero());
+    emit_read_init_macros();
+    let boundary_inputs = resolve_read_boundary_inputs(variables_as_str, mapping)?;
+    let cast_json = boundary_inputs.cast_json.as_str();
 
     let plan = build_read_scan_plan(
         path,
-        variables_as_str,
-        mapping,
+        &boundary_inputs,
         safe_relaxed,
         asterisk_var,
         sql_if,
@@ -618,8 +851,7 @@ pub fn import_parquet(
         .map(|s| s.as_str())
         .collect();
     let transfer_columns = plan.transfer_columns;
-
-    set_macro("dtpq_read_engine_stage", "execute", true);
+    emit_read_plan_macros(plan.schema_handoff_mode);
 
     if plan.can_use_eager {
         if !selected_column_list.is_empty() {
@@ -639,7 +871,6 @@ pub fn import_parquet(
             .collect();
         df = df.select(columns_vec)?;
 
-        let cast_json = read_macro("cast_json", false, None);
         if !cast_json.is_empty() {
             let cast_mapping: serde_json::Map<String, serde_json::Value> =
                 serde_json::from_str(&cast_json)?;
@@ -676,42 +907,24 @@ pub fn import_parquet(
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(selected_column_list.len(), df.height(), n_threads)
         });
-        let total_rows = df.height();
-        let mut loaded_rows = 0usize;
-        let mut batch_offset = 0usize;
-        let mut n_batches = 0usize;
+        set_read_engine_stage(ReadEngineStage::StataSink);
+        let (loaded_rows, n_batches) = sink_dataframe_in_batches(
+            &df,
+            0,
+            &transfer_columns,
+            strategy,
+            stata_offset,
+            &mut batch_tuner,
+            &mut processed_batches,
+        )?;
 
-        while batch_offset < total_rows {
-            let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
-            let batch_df = df.slice(batch_offset as i64, batch_length);
-            if batch_df.height() == 0 {
-                break;
-            }
-            let batch_started_at = Instant::now();
-            set_macro("dtpq_read_engine_stage", "stata_sink", true);
-            process_batch_with_strategy(
-                &batch_df,
-                batch_offset,
-                &transfer_columns,
-                strategy,
-                stata_offset,
-            )?;
-            let batch_rows = batch_df.height();
-            loaded_rows += batch_rows;
-            processed_batches += 1;
-            n_batches += 1;
-            batch_offset += batch_rows;
-            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
-        }
-
-        set_macro("n_batches", &n_batches.to_string(), false);
-        set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
-        publish_read_batch_tuner_metrics(&batch_tuner);
-        publish_read_runtime_metrics(
-            collect_calls,
+        finalize_read_runtime(
             n_batches,
+            loaded_rows,
+            collect_calls,
             processed_batches,
-            started_at.elapsed().as_millis(),
+            &batch_tuner,
+            started_at,
         );
 
         return Ok(0);
@@ -719,63 +932,22 @@ pub fn import_parquet(
 
     let mut lf = open_parquet_scan(path, safe_relaxed, asterisk_var)?;
 
-    let cast_json = read_macro("cast_json", false, None);
     if !cast_json.is_empty() {
         lf = apply_cast(lf, &cast_json)?;
     }
     lf = normalize_categorical(&lf)?;
 
+    let has_if_filter = sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false);
     let mut batch_source_offset = offset;
-    if sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false) {
+    if has_if_filter {
         lf = lf.slice(offset as i64, n_rows as u32);
         batch_source_offset = 0;
     }
-
-    if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
-        if let Some(expr) = compile_if_expr(sql) {
-            lf = lf.filter(expr);
-            set_macro("dtpq_if_filter_mode", "expr", true);
-        } else {
-            let mut ctx = SQLContext::new();
-            ctx.register("df", lf);
-            let translated = convert_if_sql(sql);
-            lf = ctx.execute(&format!("select * from df where {}", translated))?;
-            set_macro("dtpq_if_filter_mode", "sql_fallback", true);
-        }
-    }
-
-    if random_share > 0.0 {
-        let random_seed_option = if random_seed == 0 {
-            None
-        } else {
-            Some(random_seed)
-        };
-        collect_calls += 1;
-        let sampled = lf.collect()?.sample_frac(
-            &Series::new("frac".into(), vec![random_share]),
-            false,
-            false,
-            random_seed_option,
-        )?;
-        lf = sampled.lazy();
-    }
-
-    if !sort.is_empty() {
-        let mut sort_options = SortMultipleOptions::default();
-        let mut sort_cols: Vec<PlSmallStr> = Vec::new();
-        let mut descending: Vec<bool> = Vec::new();
-        for token in sort.split_whitespace() {
-            if token.starts_with('-') && token.len() > 1 {
-                sort_cols.push(PlSmallStr::from(&token[1..]));
-                descending.push(true);
-            } else {
-                sort_cols.push(PlSmallStr::from(token));
-                descending.push(false);
-            }
-        }
-        sort_options.descending = descending;
-        lf = lf.sort(sort_cols, sort_options);
-    }
+    let (lf_filtered, filter_mode) = apply_read_filter(lf, sql_if)?;
+    set_read_filter_mode_macro(filter_mode);
+    let lf_sampled =
+        apply_random_sample(lf_filtered, random_share, random_seed, &mut collect_calls)?;
+    lf = apply_sort_transform(lf_sampled, sort);
 
     let use_streaming = n_rows > 1_000_000;
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
@@ -787,104 +959,59 @@ pub fn import_parquet(
     let n_batches;
 
     if lazy_execution_uses_legacy_batches() {
-        set_macro("dtpq_read_lazy_mode", "legacy_batches", true);
+        set_read_lazy_mode(ReadLazyMode::LegacyBatches);
 
         let strategy = parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(columns.len(), n_rows, n_threads)
         });
+        set_read_engine_stage(ReadEngineStage::StataSink);
 
-        let mut n_batches_legacy = 0usize;
-        let mut requested_offset = 0usize;
-        while requested_offset < n_rows {
-            let mut lf_batch = lf.clone().select(&columns);
-            let batch_offset = batch_source_offset + requested_offset;
-            let batch_length = (n_rows - requested_offset).min(batch_tuner.selected_batch_size());
-            lf_batch = lf_batch.slice(batch_offset as i64, batch_length as u32);
-            let batch_df = if use_streaming {
-                collect_calls += 1;
-                lf_batch.with_new_streaming(true).collect()?
-            } else {
-                collect_calls += 1;
-                lf_batch.collect()?
-            };
-            if batch_df.height() == 0 {
-                break;
-            }
-            let batch_started_at = Instant::now();
-            set_macro("dtpq_read_engine_stage", "stata_sink", true);
-            process_batch_with_strategy(
-                &batch_df,
-                batch_offset - batch_source_offset,
-                &transfer_columns,
-                strategy,
-                stata_offset,
-            )?;
-            let batch_rows = batch_df.height();
-            loaded_rows += batch_rows;
-            processed_batches += 1;
-            n_batches_legacy += 1;
-            requested_offset += batch_length;
-            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
-        }
-
+        let (loaded_rows_legacy, n_batches_legacy) = run_lazy_legacy_batches(
+            lf,
+            &columns,
+            n_rows,
+            batch_source_offset,
+            use_streaming,
+            &transfer_columns,
+            strategy,
+            stata_offset,
+            &mut batch_tuner,
+            &mut processed_batches,
+            &mut collect_calls,
+        )?;
+        loaded_rows += loaded_rows_legacy;
         n_batches = n_batches_legacy;
     } else {
-        set_macro("dtpq_read_lazy_mode", "single_pass", true);
-
-        let mut lf_single_pass = lf.select(&columns);
-        if batch_source_offset > 0 {
-            lf_single_pass = lf_single_pass.slice(batch_source_offset as i64, n_rows as u32);
-        }
-
-        let single_pass_df = if use_streaming {
-            collect_calls += 1;
-            lf_single_pass.with_new_streaming(true).collect()?
-        } else {
-            collect_calls += 1;
-            lf_single_pass.collect()?
-        };
-
-        let total_rows = single_pass_df.height();
+        set_read_lazy_mode(ReadLazyMode::SinglePass);
         let strategy = parallel_strategy.unwrap_or_else(|| {
-            determine_parallelization_strategy(columns.len(), total_rows, n_threads)
+            determine_parallelization_strategy(columns.len(), n_rows, n_threads)
         });
+        set_read_engine_stage(ReadEngineStage::StataSink);
 
-        let mut n_batches_single = 0usize;
-        let mut batch_offset = 0usize;
-        while batch_offset < total_rows {
-            let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
-            let batch_df = single_pass_df.slice(batch_offset as i64, batch_length);
-            if batch_df.height() == 0 {
-                break;
-            }
-            let batch_started_at = Instant::now();
-            set_macro("dtpq_read_engine_stage", "stata_sink", true);
-            process_batch_with_strategy(
-                &batch_df,
-                batch_offset,
-                &transfer_columns,
-                strategy,
-                stata_offset,
-            )?;
-            let batch_rows = batch_df.height();
-            loaded_rows += batch_rows;
-            processed_batches += 1;
-            n_batches_single += 1;
-            batch_offset += batch_rows;
-            batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
-        }
-
+        let (loaded_rows_single, n_batches_single) = run_lazy_single_pass(
+            lf,
+            &columns,
+            n_rows,
+            batch_source_offset,
+            use_streaming,
+            &transfer_columns,
+            strategy,
+            stata_offset,
+            &mut batch_tuner,
+            &mut processed_batches,
+            &mut collect_calls,
+        )?;
+        loaded_rows += loaded_rows_single;
         n_batches = n_batches_single;
     }
 
-    set_macro("n_batches", &n_batches.to_string(), false);
-    set_macro("n_loaded_rows", &loaded_rows.to_string(), false);
-    publish_read_batch_tuner_metrics(&batch_tuner);
-    publish_read_runtime_metrics(
-        collect_calls,
+    finalize_read_runtime(
         n_batches,
+        loaded_rows,
+        collect_calls,
         processed_batches,
-        started_at.elapsed().as_millis(),
+        &batch_tuner,
+        started_at,
     );
 
     Ok(0)
@@ -1105,13 +1232,17 @@ pub fn normalize_categorical(lf: &LazyFrame) -> Result<LazyFrame, PolarsError> {
     }
 }
 
-fn column_info_from_macros(n_vars: usize) -> Vec<FieldSpec> {
+fn column_info_from_macros(n_vars: usize) -> Result<Vec<FieldSpec>, Box<dyn Error>> {
     let mut column_infos = Vec::with_capacity(n_vars);
     for i in 0..n_vars {
-        let index = read_macro(&format!("v_to_read_index_{}", i + 1), false, None)
-            .parse::<usize>()
-            .unwrap_or(1)
-            - 1;
+        let index_raw = read_macro(&format!("v_to_read_index_{}", i + 1), false, None);
+        let index = index_raw.parse::<usize>().map_err(|_| {
+            format!(
+                "Invalid macro v_to_read_index_{}='{}': expected usize",
+                i + 1,
+                index_raw
+            )
+        })? - 1;
         let name = read_macro(&format!("v_to_read_name_{}", i + 1), false, None);
         let dtype = read_macro(&format!("v_to_read_p_type_{}", i + 1), false, None);
         let stata_type =
@@ -1123,18 +1254,7 @@ fn column_info_from_macros(n_vars: usize) -> Vec<FieldSpec> {
             stata_type,
         });
     }
-    column_infos
-}
-
-fn writer_kind_from_stata_type(stata_type: &str) -> TransferWriterKind {
-    match stata_type {
-        "string" => TransferWriterKind::String,
-        "strl" => TransferWriterKind::Strl,
-        "date" => TransferWriterKind::Date,
-        "time" => TransferWriterKind::Time,
-        "datetime" => TransferWriterKind::Datetime,
-        _ => TransferWriterKind::Numeric,
-    }
+    Ok(column_infos)
 }
 
 fn build_transfer_columns(all_columns: &[FieldSpec]) -> Vec<TransferColumnSpec> {
@@ -1144,7 +1264,7 @@ fn build_transfer_columns(all_columns: &[FieldSpec]) -> Vec<TransferColumnSpec> 
             name: col.name.clone(),
             stata_col_index: col.index,
             stata_type: col.stata_type.clone(),
-            writer_kind: writer_kind_from_stata_type(&col.stata_type),
+            writer_kind: transfer_writer_kind_from_stata_type(&col.stata_type),
         })
         .collect()
 }
@@ -1291,104 +1411,21 @@ fn convert_strict_string(value: AnyValue<'_>) -> CellConversion<String> {
     }
 }
 
-fn convert_numeric_legacy(value: AnyValue<'_>) -> Option<f64> {
-    match value {
-        AnyValue::Boolean(v) => Some(if v { 1.0 } else { 0.0 }),
-        AnyValue::Int8(v) => Some(v as f64),
-        AnyValue::Int16(v) => Some(v as f64),
-        AnyValue::Int32(v) => Some(v as f64),
-        AnyValue::Int64(v) => Some(v as f64),
-        AnyValue::UInt8(v) => Some(v as f64),
-        AnyValue::UInt16(v) => Some(v as f64),
-        AnyValue::UInt32(v) => Some(v as f64),
-        AnyValue::UInt64(v) => Some(v as f64),
-        AnyValue::Float32(v) => Some(v as f64),
-        AnyValue::Float64(v) => Some(v),
-        AnyValue::Date(v) => Some((v + STATA_DATE_ORIGIN) as f64),
-        AnyValue::Time(v) => Some((v / TIME_US) as f64),
-        _ => None,
-    }
-}
-
-fn convert_string_legacy(value: AnyValue<'_>) -> Option<String> {
-    match value {
-        AnyValue::String(v) => Some(v.to_string()),
-        AnyValue::StringOwned(v) => Some(v.to_string()),
-        AnyValue::Null => None,
-        v => Some(v.to_string()),
-    }
-}
-
-fn convert_datetime_legacy(value: AnyValue<'_>, dtype: &DataType) -> Option<f64> {
-    let unit_factor = match dtype {
-        DataType::Datetime(TimeUnit::Nanoseconds, _) => (TIME_NS / TIME_MS) as f64,
-        DataType::Datetime(TimeUnit::Microseconds, _) => (TIME_US / TIME_MS) as f64,
-        DataType::Datetime(TimeUnit::Milliseconds, _) => 1.0,
-        _ => 1.0,
-    };
-    let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
-    match value {
-        AnyValue::Datetime(v, _, _) => Some(v as f64 / unit_factor + sec_shift_scaled),
-        _ => None,
-    }
-}
-
-fn assign_cell_legacy(
+fn dtype_mismatch_error(
     col: &Column,
     transfer_column: &TransferColumnSpec,
-    row_idx: usize,
-    global_row_idx: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    match transfer_column.stata_type.as_str() {
-        "string" | "strl" => {
-            let out = match col.get(row_idx) {
-                Ok(v) => convert_string_legacy(v),
-                Err(_) => None,
-            };
-            replace_string(
-                out,
-                global_row_idx + 1 + stata_offset,
-                transfer_column.stata_col_index + 1,
-            );
-            Ok(())
-        }
-        "datetime" => {
-            let value = match col.get(row_idx) {
-                Ok(v) => convert_datetime_legacy(v, col.dtype()),
-                Err(_) => None,
-            };
-            replace_number(
-                value,
-                global_row_idx + 1 + stata_offset,
-                transfer_column.stata_col_index + 1,
-            );
-            Ok(())
-        }
-        _ => {
-            let value = match col.get(row_idx) {
-                Ok(v) => convert_numeric_legacy(v),
-                Err(_) => None,
-            };
-            replace_number(
-                value,
-                global_row_idx + 1 + stata_offset,
-                transfer_column.stata_col_index + 1,
-            );
-            Ok(())
-        }
-    }
-}
-
-fn assign_fallback_cell(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    row_idx: usize,
-    global_row_idx: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    record_transfer_fallback();
-    assign_cell_legacy(col, transfer_column, row_idx, global_row_idx, stata_offset)
+    expected_kind: &str,
+) -> PolarsError {
+    PolarsError::ComputeError(
+        format!(
+            "Type mismatch for column '{}' at Stata type '{}': expected {}, got {:?}",
+            transfer_column.name,
+            transfer_column.stata_type,
+            expected_kind,
+            col.dtype()
+        )
+        .into(),
+    )
 }
 
 fn write_numeric_with_converter(
@@ -1402,33 +1439,43 @@ fn write_numeric_with_converter(
 ) -> PolarsResult<()> {
     for row_idx in start_row..end_row {
         let global_row_idx = row_idx + start_index;
-        match col.get(row_idx) {
-            Ok(value) => match converter(value) {
-                CellConversion::Value(number) => {
-                    replace_number(
-                        number,
-                        global_row_idx + 1 + stata_offset,
-                        transfer_column.stata_col_index + 1,
-                    );
-                }
-                CellConversion::Mismatch => {
-                    record_transfer_conversion_failure();
-                    assign_fallback_cell(
-                        col,
-                        transfer_column,
-                        row_idx,
-                        global_row_idx,
-                        stata_offset,
-                    )?;
-                }
-            },
-            Err(_) => {
+        let value = col.get(row_idx)?;
+        match converter(value) {
+            CellConversion::Value(number) => {
+                replace_number(
+                    number,
+                    global_row_idx + 1 + stata_offset,
+                    transfer_column.stata_col_index + 1,
+                );
+            }
+            CellConversion::Mismatch => {
                 record_transfer_conversion_failure();
-                assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+                return Err(dtype_mismatch_error(
+                    col,
+                    transfer_column,
+                    "numeric/date/time/datetime",
+                ));
             }
         }
     }
     Ok(())
+}
+
+fn write_all_missing_numeric_range(
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) {
+    for row_idx in start_row..end_row {
+        let global_row_idx = row_idx + start_index;
+        replace_number(
+            None,
+            global_row_idx + 1 + stata_offset,
+            transfer_column.stata_col_index + 1,
+        );
+    }
 }
 
 fn write_string_with_converter(
@@ -1442,49 +1489,39 @@ fn write_string_with_converter(
 ) -> PolarsResult<()> {
     for row_idx in start_row..end_row {
         let global_row_idx = row_idx + start_index;
-        match col.get(row_idx) {
-            Ok(value) => match converter(value) {
-                CellConversion::Value(text) => {
-                    replace_string(
-                        text,
-                        global_row_idx + 1 + stata_offset,
-                        transfer_column.stata_col_index + 1,
-                    );
-                }
-                CellConversion::Mismatch => {
-                    record_transfer_conversion_failure();
-                    assign_fallback_cell(
-                        col,
-                        transfer_column,
-                        row_idx,
-                        global_row_idx,
-                        stata_offset,
-                    )?;
-                }
-            },
-            Err(_) => {
+        let value = col.get(row_idx)?;
+        match converter(value) {
+            CellConversion::Value(text) => {
+                replace_string(
+                    text,
+                    global_row_idx + 1 + stata_offset,
+                    transfer_column.stata_col_index + 1,
+                );
+            }
+            CellConversion::Mismatch => {
                 record_transfer_conversion_failure();
-                assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+                return Err(dtype_mismatch_error(col, transfer_column, "string"));
             }
         }
     }
     Ok(())
 }
 
-fn write_column_fallback_range(
-    col: &Column,
+fn write_all_missing_string_range(
     transfer_column: &TransferColumnSpec,
     start_index: usize,
     start_row: usize,
     end_row: usize,
     stata_offset: usize,
-) -> PolarsResult<()> {
+) {
     for row_idx in start_row..end_row {
         let global_row_idx = row_idx + start_index;
-        record_transfer_conversion_failure();
-        assign_fallback_cell(col, transfer_column, row_idx, global_row_idx, stata_offset)?;
+        replace_string(
+            None,
+            global_row_idx + 1 + stata_offset,
+            transfer_column.stata_col_index + 1,
+        );
     }
-    Ok(())
 }
 
 fn write_numeric_column_range(
@@ -1622,14 +1659,24 @@ fn write_numeric_column_range(
             stata_offset,
             convert_datetime_to_stata_clock,
         ),
-        _ => write_column_fallback_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        DataType::Null => {
+            write_all_missing_numeric_range(
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            );
+            Ok(())
+        }
+        _ => {
+            record_transfer_conversion_failure();
+            Err(dtype_mismatch_error(
+                col,
+                transfer_column,
+                "numeric/date/time/datetime",
+            ))
+        }
     }
 }
 
@@ -1651,14 +1698,20 @@ fn write_date_column_range(
             stata_offset,
             convert_date_to_stata_days,
         ),
-        _ => write_column_fallback_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        DataType::Null => {
+            write_all_missing_numeric_range(
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            );
+            Ok(())
+        }
+        _ => {
+            record_transfer_conversion_failure();
+            Err(dtype_mismatch_error(col, transfer_column, "date"))
+        }
     }
 }
 
@@ -1680,14 +1733,20 @@ fn write_time_column_range(
             stata_offset,
             convert_time_to_stata_millis,
         ),
-        _ => write_column_fallback_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        DataType::Null => {
+            write_all_missing_numeric_range(
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            );
+            Ok(())
+        }
+        _ => {
+            record_transfer_conversion_failure();
+            Err(dtype_mismatch_error(col, transfer_column, "time"))
+        }
     }
 }
 
@@ -1709,14 +1768,20 @@ fn write_datetime_column_range(
             stata_offset,
             convert_datetime_to_stata_clock,
         ),
-        _ => write_column_fallback_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        DataType::Null => {
+            write_all_missing_numeric_range(
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            );
+            Ok(())
+        }
+        _ => {
+            record_transfer_conversion_failure();
+            Err(dtype_mismatch_error(col, transfer_column, "datetime"))
+        }
     }
 }
 
@@ -1738,14 +1803,31 @@ fn write_string_column_range(
             stata_offset,
             convert_strict_string,
         ),
-        _ => write_column_fallback_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        DataType::Null => {
+            write_all_missing_string_range(
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            );
+            Ok(())
+        }
+        _ => {
+            let casted = col.cast(&DataType::String).map_err(|_| {
+                record_transfer_conversion_failure();
+                dtype_mismatch_error(col, transfer_column, "string")
+            })?;
+            write_string_with_converter(
+                &casted,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+                convert_strict_string,
+            )
+        }
     }
 }
 

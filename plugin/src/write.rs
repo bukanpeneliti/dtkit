@@ -1,127 +1,231 @@
 #![allow(clippy::too_many_arguments)]
 
 use polars::prelude::*;
-use polars_sql::SQLContext;
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::ErrorKind;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender, TrySendError};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
-use std::thread::JoinHandle;
 use std::time::Instant;
 
-use crate::if_filter::{compile_if_expr, convert_if_sql};
+use crate::boundary::{resolve_arg_or_macro, resolve_schema_handoff};
+use crate::if_filter::compile_if_expr;
+use crate::mapping::{
+    estimate_export_field_width_bytes, export_field_polars_dtype, is_stata_date_format,
+    is_stata_datetime_format, is_stata_string_dtype,
+};
 use crate::metadata::{extract_dtmeta, DTMETA_KEY};
 use crate::stata_interface::{
-    count_rows, publish_transfer_metrics, pull_numeric_cell, pull_string_cell_with_buffer,
+    count_rows, display, publish_transfer_metrics, pull_numeric_cell, pull_string_cell_with_buffer,
     pull_strl_cell_with_arena, read_macro, reset_transfer_metrics, set_macro, StrlArena,
 };
 use crate::utilities::{
     compute_pool_init_count, get_compute_thread_pool, get_io_thread_pool, io_pool_init_count,
-    warm_thread_pools, write_pipeline_min_rows, write_pipeline_mode, write_pipeline_queue_capacity,
-    AdaptiveBatchTuner, WritePipelineMode, STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS,
+    warm_thread_pools, write_pipeline_mode, AdaptiveBatchTuner, WritePipelineMode,
+    STATA_DATE_ORIGIN, STATA_EPOCH_MS, TIME_MS,
 };
 
-fn publish_write_runtime_metrics(
+struct WriteRuntimeMetrics {
     collect_calls: usize,
     planned_batches: usize,
     processed_batches: usize,
     elapsed_ms: u128,
-) {
-    set_macro("dtpq_write_collect_calls", &collect_calls.to_string(), true);
+    compute_pool_threads: usize,
+    compute_pool_inits: usize,
+    io_pool_threads: usize,
+    io_pool_inits: usize,
+}
+
+impl WriteRuntimeMetrics {
+    fn zero() -> Self {
+        Self {
+            collect_calls: 0,
+            planned_batches: 0,
+            processed_batches: 0,
+            elapsed_ms: 0,
+            compute_pool_threads: get_compute_thread_pool().current_num_threads(),
+            compute_pool_inits: compute_pool_init_count(),
+            io_pool_threads: get_io_thread_pool().current_num_threads(),
+            io_pool_inits: io_pool_init_count(),
+        }
+    }
+}
+
+fn snapshot_write_runtime_metrics(
+    collect_calls: usize,
+    planned_batches: usize,
+    processed_batches: usize,
+    started_at: Instant,
+) -> WriteRuntimeMetrics {
+    WriteRuntimeMetrics {
+        collect_calls,
+        planned_batches,
+        processed_batches,
+        elapsed_ms: started_at.elapsed().as_millis(),
+        compute_pool_threads: get_compute_thread_pool().current_num_threads(),
+        compute_pool_inits: compute_pool_init_count(),
+        io_pool_threads: get_io_thread_pool().current_num_threads(),
+        io_pool_inits: io_pool_init_count(),
+    }
+}
+
+fn emit_write_runtime_metrics(metrics: &WriteRuntimeMetrics) {
+    set_macro(
+        "dtpq_write_collect_calls",
+        &metrics.collect_calls.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_write_planned_batches",
-        &planned_batches.to_string(),
+        &metrics.planned_batches.to_string(),
         true,
     );
     set_macro(
         "dtpq_write_processed_batches",
-        &processed_batches.to_string(),
+        &metrics.processed_batches.to_string(),
         true,
     );
-    set_macro("dtpq_write_elapsed_ms", &elapsed_ms.to_string(), true);
+    set_macro(
+        "dtpq_write_elapsed_ms",
+        &metrics.elapsed_ms.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_compute_pool_threads",
-        &get_compute_thread_pool().current_num_threads().to_string(),
+        &metrics.compute_pool_threads.to_string(),
         true,
     );
     set_macro(
         "dtpq_compute_pool_inits",
-        &compute_pool_init_count().to_string(),
+        &metrics.compute_pool_inits.to_string(),
         true,
     );
     set_macro(
         "dtpq_io_pool_threads",
-        &get_io_thread_pool().current_num_threads().to_string(),
+        &metrics.io_pool_threads.to_string(),
         true,
     );
     set_macro(
         "dtpq_io_pool_inits",
-        &io_pool_init_count().to_string(),
+        &metrics.io_pool_inits.to_string(),
         true,
     );
     publish_transfer_metrics("dtpq_write");
 }
 
-fn publish_write_batch_tuner_metrics(tuner: &AdaptiveBatchTuner) {
-    set_macro(
-        "dtpq_write_selected_batch_size",
-        &tuner.selected_batch_size().to_string(),
-        true,
-    );
-    set_macro(
-        "dtpq_write_batch_row_width_bytes",
-        &tuner.row_width_bytes().to_string(),
-        true,
-    );
-    set_macro(
-        "dtpq_write_batch_memory_cap_rows",
-        &tuner.memory_guardrail_rows().to_string(),
-        true,
-    );
-    set_macro(
-        "dtpq_write_batch_adjustments",
-        &tuner.tuning_adjustments().to_string(),
-        true,
-    );
-    set_macro("dtpq_write_batch_tuner_mode", tuner.tuning_mode(), true);
+struct WriteBatchTunerMetrics {
+    selected_batch_size: usize,
+    row_width_bytes: usize,
+    memory_cap_rows: usize,
+    adjustments: usize,
+    tuner_mode: &'static str,
 }
 
-fn publish_write_queue_metrics(
-    mode: &str,
+impl WriteBatchTunerMetrics {
+    fn from_tuner(tuner: &AdaptiveBatchTuner) -> Self {
+        Self {
+            selected_batch_size: tuner.selected_batch_size(),
+            row_width_bytes: tuner.row_width_bytes(),
+            memory_cap_rows: tuner.memory_guardrail_rows(),
+            adjustments: tuner.tuning_adjustments(),
+            tuner_mode: tuner.tuning_mode(),
+        }
+    }
+}
+
+struct WriteQueueMetrics {
+    mode: &'static str,
     queue_capacity: usize,
     queue_peak: usize,
     queue_backpressure_events: usize,
     queue_wait_ms: usize,
     produced_batches: usize,
     consumed_batches: usize,
-) {
-    set_macro("dtpq_write_pipeline_mode", mode, true);
+}
+
+impl WriteQueueMetrics {
+    fn legacy_direct_zero() -> Self {
+        Self {
+            mode: "legacy_direct",
+            queue_capacity: 0,
+            queue_peak: 0,
+            queue_backpressure_events: 0,
+            queue_wait_ms: 0,
+            produced_batches: 0,
+            consumed_batches: 0,
+        }
+    }
+}
+
+fn snapshot_write_queue_metrics(scan: &StataRowSource) -> WriteQueueMetrics {
+    WriteQueueMetrics {
+        mode: scan.pipeline_mode_name(),
+        queue_capacity: scan.queue_capacity(),
+        queue_peak: scan.queue_peak(),
+        queue_backpressure_events: scan.queue_backpressure_events(),
+        queue_wait_ms: scan.queue_wait_ms(),
+        produced_batches: scan.queue_produced_batches(),
+        consumed_batches: scan.queue_consumed_batches(),
+    }
+}
+
+fn emit_write_batch_tuner_metrics(metrics: &WriteBatchTunerMetrics) {
+    set_macro(
+        "dtpq_write_selected_batch_size",
+        &metrics.selected_batch_size.to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_row_width_bytes",
+        &metrics.row_width_bytes.to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_memory_cap_rows",
+        &metrics.memory_cap_rows.to_string(),
+        true,
+    );
+    set_macro(
+        "dtpq_write_batch_adjustments",
+        &metrics.adjustments.to_string(),
+        true,
+    );
+    set_macro("dtpq_write_batch_tuner_mode", metrics.tuner_mode, true);
+}
+
+fn emit_write_queue_metrics(metrics: &WriteQueueMetrics) {
+    set_macro("dtpq_write_pipeline_mode", metrics.mode, true);
     set_macro(
         "dtpq_write_queue_capacity",
-        &queue_capacity.to_string(),
+        &metrics.queue_capacity.to_string(),
         true,
     );
-    set_macro("dtpq_write_queue_peak", &queue_peak.to_string(), true);
+    set_macro(
+        "dtpq_write_queue_peak",
+        &metrics.queue_peak.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_write_queue_bp_events",
-        &queue_backpressure_events.to_string(),
+        &metrics.queue_backpressure_events.to_string(),
         true,
     );
-    set_macro("dtpq_write_queue_wait_ms", &queue_wait_ms.to_string(), true);
+    set_macro(
+        "dtpq_write_queue_wait_ms",
+        &metrics.queue_wait_ms.to_string(),
+        true,
+    );
     set_macro(
         "dtpq_write_queue_prod_batches",
-        &produced_batches.to_string(),
+        &metrics.produced_batches.to_string(),
         true,
     );
     set_macro(
         "dtpq_write_queue_cons_batches",
-        &consumed_batches.to_string(),
+        &metrics.consumed_batches.to_string(),
         true,
     );
 }
@@ -138,14 +242,6 @@ pub struct ExportField {
     pub str_length: usize,
 }
 
-#[derive(Debug, Deserialize)]
-struct SchemaHandoff<T> {
-    #[serde(alias = "v")]
-    protocol_version: u32,
-    #[serde(alias = "f")]
-    fields: Vec<T>,
-}
-
 #[derive(Clone, Debug)]
 struct WriteScanPlan {
     selected_infos: Vec<ExportField>,
@@ -154,59 +250,211 @@ struct WriteScanPlan {
     row_width_bytes: usize,
     partition_cols: Vec<PlSmallStr>,
     dtmeta_json: String,
+    schema_handoff_mode: &'static str,
 }
 
-fn parse_schema_handoff_fields<T: DeserializeOwned>(
-    mapping: &str,
-    handoff_name: &str,
-) -> Result<(Vec<T>, &'static str), Box<dyn Error>> {
-    if let Ok(payload) = serde_json::from_str::<SchemaHandoff<T>>(mapping) {
-        if payload.protocol_version != crate::SCHEMA_HANDOFF_PROTOCOL_VERSION {
-            return Err(format!(
-                "Schema protocol mismatch for {}: expected version {}, got {}. Update ado and plugin to matching versions or retry with legacy macro handoff.",
-                handoff_name,
-                crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
-                payload.protocol_version
-            )
-            .into());
+struct WriteBoundaryInputs {
+    selected_vars: String,
+    all_columns: Vec<ExportField>,
+    schema_handoff_mode: &'static str,
+}
+
+#[derive(Copy, Clone)]
+enum WriteFilterMode {
+    None,
+    Expr,
+}
+
+enum WriteEngineStage {
+    ScanPlan,
+    Execute,
+    StataSink,
+}
+
+impl WriteEngineStage {
+    fn as_macro_value(&self) -> &'static str {
+        match self {
+            WriteEngineStage::ScanPlan => "scan_plan",
+            WriteEngineStage::Execute => "execute",
+            WriteEngineStage::StataSink => "stata_sink",
         }
-        return Ok((payload.fields, "json_v2"));
     }
+}
 
-    if let Ok(fields) = serde_json::from_str::<Vec<T>>(mapping) {
-        return Ok((fields, "json_legacy_array"));
+fn set_write_engine_stage(stage: WriteEngineStage) {
+    set_macro("dtpq_write_engine_stage", stage.as_macro_value(), true);
+}
+
+fn set_if_filter_mode(mode: WriteFilterMode) {
+    match mode {
+        WriteFilterMode::None => {}
+        WriteFilterMode::Expr => {
+            set_macro("dtpq_if_filter_mode", "expr", true);
+        }
     }
+}
 
-    Err(format!(
-        "Invalid schema mapping payload for {}. Expected JSON object {{\"protocol_version\":...,\"fields\":[...]}}.",
-        handoff_name
-    )
-    .into())
+fn emit_write_init_macros() {
+    set_macro("dtpq_write_selected_batch_size", "0", true);
+    set_macro("dtpq_write_batch_row_width_bytes", "0", true);
+    set_macro("dtpq_write_batch_memory_cap_rows", "0", true);
+    set_macro("dtpq_write_batch_adjustments", "0", true);
+    set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
+    set_macro("dtpq_if_filter_mode", "none", true);
+    set_macro("dtpq_write_schema_handoff", "legacy_macros", true);
+    set_write_engine_stage(WriteEngineStage::ScanPlan);
+}
+
+fn emit_write_plan_macros(schema_handoff_mode: &str) {
+    set_macro("dtpq_write_schema_handoff", schema_handoff_mode, true);
+    set_write_engine_stage(WriteEngineStage::Execute);
+}
+
+fn compile_write_filter(
+    sql_if: Option<&str>,
+) -> Result<(Option<Expr>, WriteFilterMode), Box<dyn Error>> {
+    match sql_if.filter(|s| !s.trim().is_empty()) {
+        Some(raw) => Ok((Some(compile_if_expr(raw)?), WriteFilterMode::Expr)),
+        None => Ok((None, WriteFilterMode::None)),
+    }
+}
+
+fn build_write_source(
+    plan: &WriteScanPlan,
+    batch_size: usize,
+) -> Result<(Arc<StataRowSource>, LazyFrame), Box<dyn Error>> {
+    let scan = Arc::new(StataRowSource::new(
+        plan.selected_infos.clone(),
+        plan.start_row,
+        plan.rows_to_read,
+        batch_size,
+        plan.row_width_bytes,
+    ));
+    let lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
+    Ok((scan, lf))
+}
+
+fn apply_write_filter(
+    lf: LazyFrame,
+    sql_if: Option<&str>,
+) -> Result<(LazyFrame, WriteFilterMode), Box<dyn Error>> {
+    let (filter_expr, filter_mode) = compile_write_filter(sql_if)?;
+    let filtered = match filter_expr {
+        Some(expr) => lf.filter(expr),
+        None => lf,
+    };
+    Ok((filtered, filter_mode))
+}
+
+fn sink_write_plan(
+    path: &str,
+    lf: LazyFrame,
+    compression: &str,
+    compression_level: Option<usize>,
+    overwrite_partition: bool,
+    plan: &WriteScanPlan,
+    collect_calls: &mut usize,
+) -> Result<(), Box<dyn Error>> {
+    if plan.partition_cols.is_empty() {
+        write_single_dataframe(
+            path,
+            lf,
+            compression,
+            compression_level,
+            overwrite_partition,
+            &plan.dtmeta_json,
+            collect_calls,
+        )
+    } else {
+        *collect_calls += 1;
+        let mut df = lf.collect()?;
+        write_partitioned_dataframe(
+            path,
+            &mut df,
+            compression,
+            compression_level,
+            &plan.partition_cols,
+            overwrite_partition,
+            &plan.dtmeta_json,
+        )
+    }
+}
+
+fn init_write_runtime() {
+    warm_thread_pools();
+    reset_transfer_metrics();
+    emit_write_runtime_metrics(&WriteRuntimeMetrics::zero());
+    emit_write_init_macros();
+    emit_write_queue_metrics(&WriteQueueMetrics::legacy_direct_zero());
+}
+
+fn maybe_warn_deprecated_queue_mode() {
+    if write_pipeline_mode() == WritePipelineMode::ProducerConsumer {
+        emit_write_queue_deprecated_macros();
+        display("dtparquet: queue write mode is deprecated; using direct mode");
+    }
+}
+
+fn emit_write_queue_deprecated_macros() {
+    set_macro("dtpq_write_pipeline_mode", "legacy_direct", true);
+    set_macro(
+        "dtpq_write_pipeline_deprecated",
+        "queue_mode_forced_direct",
+        true,
+    );
+}
+
+fn finalize_write_runtime(scan: &StataRowSource, collect_calls: usize, started_at: Instant) {
+    set_write_engine_stage(WriteEngineStage::StataSink);
+
+    let batch_tuner = scan.batch_tuner_snapshot();
+    let batch_metrics = WriteBatchTunerMetrics::from_tuner(&batch_tuner);
+    emit_write_batch_tuner_metrics(&batch_metrics);
+    let queue_metrics = snapshot_write_queue_metrics(scan);
+    emit_write_queue_metrics(&queue_metrics);
+
+    let metrics = snapshot_write_runtime_metrics(
+        collect_calls,
+        scan.planned_batches(),
+        scan.processed_batches(),
+        started_at,
+    );
+    emit_write_runtime_metrics(&metrics);
+}
+
+fn resolve_write_boundary_inputs(
+    varlist: &str,
+    mapping: &str,
+) -> Result<WriteBoundaryInputs, Box<dyn Error>> {
+    let selected_vars =
+        resolve_arg_or_macro(varlist, "from_macro", "varlist", Some(10 * 1024 * 1024));
+
+    let (all_columns, schema_handoff_mode): (Vec<ExportField>, &'static str) =
+        resolve_schema_handoff(
+            mapping,
+            "save",
+            crate::SCHEMA_HANDOFF_PROTOCOL_VERSION,
+            || {
+                let var_count = read_macro("var_count", false, None).parse::<usize>()?;
+                column_info_from_macros(var_count)
+            },
+        )?;
+
+    Ok(WriteBoundaryInputs {
+        selected_vars,
+        all_columns,
+        schema_handoff_mode,
+    })
 }
 
 fn build_write_scan_plan(
-    varlist: &str,
-    mapping: &str,
+    boundary_inputs: &WriteBoundaryInputs,
     n_rows: usize,
     offset: usize,
     partition_by: &str,
 ) -> Result<WriteScanPlan, Box<dyn Error>> {
-    let selected_vars_owned;
-    let selected_vars = if varlist.is_empty() || varlist == "from_macro" {
-        selected_vars_owned = read_macro("varlist", false, Some(10 * 1024 * 1024));
-        selected_vars_owned.as_str()
-    } else {
-        varlist
-    };
-
-    let all_columns = if mapping.is_empty() || mapping == "from_macros" {
-        let var_count = read_macro("var_count", false, None).parse::<usize>()?;
-        column_info_from_macros(var_count)
-    } else {
-        let (fields, handoff_mode) = parse_schema_handoff_fields::<ExportField>(mapping, "save")?;
-        set_macro("dtpq_write_schema_handoff", handoff_mode, true);
-        fields
-    };
+    let selected_vars = boundary_inputs.selected_vars.as_str();
+    let all_columns = boundary_inputs.all_columns.clone();
 
     validate_stata_schema(&all_columns)?;
 
@@ -252,90 +500,23 @@ fn build_write_scan_plan(
         row_width_bytes,
         partition_cols,
         dtmeta_json,
+        schema_handoff_mode: boundary_inputs.schema_handoff_mode,
     })
 }
 
 fn estimate_export_row_width_bytes(infos: &[ExportField]) -> usize {
     infos
         .iter()
-        .map(|info| match info.dtype.as_str() {
-            "byte" => 1,
-            "int" => 2,
-            "long" | "float" => 4,
-            "double" => 8,
-            "strl" => 128,
-            _ if info.dtype.starts_with("str") => info.str_length.max(1) + 1,
-            _ => 8,
-        })
+        .map(|info| estimate_export_field_width_bytes(&info.dtype, info.str_length))
         .sum::<usize>()
         .max(1)
 }
 
-enum PipelineMessage {
-    Batch(DataFrame),
-    Error(String),
-}
-
 #[derive(Default)]
 struct WriteQueueTelemetry {
-    queue_depth: AtomicUsize,
     queue_peak: AtomicUsize,
     backpressure_events: AtomicUsize,
     queue_wait_ms: AtomicUsize,
-    produced_batches: AtomicUsize,
-}
-
-fn update_queue_peak(telemetry: &WriteQueueTelemetry, depth: usize) {
-    let mut peak = telemetry.queue_peak.load(Ordering::Relaxed);
-    while depth > peak {
-        match telemetry.queue_peak.compare_exchange_weak(
-            peak,
-            depth,
-            Ordering::Relaxed,
-            Ordering::Relaxed,
-        ) {
-            Ok(_) => break,
-            Err(observed) => peak = observed,
-        }
-    }
-}
-
-fn send_pipeline_message(
-    sender: &SyncSender<PipelineMessage>,
-    telemetry: &WriteQueueTelemetry,
-    stop_requested: &AtomicBool,
-    message: PipelineMessage,
-) -> bool {
-    if stop_requested.load(Ordering::Relaxed) {
-        return false;
-    }
-
-    match sender.try_send(message) {
-        Ok(()) => {
-            let depth = telemetry.queue_depth.fetch_add(1, Ordering::Relaxed) + 1;
-            update_queue_peak(telemetry, depth);
-            true
-        }
-        Err(TrySendError::Full(returned)) => {
-            telemetry
-                .backpressure_events
-                .fetch_add(1, Ordering::Relaxed);
-            let wait_started_at = Instant::now();
-            match sender.send(returned) {
-                Ok(()) => {
-                    let wait_ms = wait_started_at.elapsed().as_millis() as usize;
-                    telemetry
-                        .queue_wait_ms
-                        .fetch_add(wait_ms, Ordering::Relaxed);
-                    let depth = telemetry.queue_depth.fetch_add(1, Ordering::Relaxed) + 1;
-                    update_queue_peak(telemetry, depth);
-                    true
-                }
-                Err(_) => false,
-            }
-        }
-        Err(TrySendError::Disconnected(_)) => false,
-    }
 }
 
 pub struct StataRowSource {
@@ -348,12 +529,8 @@ pub struct StataRowSource {
     processed_batches: AtomicUsize,
     schema: Arc<Schema>,
     batch_tuner: Arc<Mutex<AdaptiveBatchTuner>>,
-    pipeline_mode: WritePipelineMode,
     queue_capacity: usize,
     queue_telemetry: Arc<WriteQueueTelemetry>,
-    stop_requested: Arc<AtomicBool>,
-    pipeline_receiver: Option<Mutex<Receiver<PipelineMessage>>>,
-    pipeline_worker: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl StataRowSource {
@@ -366,22 +543,7 @@ impl StataRowSource {
     ) -> Self {
         let mut fields = Vec::with_capacity(column_info.len());
         for info in &column_info {
-            let dtype = match info.dtype.as_str() {
-                "byte" => DataType::Int8,
-                "int" => DataType::Int16,
-                "long" => DataType::Int32,
-                "float" => DataType::Float32,
-                "double" => DataType::Float64,
-                _ if info.dtype == "strl" || info.dtype.starts_with("str") => DataType::String,
-                _ => DataType::Float64,
-            };
-            let dtype = if info.format.starts_with("%td") {
-                DataType::Date
-            } else if info.format.starts_with("%tc") {
-                DataType::Datetime(TimeUnit::Milliseconds, None)
-            } else {
-                dtype
-            };
+            let dtype = export_field_polars_dtype(&info.dtype, &info.format);
             fields.push(Field::new(PlSmallStr::from(&info.name), dtype));
         }
 
@@ -397,98 +559,11 @@ impl StataRowSource {
             n_rows.div_ceil(safe_batch_size)
         };
 
-        let requested_pipeline_mode = write_pipeline_mode();
-        let pipeline_mode = if requested_pipeline_mode == WritePipelineMode::ProducerConsumer
-            && n_rows >= write_pipeline_min_rows()
-            && planned_batches > 1
-        {
-            WritePipelineMode::ProducerConsumer
-        } else {
-            WritePipelineMode::LegacyDirect
-        };
-        let queue_capacity = if pipeline_mode == WritePipelineMode::ProducerConsumer {
-            let configured = write_pipeline_queue_capacity();
-            let effective_max = planned_batches.saturating_sub(1).max(1);
-            configured.min(effective_max)
-        } else {
-            0
-        };
+        let _requested_pipeline_mode = write_pipeline_mode();
+        let queue_capacity = 0;
 
         let batch_size_hint = Arc::new(AtomicUsize::new(safe_batch_size));
         let queue_telemetry = Arc::new(WriteQueueTelemetry::default());
-        let stop_requested = Arc::new(AtomicBool::new(false));
-
-        let mut pipeline_receiver = None;
-        let mut pipeline_worker = None;
-
-        if pipeline_mode == WritePipelineMode::ProducerConsumer && n_rows > 0 {
-            let (sender, receiver) = sync_channel(queue_capacity);
-            pipeline_receiver = Some(Mutex::new(receiver));
-
-            let producer_columns = column_info.clone();
-            let producer_batch_size_hint = batch_size_hint.clone();
-            let producer_batch_tuner = batch_tuner.clone();
-            let producer_telemetry = queue_telemetry.clone();
-            let producer_stop_requested = stop_requested.clone();
-
-            pipeline_worker = Some(thread::spawn(move || {
-                let mut producer_offset = 0usize;
-                while producer_offset < n_rows {
-                    if producer_stop_requested.load(Ordering::Relaxed) {
-                        break;
-                    }
-
-                    let requested_batch_size =
-                        producer_batch_size_hint.load(Ordering::Relaxed).max(1);
-                    let read_count = std::cmp::min(requested_batch_size, n_rows - producer_offset);
-                    let batch_started_at = Instant::now();
-
-                    let batch_df_result = read_batch_from_columns(
-                        &producer_columns,
-                        start_row + producer_offset,
-                        read_count,
-                    );
-
-                    let batch_df = match batch_df_result {
-                        Ok(df) => df,
-                        Err(err) => {
-                            let _ = send_pipeline_message(
-                                &sender,
-                                &producer_telemetry,
-                                &producer_stop_requested,
-                                PipelineMessage::Error(err.to_string()),
-                            );
-                            break;
-                        }
-                    };
-
-                    let batch_rows = batch_df.height();
-                    if batch_rows == 0 {
-                        break;
-                    }
-
-                    let next_batch_size = {
-                        let mut tuner = producer_batch_tuner.lock().unwrap();
-                        tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis())
-                    };
-                    producer_batch_size_hint.store(next_batch_size.max(1), Ordering::Relaxed);
-
-                    if !send_pipeline_message(
-                        &sender,
-                        &producer_telemetry,
-                        &producer_stop_requested,
-                        PipelineMessage::Batch(batch_df),
-                    ) {
-                        break;
-                    }
-
-                    producer_telemetry
-                        .produced_batches
-                        .fetch_add(1, Ordering::Relaxed);
-                    producer_offset += batch_rows;
-                }
-            }));
-        }
 
         StataRowSource {
             column_info,
@@ -500,12 +575,8 @@ impl StataRowSource {
             processed_batches: AtomicUsize::new(0),
             schema: Arc::new(Schema::from_iter(fields)),
             batch_tuner,
-            pipeline_mode,
             queue_capacity,
             queue_telemetry,
-            stop_requested,
-            pipeline_receiver,
-            pipeline_worker: Mutex::new(pipeline_worker),
         }
     }
 
@@ -527,11 +598,7 @@ impl StataRowSource {
     }
 
     pub fn pipeline_mode_name(&self) -> &'static str {
-        if self.pipeline_mode == WritePipelineMode::ProducerConsumer {
-            "producer_consumer"
-        } else {
-            "legacy_direct"
-        }
+        "legacy_direct"
     }
 
     pub fn queue_capacity(&self) -> usize {
@@ -553,13 +620,7 @@ impl StataRowSource {
     }
 
     pub fn queue_produced_batches(&self) -> usize {
-        if self.pipeline_mode == WritePipelineMode::ProducerConsumer {
-            self.queue_telemetry
-                .produced_batches
-                .load(Ordering::Relaxed)
-        } else {
-            self.processed_batches()
-        }
+        self.processed_batches()
     }
 
     pub fn queue_consumed_batches(&self) -> usize {
@@ -567,18 +628,7 @@ impl StataRowSource {
     }
 
     fn join_pipeline_worker(&self) {
-        if let Some(handle) = self.pipeline_worker.lock().unwrap().take() {
-            let _ = handle.join();
-        }
-    }
-
-    fn queue_message_consumed(&self) {
-        let depth = self.queue_telemetry.queue_depth.load(Ordering::Relaxed);
-        if depth > 0 {
-            self.queue_telemetry
-                .queue_depth
-                .fetch_sub(1, Ordering::Relaxed);
-        }
+        let _ = self;
     }
 
     fn next_batch_legacy(&self) -> PolarsResult<Option<DataFrame>> {
@@ -606,35 +656,6 @@ impl StataRowSource {
         Ok(Some(df))
     }
 
-    fn next_batch_pipeline(&self) -> PolarsResult<Option<DataFrame>> {
-        let receiver = match self.pipeline_receiver.as_ref() {
-            Some(r) => r,
-            None => return Ok(None),
-        };
-        let received = {
-            let receiver_guard = receiver.lock().unwrap();
-            receiver_guard.recv()
-        };
-
-        match received {
-            Ok(PipelineMessage::Batch(df)) => {
-                self.queue_message_consumed();
-                self.processed_batches.fetch_add(1, Ordering::Relaxed);
-                Ok(Some(df))
-            }
-            Ok(PipelineMessage::Error(message)) => {
-                self.queue_message_consumed();
-                self.stop_requested.store(true, Ordering::Relaxed);
-                self.join_pipeline_worker();
-                Err(PolarsError::ComputeError(message.into()))
-            }
-            Err(_) => {
-                self.join_pipeline_worker();
-                Ok(None)
-            }
-        }
-    }
-
     fn scan_legacy(&self) -> PolarsResult<DataFrame> {
         let offset = self
             .current_offset
@@ -658,21 +679,6 @@ impl StataRowSource {
         }
         Ok(df)
     }
-
-    fn scan_pipeline(&self) -> PolarsResult<DataFrame> {
-        let mut combined: Option<DataFrame> = None;
-        while let Some(batch) = self.next_batch_pipeline()? {
-            if let Some(existing) = combined.as_mut() {
-                existing.vstack_mut(&batch)?;
-            } else {
-                combined = Some(batch);
-            }
-        }
-        match combined {
-            Some(df) => Ok(df),
-            None => Ok(DataFrame::empty_with_schema(&self.schema)),
-        }
-    }
 }
 
 impl AnonymousScan for StataRowSource {
@@ -685,30 +691,11 @@ impl AnonymousScan for StataRowSource {
     }
 
     fn scan(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<DataFrame> {
-        if self.pipeline_mode == WritePipelineMode::ProducerConsumer {
-            self.scan_pipeline()
-        } else {
-            self.scan_legacy()
-        }
+        self.scan_legacy()
     }
 
     fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
-        if self.pipeline_mode == WritePipelineMode::ProducerConsumer {
-            self.next_batch_pipeline()
-        } else {
-            self.next_batch_legacy()
-        }
-    }
-}
-
-impl Drop for StataRowSource {
-    fn drop(&mut self) {
-        self.stop_requested.store(true, Ordering::Relaxed);
-        if let Ok(worker_slot) = self.pipeline_worker.get_mut() {
-            if let Some(handle) = worker_slot.take() {
-                let _ = handle.join();
-            }
-        }
+        self.next_batch_legacy()
     }
 }
 
@@ -742,7 +729,7 @@ fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn Error>> {
             continue;
         }
 
-        if info.dtype == "strl" || info.dtype.starts_with("str") {
+        if is_stata_string_dtype(&info.dtype) {
             continue;
         }
 
@@ -778,89 +765,28 @@ pub fn export_parquet(
 ) -> Result<i32, Box<dyn Error>> {
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
-    warm_thread_pools();
-    reset_transfer_metrics();
-    publish_write_runtime_metrics(0, 0, 0, 0);
-    set_macro("dtpq_write_selected_batch_size", "0", true);
-    set_macro("dtpq_write_batch_row_width_bytes", "0", true);
-    set_macro("dtpq_write_batch_memory_cap_rows", "0", true);
-    set_macro("dtpq_write_batch_adjustments", "0", true);
-    set_macro("dtpq_write_batch_tuner_mode", "fixed", true);
-    set_macro("dtpq_if_filter_mode", "none", true);
-    set_macro("dtpq_write_schema_handoff", "legacy_macros", true);
-    set_macro("dtpq_write_engine_stage", "scan_plan", true);
-    publish_write_queue_metrics("legacy_direct", 0, 0, 0, 0, 0, 0);
+    init_write_runtime();
+    maybe_warn_deprecated_queue_mode();
+    let boundary_inputs = resolve_write_boundary_inputs(varlist, mapping)?;
 
-    let plan = build_write_scan_plan(varlist, mapping, n_rows, offset, partition_by)?;
-    set_macro("dtpq_write_engine_stage", "execute", true);
+    let plan = build_write_scan_plan(&boundary_inputs, n_rows, offset, partition_by)?;
+    emit_write_plan_macros(plan.schema_handoff_mode);
 
-    let scan = Arc::new(StataRowSource::new(
-        plan.selected_infos,
-        plan.start_row,
-        plan.rows_to_read,
-        batch_size,
-        plan.row_width_bytes,
-    ));
-    let mut lf = LazyFrame::anonymous_scan(scan.clone(), ScanArgsAnonymous::default())?;
+    let (scan, lf) = build_write_source(&plan, batch_size)?;
+    let (lf, filter_mode) = apply_write_filter(lf, sql_if)?;
+    set_if_filter_mode(filter_mode);
+    sink_write_plan(
+        path,
+        lf,
+        compression,
+        compression_level,
+        overwrite_partition,
+        &plan,
+        &mut collect_calls,
+    )?;
 
-    if let Some(sql) = sql_if.filter(|s| !s.trim().is_empty()) {
-        if let Some(expr) = compile_if_expr(sql) {
-            lf = lf.filter(expr);
-            set_macro("dtpq_if_filter_mode", "expr", true);
-        } else {
-            let mut ctx = SQLContext::new();
-            ctx.register("df", lf);
-            let translated = convert_if_sql(sql);
-            lf = ctx.execute(&format!("select * from df where {}", translated))?;
-            set_macro("dtpq_if_filter_mode", "sql_fallback", true);
-        }
-    }
-
-    if plan.partition_cols.is_empty() {
-        write_single_dataframe(
-            path,
-            lf,
-            compression,
-            compression_level,
-            overwrite_partition,
-            &plan.dtmeta_json,
-            &mut collect_calls,
-        )?;
-    } else {
-        collect_calls += 1;
-        let mut df = lf.collect()?;
-        write_partitioned_dataframe(
-            path,
-            &mut df,
-            compression,
-            compression_level,
-            &plan.partition_cols,
-            overwrite_partition,
-            &plan.dtmeta_json,
-        )?;
-    }
-
-    set_macro("dtpq_write_engine_stage", "stata_sink", true);
     scan.join_pipeline_worker();
-
-    let batch_tuner = scan.batch_tuner_snapshot();
-    publish_write_batch_tuner_metrics(&batch_tuner);
-    publish_write_queue_metrics(
-        scan.pipeline_mode_name(),
-        scan.queue_capacity(),
-        scan.queue_peak(),
-        scan.queue_backpressure_events(),
-        scan.queue_wait_ms(),
-        scan.queue_produced_batches(),
-        scan.queue_consumed_batches(),
-    );
-
-    publish_write_runtime_metrics(
-        collect_calls,
-        scan.planned_batches(),
-        scan.processed_batches(),
-        started_at.elapsed().as_millis(),
-    );
+    finalize_write_runtime(&scan, collect_calls, started_at);
 
     Ok(0)
 }
@@ -986,15 +912,22 @@ fn parquet_compression(
     }
 }
 
-fn column_info_from_macros(n_vars: usize) -> Vec<ExportField> {
+fn column_info_from_macros(n_vars: usize) -> Result<Vec<ExportField>, Box<dyn Error>> {
     (1..=n_vars)
-        .map(|i| ExportField {
-            name: read_macro(&format!("name_{}", i), false, None),
-            dtype: read_macro(&format!("dtype_{}", i), false, None).to_lowercase(),
-            format: read_macro(&format!("format_{}", i), false, None).to_lowercase(),
-            str_length: read_macro(&format!("str_length_{}", i), false, None)
-                .parse::<usize>()
-                .unwrap_or(0),
+        .map(|i| {
+            let str_length_raw = read_macro(&format!("str_length_{}", i), false, None);
+            let str_length = str_length_raw.parse::<usize>().map_err(|_| {
+                format!(
+                    "Invalid macro str_length_{}='{}': expected usize",
+                    i, str_length_raw
+                )
+            })?;
+            Ok(ExportField {
+                name: read_macro(&format!("name_{}", i), false, None),
+                dtype: read_macro(&format!("dtype_{}", i), false, None).to_lowercase(),
+                format: read_macro(&format!("format_{}", i), false, None).to_lowercase(),
+                str_length,
+            })
         })
         .collect()
 }
@@ -1016,7 +949,7 @@ fn series_from_stata_column(
         return Ok(Series::new((&info.name).into(), values));
     }
 
-    if info.dtype.starts_with("str") {
+    if is_stata_string_dtype(&info.dtype) {
         let width = info.str_length.max(1);
         let mut str_buffer: Vec<i8> = vec![0; width.saturating_add(1)];
         let values: Vec<String> = (0..n_rows)
@@ -1027,7 +960,7 @@ fn series_from_stata_column(
         return Ok(Series::new((&info.name).into(), values));
     }
 
-    if info.format.starts_with("%td") {
+    if is_stata_date_format(&info.format) {
         let values: Vec<Option<i32>> = (0..n_rows)
             .map(|row_idx| {
                 pull_numeric_cell(stata_col_index, offset + row_idx + 1)
@@ -1037,7 +970,7 @@ fn series_from_stata_column(
         return Series::new((&info.name).into(), values).cast(&DataType::Date);
     }
 
-    if info.format.starts_with("%tc") {
+    if is_stata_datetime_format(&info.format) {
         let values: Vec<Option<i64>> = (0..n_rows)
             .map(|row_idx| {
                 pull_numeric_cell(stata_col_index, offset + row_idx + 1)

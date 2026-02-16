@@ -5,7 +5,7 @@ pub fn apply_cast(df: LazyFrame, type_mapping_json: &str) -> PolarsResult<LazyFr
     let type_mapping: Map<String, Value> = serde_json::from_str(type_mapping_json)
         .map_err(|e| PolarsError::ComputeError(format!("Invalid JSON: {}", e).into()))?;
     let schema = df.clone().collect_schema()?;
-    let mut cast_exprs = Vec::new();
+    let mut cast_pairs: Vec<(String, DataType)> = Vec::new();
 
     for (type_str, columns_value) in type_mapping {
         if let Value::Array(columns_array) = columns_value {
@@ -13,17 +13,21 @@ pub fn apply_cast(df: LazyFrame, type_mapping_json: &str) -> PolarsResult<LazyFr
             for column_value in columns_array {
                 if let Value::String(col_name) = column_value {
                     if schema.get(&col_name).is_some() {
-                        cast_exprs.push(col(&col_name).cast(target_type.clone()).alias(&col_name));
+                        cast_pairs.push((col_name, target_type.clone()));
                     }
                 }
             }
         }
     }
 
-    if cast_exprs.is_empty() {
+    if cast_pairs.is_empty() {
         Ok(df)
     } else {
-        Ok(df.with_columns(cast_exprs))
+        let cast_map: PlHashMap<&str, DataType> = cast_pairs
+            .iter()
+            .map(|(name, dtype)| (name.as_str(), dtype.clone()))
+            .collect();
+        Ok(df.cast(cast_map, true))
     }
 }
 

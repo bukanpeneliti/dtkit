@@ -3,6 +3,7 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::slice;
 
+pub mod boundary;
 pub mod downcast;
 pub mod if_filter;
 pub mod mapping;
@@ -147,6 +148,24 @@ fn parse_parallel_strategy(s: &str) -> Option<BatchMode> {
     }
 }
 
+fn parse_usize_arg(field: &'static str, value: &str) -> Result<usize, CommandError> {
+    value
+        .parse::<usize>()
+        .map_err(|_| CommandError::InvalidArg(field, value.to_string()))
+}
+
+fn parse_u64_arg(field: &'static str, value: &str) -> Result<u64, CommandError> {
+    value
+        .parse::<u64>()
+        .map_err(|_| CommandError::InvalidArg(field, value.to_string()))
+}
+
+fn parse_f64_arg(field: &'static str, value: &str) -> Result<f64, CommandError> {
+    value
+        .parse::<f64>()
+        .map_err(|_| CommandError::InvalidArg(field, value.to_string()))
+}
+
 fn parse_read_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     if args.len() < 13 {
         return Err(CommandError::SubcommandArgCount("read", 13));
@@ -166,7 +185,7 @@ fn parse_read_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     };
 
     let batch_size = if args.len() >= 14 {
-        args[13].parse().unwrap_or(50_000)
+        parse_usize_arg("batch_size", args[13])?
     } else {
         50_000
     };
@@ -174,8 +193,8 @@ fn parse_read_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     Ok(CommandArgs::Read(ReadArgs {
         file_path,
         varlist: args[1].to_string(),
-        start_row: args[2].parse().unwrap_or(0),
-        max_rows: args[3].parse().unwrap_or(0),
+        start_row: parse_usize_arg("start_row", args[2])?,
+        max_rows: parse_usize_arg("max_rows", args[3])?,
         sql_if: if args[4].is_empty() {
             None
         } else {
@@ -186,9 +205,9 @@ fn parse_read_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
         safe_relaxed,
         asterisk_to_variable_name,
         order_by: args[9].to_string(),
-        order_by_type: args[10].parse().unwrap_or(0),
-        order_descending: args[11].parse().unwrap_or(0.0),
-        random_seed: args[12].parse().unwrap_or(0),
+        order_by_type: parse_usize_arg("order_by_type", args[10])?,
+        order_descending: parse_f64_arg("order_descending", args[11])?,
+        random_seed: parse_u64_arg("random_seed", args[12])?,
         batch_size,
     }))
 }
@@ -209,7 +228,7 @@ fn parse_save_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     };
 
     let batch_size = if args.len() >= 13 {
-        args[12].parse().unwrap_or(0)
+        parse_usize_arg("batch_size", args[12])?
     } else {
         0
     };
@@ -217,8 +236,8 @@ fn parse_save_args(args: &[&str]) -> Result<CommandArgs, CommandError> {
     Ok(CommandArgs::Save(SaveArgs {
         file_path: args[0].to_string(),
         varlist: args[1].to_string(),
-        start_row: args[2].parse().unwrap_or(0),
-        max_rows: args[3].parse().unwrap_or(0),
+        start_row: parse_usize_arg("start_row", args[2])?,
+        max_rows: parse_usize_arg("max_rows", args[3])?,
         sql_if: if args[4].is_empty() {
             None
         } else {
