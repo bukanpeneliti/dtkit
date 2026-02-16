@@ -43,5 +43,9 @@ lto = "fat"
 codegen-units = 1
 
 [profile.dev]
+debug = 0
 split-debuginfo = "packed"
 strip = "symbols"
+
+[profile.test]
+debug = 0
