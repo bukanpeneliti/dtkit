@@ -243,7 +243,7 @@ pub struct ExportField {
 }
 
 #[derive(Clone, Debug)]
-struct WriteScanPlan {
+pub struct WriteScanPlan {
     selected_infos: Vec<ExportField>,
     start_row: usize,
     rows_to_read: usize,
@@ -253,7 +253,7 @@ struct WriteScanPlan {
     schema_handoff_mode: &'static str,
 }
 
-struct WriteBoundaryInputs {
+pub struct WriteBoundaryInputs {
     selected_vars: String,
     all_columns: Vec<ExportField>,
     schema_handoff_mode: &'static str,
@@ -422,7 +422,7 @@ fn finalize_write_runtime(scan: &StataRowSource, collect_calls: usize, started_a
     emit_write_runtime_metrics(&metrics);
 }
 
-fn resolve_write_boundary_inputs(
+pub fn resolve_write_boundary_inputs(
     varlist: &str,
     mapping: &str,
 ) -> Result<WriteBoundaryInputs, Box<dyn Error>> {
@@ -447,7 +447,7 @@ fn resolve_write_boundary_inputs(
     })
 }
 
-fn build_write_scan_plan(
+pub fn build_write_scan_plan(
     boundary_inputs: &WriteBoundaryInputs,
     n_rows: usize,
     offset: usize,

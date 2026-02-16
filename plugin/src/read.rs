@@ -55,14 +55,14 @@ struct DescribeSchemaPayload {
 }
 
 #[derive(Debug)]
-struct ReadScanPlan {
+pub struct ReadScanPlan {
     selected_column_list: Vec<String>,
     transfer_columns: Vec<TransferColumnSpec>,
     can_use_eager: bool,
     schema_handoff_mode: &'static str,
 }
 
-struct ReadBoundaryInputs {
+pub struct ReadBoundaryInputs {
     variables_as_str: String,
     all_columns_unfiltered: Vec<FieldSpec>,
     schema_handoff_mode: &'static str,
@@ -217,7 +217,7 @@ fn snapshot_read_runtime_metrics(
     }
 }
 
-fn resolve_read_boundary_inputs(
+pub fn resolve_read_boundary_inputs(
     variables_as_str: &str,
     mapping: &str,
 ) -> Result<ReadBoundaryInputs, Box<dyn Error>> {
@@ -249,7 +249,7 @@ fn resolve_read_boundary_inputs(
     })
 }
 
-fn build_read_scan_plan(
+pub fn build_read_scan_plan(
     path: &str,
     boundary_inputs: &ReadBoundaryInputs,
     safe_relaxed: bool,
@@ -572,7 +572,7 @@ pub fn validate_parquet_schema(path: &str, expected_columns: &[&str]) -> Result<
 }
 
 #[allow(dead_code)]
-fn sample_parquet_schema(path: &str) -> Result<Schema, String> {
+pub fn sample_parquet_schema(path: &str) -> Result<Schema, String> {
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let reader = ParquetReader::new(file);
 
@@ -1017,7 +1017,7 @@ pub fn import_parquet(
     Ok(0)
 }
 
-fn set_schema_macros(
+pub fn set_schema_macros(
     schema: &Schema,
     string_lengths: &std::collections::HashMap<String, usize>,
     detailed: bool,

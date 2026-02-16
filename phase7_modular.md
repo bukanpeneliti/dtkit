@@ -7,6 +7,7 @@ This document outlines the implementation plan for Phase 7 of dtparquet developm
 ## Context
 
 This phase builds upon completed work:
+
 - **Phase 1**: Initial dtparquet implementation (Python bridge)
 - **Phase 2** (HANDOFF.md): Rust plugin rewrite with Polars 0.52.0 upgrade, including:
   - Slice 1: SQL translation characterization coverage
@@ -22,26 +23,42 @@ Phase 7 focuses on extracting modules to reduce file size and improve maintainab
 Based on HANDOFF.md, all changes must follow this workflow:
 
 ### 1. Build the Plugin
+
 ```bash
 cd plugin && cargo build --release
 ```
 
 ### 2. Lock-Safe DLL Promotion
+
 ```
 ado/ancillary_files/dtparquet.new.dll → ado/ancillary_files/dtparquet.dll
 ```
+
 - Use `dtparquet.new.dll` only when `dtparquet.dll` is locked
 
 ### 3. Run Validation Tests
+
 Run **one-by-one** in batch mode:
+
 ```bash
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log" 
 "C:/Program Files/StataNow19/StataMP-64.exe" -e do "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/dtparquet_testN.do"
 ```
+
 Replace `N` with 1-7 for each test file.
 
-### 4. Verify Policy Invariants
+### 4. Examine Log Files
+
+After each test, HAVE SUBAGENTS check the log file in `ado/ancillary_files/test/log/` for:
+
+- Test number and pass/fail status
+- Any warnings or errors
+- Return code (should be 0 for pass)
+
+### 5. Verify Policy Invariants
+
 After each slice:
+
 - Metadata restore remains in-parquet-only (`dtparquet.dtmeta`)
 - Explicit compression level rejects with `r(198)`
 - `compress_string_to_numeric` remains unsupported
@@ -163,18 +180,21 @@ CRITICAL PATH (MUST BE SEQUENTIAL):
 **Objective**: Extract utilities and establish shared infrastructure.
 
 #### 7.1.1 Temporal Utilities
+
 - Move time/date constants to dedicated section in `utilities.rs`
 - Extract conversion functions used by both read and write
 - No new files
 - **Status**: INDEPENDENT
 
 #### 7.1.2 Metrics Infrastructure
+
 - Create `metrics.rs` with shared trait definitions
 - Extract `RuntimeMetrics` and `BatchTunerMetrics` traits
 - Keep inline implementations in read/write during transition
 - **Status**: INDEPENDENT
 
 #### 7.1.3 Batch Mode Organization
+
 - Clarify `BatchMode` documentation
 - Group `WritePipelineMode` with related functions
 - **Status**: INDEPENDENT
@@ -185,10 +205,12 @@ CRITICAL PATH (MUST BE SEQUENTIAL):
 
 **Objective**: Extract core data conversion logic into testable module.
 
-**CRITICAL: Decoupling Stata FFI** (per Gemini feedback): 
+**CRITICAL: Decoupling Stata FFI** (per Gemini feedback):
+
 - Many functions in read.rs (like `write_numeric_column_range`) call `replace_number` directly from `stata_interface`
 - If these are moved to transfer/ as-is, they remain untestable without Stata
 - **Solution**: Use an intermediate buffer or trait-based sink:
+
 ```rust
 // Define trait for testability
 pub trait TransferSink {
@@ -206,21 +228,25 @@ impl TransferSink for MockSink { ... }
 ```
 
 **Orchestration Separation** (per Gemini feedback):
+
 - `sink_dataframe_in_batches` is complex orchestration
 - It should NOT move to transfer/ if it depends on ReadScanPlan (in plan/)
 - **Solution**: Keep orchestration in read.rs; transfer/ only handles data conversion
 - transfer.rs accepts DataFrame, outputs rows via TransferSink
 
 #### 7.2.1 Create transfer.rs (FLAT structure per Kimi's review)
+
 ```
 transfer.rs (~500 lines)
 ├── pub mod reader { }  # Polars → Stata conversion
 └── pub mod writer { }  # Stata → Polars conversion
 ```
+
 - **Status**: SEQUENTIAL (must be first)
 - **Depends on**: Slice 7.1 complete
 
 #### 7.2.2 Extract Reader Transfer (~400 lines from read.rs)
+
 - `TransferColumnSpec` struct
 - All `convert_*` functions (15 functions)
 - `write_numeric_column_range`, `write_string_column_range`
@@ -231,6 +257,7 @@ transfer.rs (~500 lines)
 **Can parallel with**: 7.2.3 (after 7.2.1)
 
 #### 7.2.3 Extract Writer Transfer (~300 lines from write.rs)
+
 - `ExportField` struct
 - `read_batch_from_columns`
 - `series_from_stata_column`
@@ -239,6 +266,7 @@ transfer.rs (~500 lines)
 - **Depends on**: 7.2.1 only
 
 #### 7.2.4 Refactor read.rs
+
 - Import from `transfer::reader`
 - Remove extracted code
 - Keep orchestration logic
@@ -246,6 +274,7 @@ transfer.rs (~500 lines)
 - **Depends on**: 7.2.2
 
 #### 7.2.5 Refactor write.rs
+
 - Import from `transfer::writer`
 - Remove extracted code
 - Keep orchestration logic
@@ -259,15 +288,18 @@ transfer.rs (~500 lines)
 **Objective**: Extract scan plan construction. Using flat file structure per Kimi's review.
 
 #### 7.3.1 Create plan.rs
+
 ```
 plan.rs (~300 lines)
 ├── pub mod read { }  # ReadScanPlan
 └── pub mod write { } # WriteScanPlan
 ```
+
 - **Status**: SEQUENTIAL
 - **Depends on**: Slice 7.2 complete
 
 #### 7.3.2 Extract Read Planning (~200 lines)
+
 - `ReadScanPlan`, `ReadBoundaryInputs`
 - `build_read_scan_plan`
 - `resolve_read_boundary_inputs`
@@ -277,6 +309,7 @@ plan.rs (~300 lines)
 **Can parallel with**: 7.3.3 (after 7.3.1)
 
 #### 7.3.3 Extract Write Planning (~200 lines)
+
 - `WriteScanPlan`, `WriteBoundaryInputs`
 - `build_write_scan_plan`
 - `resolve_write_boundary_inputs`
@@ -288,18 +321,22 @@ plan.rs (~300 lines)
 ### Slice 7.4: Schema and Filter (Lower Risk)
 
 #### 7.4.1 Create schema.rs
+
 ```
 schema.rs (~150 lines)
 ```
+
 - Extract `file_summary`, `set_schema_macros`
 - Extract `validate_parquet_schema`, `sample_parquet_schema`
 - **Status**: SEQUENTIAL
 - **Depends on**: Slice 7.3 complete
 
 #### 7.4.2 Create filter.rs
+
 ```
 filter.rs (~1000 lines, from if_filter.rs)
 ```
+
 - **NOTE**: `if_filter.rs` is **1056 lines** (the entire SQL translation logic)
 - Move ALL content from `if_filter.rs` to `filter.rs`, **including `convert_if_sql`**
 - **NO separate `sql_from_if.rs`**: SQL translation stays in `filter.rs` as part of consolidated module
@@ -314,12 +351,14 @@ filter.rs (~1000 lines, from if_filter.rs)
 **Objective**: Thin the entry point.
 
 #### 7.5.1 Thin Entry Point
+
 - Move argument parsing to `parse/` module
 - Target: ~200 lines in `lib.rs`
 - **Status**: SEQUENTIAL
 - **Depends on**: All previous slices complete
 
 #### 7.5.2 Command Dispatch
+
 - Extract command dispatch functions into `lib.rs` or separate into:
   - `commands.rs` (~300 lines) - Flat file with `handle_read`, `handle_write`, `handle_describe`
 - **NO nested directories** - maintain flat structure consistency
@@ -333,9 +372,11 @@ filter.rs (~1000 lines, from if_filter.rs)
 **Objective**: Add missing modules. Moved earlier per Gemini recommendation. Using flat file structure per Kimi's review.
 
 #### 7.6.1 error.rs
+
 ```
 error.rs (~80 lines)
 ```
+
 - Unified error enum using **manual `From` implementations** (no external deps)
 - **NOTE**: `thiserror` not available per "No external tooling additions" constraint
 - Stata error code mapping
@@ -343,10 +384,12 @@ error.rs (~80 lines)
 - **Status**: FOUNDATION (do first after 7.1)
 
 #### 7.6.2 config.rs
+
 ```
 config/mod.rs
 config/constants.rs
 ```
+
 - Centralize magic numbers
 - Batch size defaults
 - Thread count configurations
@@ -421,27 +464,32 @@ Phase 7.5: Library Refactoring (REQUIRED)
 ## Risk Mitigation
 
 ### Risk 1: Breaking Public API
+
 - Use `pub use` re-exports in original module files
 - Maintain function signatures exactly
 - Run integration tests after each slice
 
 ### Risk 2: Circular Dependencies
+
 - Follow: `lib.rs` → `read/write` → `transfer/plan/schema` → `utilities`
 - Keep `utilities` free of business logic
 - Use traits for cross-module communication
 
 ### Risk 3: Performance Regression
+
 - **NEW**: Run baseline benchmarks before starting
 - **NEW**: Define acceptance threshold (<5% regression)
 - Extract logic without rewriting
 - Preserve existing data flow
 
 ### Risk 4: Scope Creep
+
 - Complete each slice before starting next
 - Document decisions in code comments
 - Review after each slice for course correction
 
 ### Risk 5: Slice Failure Rollback
+
 - **NEW**: Keep extracted code in separate files from start
 - **NEW**: Use feature flags for gradual rollout if needed
 - **NEW**: Create git checkpoint after each successful slice
@@ -458,6 +506,7 @@ time StataMP-64.exe -e do dtparquet_test2.do
 ```
 
 Define acceptance:
+
 - <5% regression: Accept
 - 5-10% regression: Investigate
 - >10% regression: Rollback and re-analyze
@@ -474,6 +523,7 @@ Kimi's review suggested a simpler flat structure instead of nested directories:
 | Navigation | Complex | **Simple** |
 
 **Key simplifications (per Kimi's review):**
+
 1. `error/mod.rs + stata.rs` → `error.rs`
 2. `transfer/reader.rs + writer.rs` → `transfer.rs` (with `pub mod reader`)
 3. `plan/read.rs + write.rs` → `plan.rs`
@@ -552,6 +602,7 @@ mod tests {
 ### Policy Invariant Tests
 
 Add unit tests to verify policy invariants are preserved (per Gemini feedback):
+
 ```rust
 // In config.rs
 #[cfg(test)]
@@ -589,10 +640,10 @@ Based on subagent feedback:
 
 Based on Gemini feedback:
 
-10. **Moved Slice 7.6 earlier** - After 7.1, before 7.2 (establishes foundational types)
-11. **Fixed sql_from_if.rs reference** - Clarified SQL logic is in if_filter.rs
-12. **Added decoupling guidance** - Traits for transfer module testability
-13. **Added policy invariant tests** - Unit tests for metadata/compression policies
+1. **Moved Slice 7.6 earlier** - After 7.1, before 7.2 (establishes foundational types)
+2. **Fixed sql_from_if.rs reference** - Clarified SQL logic is in if_filter.rs
+3. **Added decoupling guidance** - Traits for transfer module testability
+4. **Added policy invariant tests** - Unit tests for metadata/compression policies
 
 ## References
 
