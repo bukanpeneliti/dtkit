@@ -194,3 +194,97 @@ pub fn parse_command(
         )),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_parquet_file(tag: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("dtparquet_{tag}_{stamp}.parquet"));
+        fs::write(&path, b"test").unwrap();
+        path
+    }
+
+    #[test]
+    fn parse_read_args_parses_full_argument_vector() {
+        let path = temp_parquet_file("parse_read_ok");
+        let path_str = path.to_string_lossy().to_string();
+        let args = vec![
+            path_str.as_str(),
+            "id value",
+            "1",
+            "500",
+            "id > 10",
+            "",
+            "rows",
+            "1",
+            "",
+            "id",
+            "0",
+            "0",
+            "2",
+            "0.25",
+            "42",
+            "2500",
+        ];
+
+        let parsed = parse_read_args(&args).unwrap();
+        match parsed {
+            CommandArgs::Read(read) => {
+                assert_eq!(read.file_path, path_str);
+                assert_eq!(read.varlist, "id value");
+                assert_eq!(read.start_row, 1);
+                assert_eq!(read.max_rows, 500);
+                assert_eq!(read.sql_if.as_deref(), Some("id > 10"));
+                assert!(matches!(read.parallel_strategy, Some(BatchMode::ByRow)));
+                assert!(read.safe_relaxed);
+                assert_eq!(read.order_by, "id");
+                assert_eq!(read.stata_offset, 2);
+                assert_eq!(read.random_share, 0.25);
+                assert_eq!(read.random_seed, 42);
+                assert_eq!(read.batch_size, 2500);
+            }
+            _ => panic!("expected read args"),
+        }
+
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn parse_read_args_rejects_missing_file() {
+        let args = vec![
+            "C:/definitely/missing/file.parquet",
+            "id",
+            "1",
+            "10",
+            "",
+            "",
+            "rows",
+            "0",
+            "",
+            "",
+            "0",
+            "0",
+            "0",
+            "0",
+            "1",
+            "1000",
+        ];
+
+        let err = parse_read_args(&args).unwrap_err();
+        assert!(matches!(err, DtparquetError::FileNotFound(_)));
+    }
+
+    #[test]
+    fn parse_command_rejects_unknown_subcommand() {
+        let err = parse_command("unknown_cmd", &[]).unwrap_err();
+        assert!(matches!(err, DtparquetError::SubcommandUnknown(_)));
+    }
+}

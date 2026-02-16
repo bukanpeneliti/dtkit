@@ -328,3 +328,36 @@ impl AdaptiveBatchTuner {
         self.selected_batch_size
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn determine_parallelization_strategy_prefers_columns_for_wide_small_data() {
+        let mode = determine_parallelization_strategy(64, 10_000, 8);
+        assert!(matches!(mode, BatchMode::ByColumn));
+
+        let mode = determine_parallelization_strategy(8, 200_000, 8);
+        assert!(matches!(mode, BatchMode::ByRow));
+    }
+
+    #[test]
+    fn calculate_adaptive_batch_size_respects_global_bounds() {
+        let batch = calculate_adaptive_batch_size(20, 256, Some(64));
+        assert!(batch >= MIN_BATCH_SIZE);
+        assert!(batch <= MAX_BATCH_SIZE);
+    }
+
+    #[test]
+    fn adaptive_batch_tuner_observe_batch_keeps_size_in_range() {
+        let mut tuner = AdaptiveBatchTuner::new(128, 5000, 0);
+        let initial = tuner.selected_batch_size();
+        let next = tuner.observe_batch(2500, 120);
+
+        assert!(next >= 1);
+        assert!(next <= tuner.memory_guardrail_rows());
+        assert!(matches!(tuner.tuning_mode(), "adaptive" | "fixed"));
+        assert!(tuner.selected_batch_size() >= tuner.row_width_bytes().min(initial).min(next));
+    }
+}

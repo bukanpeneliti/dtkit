@@ -291,3 +291,44 @@ fn has_parquet_files_in_hive_structure(dir_path: &str) -> bool {
     }
     false
 }
+
+#[cfg(test)]
+mod tests {
+    use super::verify_parquet_path;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn temp_path(tag: &str, ext: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("dtparquet_schema_{tag}_{stamp}.{ext}"))
+    }
+
+    #[test]
+    fn verify_parquet_path_false_for_missing_path() {
+        assert!(!verify_parquet_path(
+            "C:/definitely/missing/path/file.parquet"
+        ));
+    }
+
+    #[test]
+    fn verify_parquet_path_true_for_existing_file() {
+        let path = temp_path("exists", "parquet");
+        fs::write(&path, b"test").unwrap();
+        assert!(verify_parquet_path(&path.to_string_lossy()));
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn verify_parquet_path_true_for_matching_glob() {
+        let path = temp_path("glob", "parquet");
+        fs::write(&path, b"test").unwrap();
+        let dir = path.parent().unwrap();
+        let pattern = format!("{}/*.parquet", dir.to_string_lossy());
+        assert!(verify_parquet_path(&pattern));
+        fs::remove_file(path).unwrap();
+    }
+}

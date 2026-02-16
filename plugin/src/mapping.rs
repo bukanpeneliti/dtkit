@@ -103,3 +103,52 @@ pub fn stata_to_polars_type(stata_type: &str) -> DataType {
         _ => DataType::String,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn transfer_writer_kind_maps_expected_stata_types() {
+        assert_eq!(
+            transfer_writer_kind_from_stata_type("string"),
+            TransferWriterKind::String
+        );
+        assert_eq!(
+            transfer_writer_kind_from_stata_type("strl"),
+            TransferWriterKind::Strl
+        );
+        assert_eq!(
+            transfer_writer_kind_from_stata_type("date"),
+            TransferWriterKind::Date
+        );
+        assert_eq!(
+            transfer_writer_kind_from_stata_type("datetime"),
+            TransferWriterKind::Datetime
+        );
+        assert_eq!(
+            transfer_writer_kind_from_stata_type("double"),
+            TransferWriterKind::Numeric
+        );
+    }
+
+    #[test]
+    fn export_field_polars_dtype_prefers_format_over_numeric_base() {
+        assert!(matches!(
+            export_field_polars_dtype("double", "%td"),
+            DataType::Date
+        ));
+        assert!(matches!(
+            export_field_polars_dtype("long", "%tc"),
+            DataType::Datetime(_, _)
+        ));
+    }
+
+    #[test]
+    fn estimate_export_field_width_bytes_handles_strings_and_numeric() {
+        assert_eq!(estimate_export_field_width_bytes("byte", 0), 1);
+        assert_eq!(estimate_export_field_width_bytes("double", 0), 8);
+        assert_eq!(estimate_export_field_width_bytes("str10", 10), 11);
+        assert_eq!(estimate_export_field_width_bytes("strl", 0), 128);
+    }
+}
