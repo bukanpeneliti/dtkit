@@ -1,8 +1,5 @@
 pub mod read {
-    use crate::mapping::{FieldSpec, TransferWriterKind};
     use crate::transfer::TransferColumnSpec;
-    use std::collections::HashSet;
-    use std::path::Path;
 
     #[derive(Debug)]
     pub struct ReadScanPlan {
@@ -14,7 +11,7 @@ pub mod read {
 
     pub struct ReadBoundaryInputs {
         pub variables_as_str: String,
-        pub all_columns_unfiltered: Vec<FieldSpec>,
+        pub all_columns_unfiltered: Vec<crate::mapping::FieldSpec>,
         pub schema_handoff_mode: &'static str,
         pub cast_json: String,
     }
@@ -24,8 +21,6 @@ pub mod read {
 }
 
 pub mod write {
-    use crate::mapping::FieldSpec;
-
     pub struct WriteScanPlan {
         pub selected_infos: Vec<crate::write::ExportField>,
         pub start_row: usize,

@@ -1,5 +1,5 @@
 pub mod reader {
-    use crate::mapping::{FieldSpec, TransferWriterKind};
+    use crate::mapping::TransferWriterKind;
 
     #[derive(Clone, Debug)]
     pub struct TransferColumnSpec {
@@ -18,8 +18,6 @@ pub mod reader {
 }
 
 pub mod writer {
-    use crate::mapping::FieldSpec;
-
     #[derive(Clone, Debug)]
     pub struct ExportField {
         pub name: String,
