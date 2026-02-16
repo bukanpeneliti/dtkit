@@ -269,9 +269,8 @@ pub fn build_read_scan_plan(
     let all_columns: Vec<FieldSpec> = boundary_inputs
         .all_columns_unfiltered
         .iter()
-        .cloned()
-        .into_iter()
         .filter(|col_info| selected_column_names.contains(col_info.name.as_str()))
+        .cloned()
         .collect();
 
     let transfer_columns = build_transfer_columns(&all_columns);
@@ -873,7 +872,7 @@ pub fn import_parquet(
 
         if !cast_json.is_empty() {
             let cast_mapping: serde_json::Map<String, serde_json::Value> =
-                serde_json::from_str(&cast_json)?;
+                serde_json::from_str(cast_json)?;
             if let Some(serde_json::Value::Array(cols)) = cast_mapping.get("string") {
                 for col_value in cols {
                     if let serde_json::Value::String(col_name) = col_value {
@@ -933,7 +932,7 @@ pub fn import_parquet(
     let mut lf = open_parquet_scan(path, safe_relaxed, asterisk_var)?;
 
     if !cast_json.is_empty() {
-        lf = apply_cast(lf, &cast_json)?;
+        lf = apply_cast(lf, cast_json)?;
     }
     lf = normalize_categorical(&lf)?;
 
@@ -956,9 +955,8 @@ pub fn import_parquet(
     let mut batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, batch_size, 0);
 
     let mut loaded_rows = 0usize;
-    let n_batches;
 
-    if lazy_execution_uses_legacy_batches() {
+    let n_batches = if lazy_execution_uses_legacy_batches() {
         set_read_lazy_mode(ReadLazyMode::LegacyBatches);
 
         let strategy = parallel_strategy.unwrap_or_else(|| {
@@ -980,7 +978,7 @@ pub fn import_parquet(
             &mut collect_calls,
         )?;
         loaded_rows += loaded_rows_legacy;
-        n_batches = n_batches_legacy;
+        n_batches_legacy
     } else {
         set_read_lazy_mode(ReadLazyMode::SinglePass);
         let strategy = parallel_strategy.unwrap_or_else(|| {
@@ -1002,8 +1000,8 @@ pub fn import_parquet(
             &mut collect_calls,
         )?;
         loaded_rows += loaded_rows_single;
-        n_batches = n_batches_single;
-    }
+        n_batches_single
+    };
 
     finalize_read_runtime(
         n_batches,

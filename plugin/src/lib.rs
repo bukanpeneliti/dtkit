@@ -5,7 +5,6 @@ use std::slice;
 
 pub mod boundary;
 pub mod commands;
-pub mod config;
 pub mod downcast;
 pub mod error;
 pub mod filter;
