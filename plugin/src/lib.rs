@@ -3,32 +3,25 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::slice;
 
-pub mod boundary;
-pub mod commands;
 pub mod config;
 pub mod downcast;
+pub mod engine;
 pub mod error;
 pub mod filter;
-pub mod handlers;
 pub mod if_filter;
 pub mod mapping;
 pub mod metadata;
 pub mod metrics;
-pub mod parse;
-pub mod plan;
-pub mod read;
 pub mod schema;
 pub mod stata_interface;
 pub mod transfer;
 pub mod utilities;
-pub mod write;
 
-pub use commands::{
-    CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs, ReadArgs, SaveArgs,
+pub use engine::{
+    dispatch_command, parse_command, CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs,
+    ReadArgs, SaveArgs,
 };
 pub use error::DtparquetError;
-pub use handlers::dispatch_command;
-pub use parse::parse_command;
 
 use stata_interface::{display, ST_retcode};
 
