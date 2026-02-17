@@ -1,11 +1,11 @@
 use polars::prelude::*;
 use std::env;
-use std::error::Error;
 use std::fs::File;
 use std::time::Instant;
 
 use crate::config::*;
 use crate::downcast::apply_cast;
+use crate::error::DtparquetError;
 use crate::if_filter::apply_if_filter;
 use crate::metrics::*;
 use crate::plan::read::*;
@@ -20,7 +20,7 @@ fn apply_random_sample(
     random_share: f64,
     random_seed: u64,
     collect_calls: &mut usize,
-) -> Result<LazyFrame, Box<dyn Error>> {
+) -> Result<LazyFrame, DtparquetError> {
     if random_share <= 0.0 {
         return Ok(lf);
     }
@@ -201,15 +201,18 @@ struct ReadEngineOutput {
     batch_tuner: AdaptiveBatchTuner,
 }
 
-fn resolve_inputs_stage(request: ReadRequest<'_>) -> Result<ReadBoundaryInputs, Box<dyn Error>> {
-    resolve_read_boundary_inputs(request.variables_as_str, request.mapping)
+fn resolve_inputs_stage(request: ReadRequest<'_>) -> Result<ReadBoundaryInputs, DtparquetError> {
+    Ok(resolve_read_boundary_inputs(
+        request.variables_as_str,
+        request.mapping,
+    )?)
 }
 
 fn build_plan_stage(
     request: ReadRequest<'_>,
     boundary_inputs: &ReadBoundaryInputs,
-) -> Result<ReadScanPlan, Box<dyn Error>> {
-    build_read_scan_plan(
+) -> Result<ReadScanPlan, DtparquetError> {
+    Ok(build_read_scan_plan(
         request.path,
         boundary_inputs,
         request.safe_relaxed,
@@ -217,7 +220,7 @@ fn build_plan_stage(
         request.sql_if,
         request.order_by,
         request.random_share,
-    )
+    )?)
 }
 
 fn execute_engine_stage(
@@ -226,7 +229,7 @@ fn execute_engine_stage(
     plan: ReadScanPlan,
     collect_calls: &mut usize,
     processed_batches: &mut usize,
-) -> Result<ReadEngineOutput, Box<dyn Error>> {
+) -> Result<ReadEngineOutput, DtparquetError> {
     let path = request.path;
     let n_rows = request.n_rows;
     let offset = request.offset;
@@ -407,7 +410,7 @@ fn execute_engine_stage(
     })
 }
 
-pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn Error>> {
+pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, DtparquetError> {
     let request = *request;
 
     let started_at = Instant::now();

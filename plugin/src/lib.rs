@@ -79,8 +79,8 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
         let subfunction_name = args[0];
         let subfunction_args = &args[1..];
 
-        match parse_command(subfunction_name, subfunction_args) {
-            Ok(cmd) => dispatch_command(cmd),
+        match parse_command(subfunction_name, subfunction_args).and_then(dispatch_command) {
+            Ok(code) => code,
             Err(e) => {
                 display(&e.display_msg());
                 e.to_retcode()

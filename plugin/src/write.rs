@@ -1,10 +1,10 @@
 use polars::prelude::*;
-use std::error::Error;
 use std::fs::create_dir_all;
 use std::io::ErrorKind;
 use std::path::Path;
 use std::time::Instant;
 
+use crate::error::DtparquetError;
 use crate::if_filter::compile_if_expr;
 use crate::metrics::*;
 use crate::plan::write::*;
@@ -51,7 +51,7 @@ fn set_if_filter_mode(mode: WriteFilterMode) {
 
 fn compile_write_filter(
     sql_if: Option<&str>,
-) -> Result<(Option<Expr>, WriteFilterMode), Box<dyn Error>> {
+) -> Result<(Option<Expr>, WriteFilterMode), DtparquetError> {
     match sql_if.filter(|s| !s.trim().is_empty()) {
         Some(raw) => Ok((Some(compile_if_expr(raw)?), WriteFilterMode::Expr)),
         None => Ok((None, WriteFilterMode::None)),
@@ -61,7 +61,7 @@ fn compile_write_filter(
 fn build_write_source(
     plan: &WriteScanPlan,
     batch_size: usize,
-) -> Result<(Arc<StataRowSource>, LazyFrame), Box<dyn Error>> {
+) -> Result<(Arc<StataRowSource>, LazyFrame), DtparquetError> {
     let scan = Arc::new(StataRowSource::new(
         plan.selected_infos.clone(),
         plan.start_row,
@@ -76,7 +76,7 @@ fn build_write_source(
 fn apply_write_filter(
     lf: LazyFrame,
     sql_if: Option<&str>,
-) -> Result<(LazyFrame, WriteFilterMode), Box<dyn Error>> {
+) -> Result<(LazyFrame, WriteFilterMode), DtparquetError> {
     let (filter_expr, filter_mode) = compile_write_filter(sql_if)?;
     let filtered = match filter_expr {
         Some(expr) => lf.filter(expr),
@@ -93,7 +93,7 @@ fn sink_write_plan(
     overwrite_partition: bool,
     plan: &WriteScanPlan,
     collect_calls: &mut usize,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), DtparquetError> {
     if plan.partition_cols.is_empty() {
         write_single_dataframe(
             path,
@@ -122,8 +122,10 @@ fn sink_write_plan(
 fn resolve_inputs_stage(
     varlist: &str,
     mapping: &str,
-) -> Result<WriteBoundaryInputs, Box<dyn Error>> {
-    crate::plan::write::resolve_write_boundary_inputs(varlist, mapping)
+) -> Result<WriteBoundaryInputs, DtparquetError> {
+    Ok(crate::plan::write::resolve_write_boundary_inputs(
+        varlist, mapping,
+    )?)
 }
 
 fn build_plan_stage(
@@ -131,15 +133,20 @@ fn build_plan_stage(
     n_rows: usize,
     offset: usize,
     partition_by: &str,
-) -> Result<WriteScanPlan, Box<dyn Error>> {
-    crate::plan::write::build_write_scan_plan(boundary_inputs, n_rows, offset, partition_by)
+) -> Result<WriteScanPlan, DtparquetError> {
+    Ok(crate::plan::write::build_write_scan_plan(
+        boundary_inputs,
+        n_rows,
+        offset,
+        partition_by,
+    )?)
 }
 
 fn execute_engine_stage(
     request: WriteRequest<'_>,
     plan: &WriteScanPlan,
     collect_calls: &mut usize,
-) -> Result<Arc<StataRowSource>, Box<dyn Error>> {
+) -> Result<Arc<StataRowSource>, DtparquetError> {
     let (scan, lf) = build_write_source(plan, request.batch_size)?;
     let (lf, filter_mode) = apply_write_filter(lf, request.sql_if)?;
     set_if_filter_mode(filter_mode);
@@ -175,7 +182,7 @@ pub struct WriteRequest<'a> {
     pub batch_size: usize,
 }
 
-pub fn export_parquet_request(request: &WriteRequest<'_>) -> Result<i32, Box<dyn Error>> {
+pub fn export_parquet_request(request: &WriteRequest<'_>) -> Result<i32, DtparquetError> {
     let request = *request;
     let varlist = request.varlist;
     let n_rows = request.n_rows;
@@ -347,7 +354,7 @@ fn write_single_dataframe(
     overwrite_partition: bool,
     dtmeta_json: &str,
     collect_calls: &mut usize,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), DtparquetError> {
     let out_path = Path::new(path);
 
     if out_path.exists() && !overwrite_partition {
@@ -364,7 +371,7 @@ fn write_single_dataframe(
         match std::fs::remove_file(out_path) {
             Ok(()) => {}
             Err(e) if e.kind() == ErrorKind::NotFound => {}
-            Err(e) => return Err(Box::new(e)),
+            Err(e) => return Err(e.into()),
         }
     }
 
@@ -406,7 +413,7 @@ fn write_partitioned_dataframe(
     partition_by: &[PlSmallStr],
     overwrite_partition: bool,
     dtmeta_json: &str,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), DtparquetError> {
     let out_path = Path::new(path);
 
     if out_path.exists() {
@@ -448,9 +455,11 @@ fn write_partitioned_dataframe(
 fn parquet_compression(
     compression: &str,
     compression_level: Option<usize>,
-) -> Result<ParquetCompression, Box<dyn Error>> {
+) -> Result<ParquetCompression, DtparquetError> {
     if compression_level.is_some() {
-        return Err("compression levels are not supported; pass -1".into());
+        return Err(DtparquetError::Custom(
+            "compression levels are not supported; pass -1".to_string(),
+        ));
     }
 
     match compression {

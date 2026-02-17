@@ -1,4 +1,5 @@
 use crate::stata_interface::ST_retcode;
+use std::error::Error as StdError;
 
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum DtparquetError {
@@ -54,9 +55,27 @@ impl From<polars::error::PolarsError> for DtparquetError {
     }
 }
 
+impl From<serde_json::Error> for DtparquetError {
+    fn from(err: serde_json::Error) -> Self {
+        DtparquetError::Custom(err.to_string())
+    }
+}
+
 impl From<String> for DtparquetError {
     fn from(s: String) -> Self {
         DtparquetError::Custom(s)
+    }
+}
+
+impl From<Box<dyn StdError>> for DtparquetError {
+    fn from(err: Box<dyn StdError>) -> Self {
+        DtparquetError::Custom(err.to_string())
+    }
+}
+
+impl From<crate::filter::FilterError> for DtparquetError {
+    fn from(err: crate::filter::FilterError) -> Self {
+        DtparquetError::Custom(err.to_string())
     }
 }
 
@@ -151,6 +170,24 @@ mod tests {
 
         assert!(matches!(
             DtparquetError::from("x".to_string()),
+            DtparquetError::Custom(_)
+        ));
+
+        let json_error = serde_json::from_str::<serde_json::Value>("{").unwrap_err();
+        assert!(matches!(
+            DtparquetError::from(json_error),
+            DtparquetError::Custom(_)
+        ));
+
+        let boxed: Box<dyn std::error::Error> = Box::new(std::io::Error::other("boxed"));
+        assert!(matches!(
+            DtparquetError::from(boxed),
+            DtparquetError::Custom(_)
+        ));
+
+        let filter_error = crate::filter::compile_if_expr("Missing(age)").unwrap_err();
+        assert!(matches!(
+            DtparquetError::from(filter_error),
             DtparquetError::Custom(_)
         ));
     }

@@ -1,15 +1,16 @@
 use crate::commands::{
     CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs, ReadArgs, SaveArgs,
 };
+use crate::error::DtparquetError;
 use crate::metadata;
 use crate::read;
 use crate::schema;
 use crate::stata_interface::{display, set_macro, ST_retcode};
 use crate::write;
 
-fn handle_setup_check() -> ST_retcode {
+fn handle_setup_check() -> Result<ST_retcode, DtparquetError> {
     display("dtparquet Rust plugin loaded successfully");
-    0
+    Ok(0)
 }
 
 fn build_read_request(args: &ReadArgs) -> read::ReadRequest<'_> {
@@ -33,17 +34,9 @@ fn build_read_request(args: &ReadArgs) -> read::ReadRequest<'_> {
     }
 }
 
-fn handle_read(args: &ReadArgs) -> ST_retcode {
+fn handle_read(args: &ReadArgs) -> Result<ST_retcode, DtparquetError> {
     let request = build_read_request(args);
-    let read_result = read::import_parquet_request(&request);
-
-    match read_result {
-        Ok(code) => code,
-        Err(e) => {
-            display(&format!("Error reading the file = {:?}", e));
-            198
-        }
-    }
+    read::import_parquet_request(&request)
 }
 
 fn build_write_request(args: &SaveArgs) -> write::WriteRequest<'_> {
@@ -65,21 +58,13 @@ fn build_write_request(args: &SaveArgs) -> write::WriteRequest<'_> {
     }
 }
 
-fn handle_save(args: &SaveArgs) -> ST_retcode {
+fn handle_save(args: &SaveArgs) -> Result<ST_retcode, DtparquetError> {
     let request = build_write_request(args);
-    let save_result = write::export_parquet_request(&request);
-
-    match save_result {
-        Ok(code) => code,
-        Err(e) => {
-            display(&format!("Error writing parquet file = {:?}", e));
-            198
-        }
-    }
+    write::export_parquet_request(&request)
 }
 
-fn handle_describe(args: &DescribeArgs) -> ST_retcode {
-    schema::file_summary(
+fn handle_describe(args: &DescribeArgs) -> Result<ST_retcode, DtparquetError> {
+    Ok(schema::file_summary(
         &args.file_path,
         args.detailed,
         args.memory_savvy,
@@ -88,23 +73,16 @@ fn handle_describe(args: &DescribeArgs) -> ST_retcode {
         args.asterisk_to_variable_name.as_deref(),
         args.compress,
         args.compress_string_to_numeric,
-    )
+    ))
 }
 
-fn handle_has_metadata_key(args: &HasMetadataKeyArgs) -> ST_retcode {
-    match metadata::has_parquet_metadata_key(&args.file_path, &args.key) {
-        Ok(found) => {
-            set_macro("has_metadata_key", if found { "1" } else { "0" }, false);
-            0
-        }
-        Err(e) => {
-            display(&format!("Error checking metadata key = {:?}", e));
-            198
-        }
-    }
+fn handle_has_metadata_key(args: &HasMetadataKeyArgs) -> Result<ST_retcode, DtparquetError> {
+    let found = metadata::has_parquet_metadata_key(&args.file_path, &args.key)?;
+    set_macro("has_metadata_key", if found { "1" } else { "0" }, false);
+    Ok(0)
 }
 
-fn handle_load_meta(args: &LoadMetaArgs) -> ST_retcode {
+fn handle_load_meta(args: &LoadMetaArgs) -> Result<ST_retcode, DtparquetError> {
     if let Some(meta) = metadata::load_dtmeta_from_parquet(&args.file_path) {
         metadata::expose_dtmeta_to_macros(&meta);
         set_macro("dtmeta_loaded", "1", false);
@@ -119,10 +97,10 @@ fn handle_load_meta(args: &LoadMetaArgs) -> ST_retcode {
         set_macro("dtmeta_dta_note_count", "0", false);
         set_macro("dtmeta_var_note_count", "0", false);
     }
-    0
+    Ok(0)
 }
 
-pub fn dispatch_command(cmd: CommandArgs) -> ST_retcode {
+pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> {
     match cmd {
         CommandArgs::SetupCheck => handle_setup_check(),
         CommandArgs::Read(args) => handle_read(&args),
