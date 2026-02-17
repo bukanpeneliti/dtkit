@@ -34,6 +34,13 @@ use stata_interface::{display, ST_retcode};
 
 pub use config::SCHEMA_HANDOFF_PROTOCOL_VERSION;
 
+fn execute_subcommand(
+    subfunction_name: &str,
+    subfunction_args: &[&str],
+) -> Result<ST_retcode, DtparquetError> {
+    parse_command(subfunction_name, subfunction_args).and_then(dispatch_command)
+}
+
 #[no_mangle]
 pub static mut _stata_: *mut stata_sys::ST_plugin = ptr::null_mut();
 
@@ -79,7 +86,7 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
         let subfunction_name = args[0];
         let subfunction_args = &args[1..];
 
-        match parse_command(subfunction_name, subfunction_args).and_then(dispatch_command) {
+        match execute_subcommand(subfunction_name, subfunction_args) {
             Ok(code) => code,
             Err(e) => {
                 display(&e.display_msg());
@@ -91,4 +98,35 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
         display("Panic occurred in dtparquet plugin");
         198
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn execute_subcommand_preserves_parse_errors() {
+        let err = execute_subcommand("unknown_subcommand", &[]).unwrap_err();
+        assert!(matches!(err, DtparquetError::SubcommandUnknown(_)));
+        assert_eq!(err.to_retcode(), 198);
+    }
+
+    #[test]
+    fn execute_subcommand_preserves_file_not_found_contract() {
+        let err = execute_subcommand(
+            "describe",
+            &[
+                "C:/definitely/missing/file.parquet",
+                "0",
+                "0",
+                "",
+                "",
+                "0",
+                "0",
+            ],
+        )
+        .unwrap_err();
+        assert!(matches!(err, DtparquetError::FileNotFound(_)));
+        assert_eq!(err.to_retcode(), 601);
+    }
 }

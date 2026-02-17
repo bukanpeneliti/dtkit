@@ -193,4 +193,16 @@ mod tests {
         assert!(request.compress_string);
         assert_eq!(request.batch_size, 4096);
     }
+
+    #[test]
+    fn dispatch_propagates_typed_error_for_metadata_lookup_failures() {
+        let cmd = CommandArgs::HasMetadataKey(HasMetadataKeyArgs {
+            file_path: "C:/definitely/missing/file.parquet".to_string(),
+            key: "dtparquet.dtmeta".to_string(),
+        });
+
+        let err = dispatch_command(cmd).unwrap_err();
+        assert_eq!(err.to_retcode(), 198);
+        assert!(matches!(err, DtparquetError::Custom(_)));
+    }
 }
