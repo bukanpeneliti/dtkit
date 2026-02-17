@@ -87,7 +87,7 @@ pub mod read {
             .cloned()
             .collect();
 
-        let transfer_columns = crate::transfer::reader::build_transfer_columns(&all_columns);
+        let transfer_columns = crate::transfer::build_transfer_columns(&all_columns);
         let can_use_eager = Path::new(path).is_file()
             && !path.contains('*')
             && !path.contains('?')
@@ -330,7 +330,7 @@ pub mod write {
         let selected_vars = boundary_inputs.selected_vars.as_str();
         let all_columns = boundary_inputs.all_columns.clone();
 
-        crate::transfer::writer::validate_stata_schema(&all_columns)?;
+        crate::transfer::validate_stata_schema(&all_columns)?;
 
         let info_by_name: HashMap<&str, &ExportField> = all_columns
             .iter()

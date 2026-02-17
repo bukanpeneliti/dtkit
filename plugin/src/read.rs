@@ -10,7 +10,7 @@ use crate::if_filter::apply_if_filter;
 use crate::metrics::*;
 use crate::plan::read::*;
 use crate::stata_interface::{reset_transfer_metrics, set_macro};
-use crate::transfer::reader::*;
+use crate::transfer::*;
 use crate::utilities::{get_compute_thread_pool, warm_thread_pools, AdaptiveBatchTuner, BatchMode};
 
 // --- Transformation Logic ---
@@ -81,7 +81,7 @@ pub fn sink_dataframe_in_batches(
     batch_tuner: &mut AdaptiveBatchTuner,
     processed_batches: &mut usize,
 ) -> PolarsResult<(usize, usize)> {
-    crate::transfer::reader::sink_dataframe_in_batches(
+    crate::transfer::sink_dataframe_in_batches(
         df,
         start_index_base,
         transfer_columns,
@@ -122,7 +122,7 @@ fn run_lazy_legacy_batches(
         }
 
         let _batch_started_at = Instant::now();
-        crate::transfer::reader::sink_dataframe_in_batches(
+        crate::transfer::sink_dataframe_in_batches(
             &batch_df,
             batch_offset - batch_source_offset,
             transfer_columns,
@@ -297,8 +297,7 @@ fn execute_engine_stage(
             df.try_apply(&col_name, |s| s.cast(&DataType::String))?;
         }
 
-        let row_width_bytes =
-            crate::transfer::reader::estimate_transfer_row_width_bytes(&transfer_columns);
+        let row_width_bytes = crate::transfer::estimate_transfer_row_width_bytes(&transfer_columns);
         let mut batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, batch_size, 0);
 
         let n_threads = get_compute_thread_pool().current_num_threads().max(1);
@@ -350,8 +349,7 @@ fn execute_engine_stage(
     let use_streaming = n_rows > 1_000_000;
     let columns: Vec<Expr> = selected_column_list.iter().map(|s| col(*s)).collect();
     let n_threads = get_compute_thread_pool().current_num_threads().max(1);
-    let row_width_bytes =
-        crate::transfer::reader::estimate_transfer_row_width_bytes(&transfer_columns);
+    let row_width_bytes = crate::transfer::estimate_transfer_row_width_bytes(&transfer_columns);
     let mut batch_tuner = AdaptiveBatchTuner::new(row_width_bytes, batch_size, 0);
 
     let mut total_loaded = 0usize;

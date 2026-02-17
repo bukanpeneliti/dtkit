@@ -9,7 +9,7 @@ use crate::if_filter::compile_if_expr;
 use crate::metrics::*;
 use crate::plan::write::*;
 use crate::stata_interface::{display, reset_transfer_metrics, set_macro};
-use crate::transfer::writer::*;
+use crate::transfer::*;
 use crate::utilities::{warm_thread_pools, write_pipeline_mode, WritePipelineMode};
 
 // --- Execution Orchestration ---
