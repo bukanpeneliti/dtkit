@@ -31,12 +31,12 @@ use filter_impl_lang::{
 };
 
 pub fn convert_if_sql(input: &str) -> String {
-    FilterTranslator::new().translate(input)
+    translate_filter_syntax(input)
 }
 
 pub fn compile_if_expr(input: &str) -> Result<Expr, FilterError> {
-    let expr = parse_bool_expr(input);
-    compile_bool_expr(&expr).ok_or_else(|| FilterError::unsupported(input.trim()))
+    let parsed = parse_filter_syntax(input);
+    compile_filter_semantics(&parsed).ok_or_else(|| FilterError::unsupported(input.trim()))
 }
 
 pub fn apply_if_filter(
@@ -47,6 +47,18 @@ pub fn apply_if_filter(
         Some(raw) => Ok((lf.filter(compile_if_expr(raw)?), true)),
         None => Ok((lf, false)),
     }
+}
+
+fn translate_filter_syntax(input: &str) -> String {
+    FilterTranslator::new().translate(input)
+}
+
+fn parse_filter_syntax(input: &str) -> BoolExpr {
+    parse_bool_expr(input)
+}
+
+fn compile_filter_semantics(expr: &BoolExpr) -> Option<Expr> {
+    compile_bool_expr(expr)
 }
 
 fn compile_bool_expr(expr: &BoolExpr) -> Option<Expr> {
@@ -272,7 +284,8 @@ fn is_identifier_name(input: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{compile_if_expr, convert_if_sql};
+    use super::{apply_if_filter, compile_if_expr, convert_if_sql};
+    use polars::prelude::{DataFrame, IntoLazy, NamedFrom, Series};
 
     fn assert_translation(input: &str, expected: &str) {
         assert_eq!(convert_if_sql(input), expected, "input: {input}");
@@ -370,5 +383,30 @@ mod tests {
     fn errors_when_expr_compiler_cannot_compile() {
         assert!(compile_if_expr("mod(id, 2) == 0").is_err());
         assert!(compile_if_expr("Missing(age)").is_err());
+    }
+
+    #[test]
+    fn apply_if_filter_sets_presence_flag_and_filters_rows() {
+        let df = DataFrame::new(vec![
+            Series::new("year".into(), vec![2010, 2015, 2020]).into()
+        ])
+        .unwrap();
+
+        let (filtered, has_filter) = apply_if_filter(df.lazy(), Some("year > 2012")).unwrap();
+        let collected = filtered.collect().unwrap();
+
+        assert!(has_filter);
+        assert_eq!(collected.height(), 2);
+    }
+
+    #[test]
+    fn apply_if_filter_returns_noop_for_empty_expression() {
+        let df = DataFrame::new(vec![Series::new("x".into(), vec![1, 2, 3]).into()]).unwrap();
+
+        let (filtered, has_filter) = apply_if_filter(df.lazy(), Some("   ")).unwrap();
+        let collected = filtered.collect().unwrap();
+
+        assert!(!has_filter);
+        assert_eq!(collected.height(), 3);
     }
 }

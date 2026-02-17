@@ -563,6 +563,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stata-sys",
+ "thiserror",
  "walkdir",
 ]
 
