@@ -28,6 +28,7 @@ pub struct SaveArgs {
     pub max_rows: usize,
     pub sql_if: Option<String>,
     pub sort_by: String,
+    pub partition_by: String,
     pub compression_codec: String,
     pub compression_level: Option<usize>,
     pub include_labels: bool,

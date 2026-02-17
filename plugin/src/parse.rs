@@ -112,7 +112,8 @@ pub fn parse_save_args(args: &[&str]) -> ParseResult<CommandArgs> {
             Some(args[4].to_string())
         },
         sort_by: args[5].to_string(),
-        compression_codec: args[6].to_string(),
+        partition_by: args[6].to_string(),
+        compression_codec: args[7].to_string(),
         compression_level,
         include_labels: args[9] == "1",
         include_notes: args[10] == "1",
@@ -286,5 +287,69 @@ mod tests {
     fn parse_command_rejects_unknown_subcommand() {
         let err = parse_command("unknown_cmd", &[]).unwrap_err();
         assert!(matches!(err, DtparquetError::SubcommandUnknown(_)));
+    }
+
+    #[test]
+    fn parse_save_args_parses_argument_vector_shape() {
+        let args = vec![
+            "out.parquet",
+            "id value",
+            "10",
+            "20",
+            "id > 0",
+            "from_macros",
+            "partition_col",
+            "gzip",
+            "-1",
+            "1",
+            "0",
+            "1",
+            "4096",
+        ];
+
+        let parsed = parse_save_args(&args).unwrap();
+        match parsed {
+            CommandArgs::Save(save) => {
+                assert_eq!(save.file_path, "out.parquet");
+                assert_eq!(save.varlist, "id value");
+                assert_eq!(save.start_row, 10);
+                assert_eq!(save.max_rows, 20);
+                assert_eq!(save.sql_if.as_deref(), Some("id > 0"));
+                assert_eq!(save.sort_by, "from_macros");
+                assert_eq!(save.partition_by, "partition_col");
+                assert_eq!(save.compression_codec, "gzip");
+                assert_eq!(save.compression_level, None);
+                assert!(save.include_labels);
+                assert!(!save.include_notes);
+                assert!(save.overwrite);
+                assert_eq!(save.batch_size, 4096);
+            }
+            _ => panic!("expected save args"),
+        }
+    }
+
+    #[test]
+    fn parse_save_args_rejects_invalid_compression_level() {
+        let args = vec![
+            "out.parquet",
+            "*",
+            "0",
+            "0",
+            "",
+            "from_macros",
+            "",
+            "zstd",
+            "not_a_number",
+            "1",
+            "0",
+            "0",
+            "1024",
+        ];
+
+        let err = parse_save_args(&args).unwrap_err();
+        assert!(matches!(
+            err,
+            DtparquetError::InvalidArg("compression_level", _)
+        ));
     }
 }

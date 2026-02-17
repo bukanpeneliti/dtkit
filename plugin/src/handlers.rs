@@ -50,7 +50,7 @@ fn handle_save(args: &SaveArgs) -> ST_retcode {
         args.sql_if.as_deref(),
         &args.sort_by,
         None,
-        &args.compression_codec,
+        &args.partition_by,
         &args.compression_codec,
         args.compression_level,
         args.include_labels,
