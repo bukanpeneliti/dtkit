@@ -32,13 +32,8 @@ pub const ENV_BATCH_MIN_ROWS: &str = "DTPARQUET_BATCH_MIN_ROWS";
 pub const ENV_BATCH_MAX_ROWS: &str = "DTPARQUET_BATCH_MAX_ROWS";
 pub const ENV_BATCH_TARGET_MS: &str = "DTPARQUET_BATCH_TARGET_MS";
 pub const ENV_WRITE_PIPELINE_MODE: &str = "DTPARQUET_WRITE_PIPELINE_MODE";
-pub const ENV_WRITE_PIPELINE_QUEUE_CAPACITY: &str = "DTPARQUET_WRITE_PIPELINE_QUEUE_CAPACITY";
-pub const ENV_WRITE_PIPELINE_MIN_ROWS: &str = "DTPARQUET_WRITE_PIPELINE_MIN_ROWS";
 pub const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
 
-pub const DEFAULT_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 8;
-pub const MAX_WRITE_PIPELINE_QUEUE_CAPACITY: usize = 32;
-pub const DEFAULT_WRITE_PIPELINE_MIN_ROWS: usize = 20_000;
 pub const DEFAULT_MEMORY_BUDGET_MB: usize = 512;
 pub const ROW_ESTIMATE_BYTES: usize = 64;
 pub const MIN_BATCH_SIZE: usize = 1_000;
@@ -63,7 +58,7 @@ static TRANSFER_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_CONVERSION_FAILURES: AtomicU64 = AtomicU64::new(0);
 
 pub fn reset_transfer_metrics() {
-    [
+    let a = [
         &REPLACE_NUMBER_CALLS,
         &REPLACE_STRING_CALLS,
         &PULL_NUMERIC_CALLS,
@@ -73,9 +68,10 @@ pub fn reset_transfer_metrics() {
         &STRL_BINARY_EVENTS,
         &TRANSFER_FALLBACK_CALLS,
         &TRANSFER_CONVERSION_FAILURES,
-    ]
-    .iter()
-    .for_each(|a| a.store(0, Ordering::Relaxed));
+    ];
+    for m in a {
+        m.store(0, Ordering::Relaxed);
+    }
 }
 
 pub fn publish_transfer_metrics(prefix: &str) {
@@ -499,54 +495,50 @@ impl CommonBatchTunerMetrics {
 
 #[derive(Clone, Debug)]
 pub struct AdaptiveBatchTuner {
-    min_batch: usize,
-    max_batch: usize,
-    row_width: usize,
-    mem_rows: usize,
+    min_b: usize,
+    max_b: usize,
+    row_w: usize,
+    mem_r: usize,
     target_ms: f64,
-    curr_batch: usize,
+    curr_b: usize,
     smoothed_rpms: f64,
     adjustments: usize,
     autotune: bool,
 }
 
 impl AdaptiveBatchTuner {
-    pub fn new(row_width: usize, conf_batch: usize, def_batch: usize) -> Self {
-        let row_width = row_width.max(1);
-        let budget_mb = get_env_u(ENV_BATCH_MEMORY_MB)
+    pub fn new(row_w: usize, conf_b: usize, def_b: usize) -> Self {
+        let rw = row_w.max(1);
+        let bmb = get_env_u(ENV_BATCH_MEMORY_MB)
             .unwrap_or(DEFAULT_MEMORY_BUDGET_MB)
             .max(1);
-        let mem_rows = (budget_mb * 1024 * 1024 / row_width).max(1);
-        let max_b = get_env_u(ENV_BATCH_MAX_ROWS)
+        let mr = (bmb * 1024 * 1024 / rw).max(1);
+        let maxb = get_env_u(ENV_BATCH_MAX_ROWS)
             .unwrap_or(DEFAULT_BATCH_MAX_ROWS)
-            .min(mem_rows)
-            .min(if conf_batch == 0 {
-                usize::MAX
-            } else {
-                conf_batch
-            })
+            .min(mr)
+            .min(if conf_b == 0 { usize::MAX } else { conf_b })
             .max(1);
-        let min_b = get_env_u(ENV_BATCH_MIN_ROWS)
+        let minb = get_env_u(ENV_BATCH_MIN_ROWS)
             .unwrap_or(DEFAULT_BATCH_MIN_ROWS)
-            .min(max_b)
+            .min(maxb)
             .max(1);
-        let seed = (budget_mb * 1024 * 1024 / row_width.max(ROW_ESTIMATE_BYTES / 10))
+        let seed = (bmb * 1024 * 1024 / rw.max(ROW_ESTIMATE_BYTES / 10))
             .clamp(MIN_BATCH_SIZE, MAX_BATCH_SIZE);
-        let start_b = (if conf_batch > 0 {
-            conf_batch
-        } else if def_batch > 0 {
-            seed.max(def_batch)
+        let startb = (if conf_b > 0 {
+            conf_b
+        } else if def_b > 0 {
+            seed.max(def_b)
         } else {
             seed
         })
-        .clamp(min_b, max_b);
+        .clamp(minb, maxb);
         Self {
-            min_batch: min_b,
-            max_batch: max_b,
-            row_width,
-            mem_rows,
+            min_b: minb,
+            max_b: maxb,
+            row_w: rw,
+            mem_r: mr,
             target_ms: get_env_u(ENV_BATCH_TARGET_MS).unwrap_or(DEFAULT_BATCH_TARGET_MS) as f64,
-            curr_batch: start_b,
+            curr_b: startb,
             smoothed_rpms: 0.0,
             adjustments: 0,
             autotune: env::var(ENV_BATCH_AUTOTUNE_MODE)
@@ -560,13 +552,13 @@ impl AdaptiveBatchTuner {
         }
     }
     pub fn selected_batch_size(&self) -> usize {
-        self.curr_batch
+        self.curr_b
     }
     pub fn row_width_bytes(&self) -> usize {
-        self.row_width
+        self.row_w
     }
     pub fn memory_guardrail_rows(&self) -> usize {
-        self.mem_rows
+        self.mem_r
     }
     pub fn tuning_adjustments(&self) -> usize {
         self.adjustments
@@ -580,7 +572,7 @@ impl AdaptiveBatchTuner {
     }
     pub fn observe_batch(&mut self, rows: usize, ms: u128) -> usize {
         if rows == 0 || !self.autotune {
-            return self.curr_batch;
+            return self.curr_b;
         }
         let rpms = rows as f64 / (ms as f64).max(1.0);
         self.smoothed_rpms = if self.smoothed_rpms == 0.0 {
@@ -589,7 +581,7 @@ impl AdaptiveBatchTuner {
             self.smoothed_rpms * 0.7 + rpms * 0.3
         };
         let target = (self.smoothed_rpms * self.target_ms).round() as usize;
-        let mut next = (self.curr_batch * 3 + target) / 4;
+        let mut next = (self.curr_b * 3 + target) / 4;
         if ms as f64 > self.target_ms * 1.35 {
             next = next * 9 / 10;
         } else if (ms as f64) < self.target_ms * 0.65 {
@@ -603,12 +595,12 @@ impl AdaptiveBatchTuner {
             100
         };
         let rounded = ((next + unit / 2) / unit).max(1) * unit;
-        let clamped = rounded.clamp(self.min_batch, self.max_batch);
-        if clamped != self.curr_batch {
+        let clamped = rounded.clamp(self.min_b, self.max_b);
+        if clamped != self.curr_b {
             self.adjustments += 1;
-            self.curr_batch = clamped;
+            self.curr_b = clamped;
         }
-        self.curr_batch
+        self.curr_b
     }
 }
 
@@ -656,9 +648,9 @@ pub struct VarNoteMeta {
 }
 
 pub fn extract_dtmeta() -> String {
-    let get_u = |n: &str| read_macro(n, false, None).parse().unwrap_or(0usize);
-    let get_i = |n: &str| read_macro(n, false, None).parse().unwrap_or(0i64);
-    let vars = (1..=get_u("dtmeta_var_count"))
+    let vars = (1..=read_macro("dtmeta_var_count", false, None)
+        .parse()
+        .unwrap_or(0usize))
         .map(|i| VarMeta {
             name: read_macro(&format!("dtmeta_varname_{i}"), false, None),
             stata_type: read_macro(&format!("dtmeta_vartype_{i}"), false, None),
@@ -667,10 +659,14 @@ pub fn extract_dtmeta() -> String {
             value_label: read_macro(&format!("dtmeta_vallab_{i}"), false, None),
         })
         .collect();
-    let labels = (1..=get_u("dtmeta_label_count"))
+    let labels = (1..=read_macro("dtmeta_label_count", false, None)
+        .parse()
+        .unwrap_or(0usize))
         .map(|i| ValueLabelMeta {
             name: read_macro(&format!("dtmeta_label_name_{i}"), false, None),
-            value: get_i(&format!("dtmeta_label_value_{i}")),
+            value: read_macro(&format!("dtmeta_label_value_{i}"), false, None)
+                .parse()
+                .unwrap_or(0),
             text: read_macro(&format!("dtmeta_label_text_{i}"), false, Some(65536)),
         })
         .collect();
@@ -680,13 +676,21 @@ pub fn extract_dtmeta() -> String {
         vars,
         value_labels: labels,
         dta_label: read_macro("dtmeta_dta_label", false, Some(65536)),
-        dta_obs: get_i("dtmeta_dta_obs"),
-        dta_vars: get_i("dtmeta_dta_vars"),
+        dta_obs: read_macro("dtmeta_dta_obs", false, None)
+            .parse()
+            .unwrap_or(0),
+        dta_vars: read_macro("dtmeta_dta_vars", false, None)
+            .parse()
+            .unwrap_or(0),
         dta_ts: read_macro("dtmeta_dta_ts", false, Some(65536)),
-        dta_notes: (1..=get_u("dtmeta_dta_note_count"))
+        dta_notes: (1..=read_macro("dtmeta_dta_note_count", false, None)
+            .parse()
+            .unwrap_or(0usize))
             .map(|i| read_macro(&format!("dtmeta_dta_note_{i}"), false, Some(65536)))
             .collect(),
-        var_notes: (1..=get_u("dtmeta_var_note_count"))
+        var_notes: (1..=read_macro("dtmeta_var_note_count", false, None)
+            .parse()
+            .unwrap_or(0usize))
             .map(|i| VarNoteMeta {
                 varname: read_macro(&format!("dtmeta_var_note_var_{i}"), false, None),
                 text: read_macro(&format!("dtmeta_var_note_text_{i}"), false, Some(65536)),

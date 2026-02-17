@@ -3,11 +3,9 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::slice;
 
-pub mod downcast;
 pub mod engine;
 pub mod error;
 pub mod filter;
-pub mod if_filter;
 pub mod logic;
 pub mod transfer;
 

@@ -12,9 +12,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::downcast::apply_cast;
 use crate::error::DtparquetError;
-use crate::if_filter::{apply_if_filter, compile_if_expr};
+use crate::filter::*;
 use crate::logic::*;
 use crate::transfer::*;
 
@@ -283,7 +282,6 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
             compress_string: args.overwrite,
             batch_size: args.batch_size,
         }),
-
         CommandArgs::Describe(args) => Ok(file_summary(
             &args.file_path,
             args.memory_savvy,
