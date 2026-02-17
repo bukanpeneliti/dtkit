@@ -124,12 +124,16 @@ pub fn set_macro(macro_name: &str, value: &str, global: bool) -> i32 {
 
     let value_c = std::ffi::CString::new(value).unwrap();
 
-    unsafe {
+    let rc = unsafe {
         SF_macro_save(
             macro_name_c.as_ptr() as *mut std::os::raw::c_char,
             value_c.as_ptr() as *mut std::os::raw::c_char,
         )
+    };
+    if rc != 0 {
+        display(&format!("Error setting macro {}: rc={}", macro_name, rc));
     }
+    rc
 }
 
 pub fn get_macro(

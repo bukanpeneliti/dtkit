@@ -86,6 +86,12 @@ pub fn set_schema_macros(
         display("-------------------------------- | -------------------------------- | ----------");
     }
 
+    set_macro(
+        "schema_protocol_version",
+        &crate::SCHEMA_HANDOFF_PROTOCOL_VERSION.to_string(),
+        false,
+    );
+
     let mut payload_fields = Vec::with_capacity(schema.len());
     for (i, (name, dtype)) in schema.iter().enumerate() {
         let polars_type = match dtype {
@@ -182,11 +188,6 @@ pub fn set_schema_macros(
     let payload_json = serde_json::to_string(&payload).map_err(|e| {
         PolarsError::ComputeError(format!("failed to encode schema payload: {e}").into())
     })?;
-    set_macro(
-        "schema_protocol_version",
-        &crate::SCHEMA_HANDOFF_PROTOCOL_VERSION.to_string(),
-        false,
-    );
     set_macro("schema_payload", &payload_json, false);
 
     Ok(schema.len())
