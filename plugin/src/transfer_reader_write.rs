@@ -298,6 +298,57 @@ fn write_all_missing_string_range(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+fn write_strict_typed_numeric_column_range(
+    col: &Column,
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+    expected_name: &'static str,
+    expected_dtype: fn(&DataType) -> bool,
+    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
+) -> PolarsResult<()> {
+    if expected_dtype(col.dtype()) {
+        return write_numeric_with_converter(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            converter,
+        );
+    }
+
+    if matches!(col.dtype(), DataType::Null) {
+        write_all_missing_numeric_range(
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+        );
+        return Ok(());
+    }
+
+    record_transfer_conversion_failure();
+    Err(dtype_mismatch_error(col, transfer_column, expected_name))
+}
+
+fn is_date_dtype(dtype: &DataType) -> bool {
+    matches!(dtype, DataType::Date)
+}
+
+fn is_time_dtype(dtype: &DataType) -> bool {
+    matches!(dtype, DataType::Time)
+}
+
+fn is_datetime_dtype(dtype: &DataType) -> bool {
+    matches!(dtype, DataType::Datetime(_, _))
+}
+
 pub(crate) fn write_transfer_column_range(
     col: &Column,
     transfer_column: &TransferColumnSpec,
@@ -315,81 +366,39 @@ pub(crate) fn write_transfer_column_range(
             end_row,
             stata_offset,
         ),
-        TransferWriterKind::Date => match col.dtype() {
-            DataType::Date => write_numeric_with_converter(
-                col,
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
-                convert_date_to_stata_days,
-            ),
-            DataType::Null => {
-                write_all_missing_numeric_range(
-                    transfer_column,
-                    start_index,
-                    start_row,
-                    end_row,
-                    stata_offset,
-                );
-                Ok(())
-            }
-            _ => {
-                record_transfer_conversion_failure();
-                Err(dtype_mismatch_error(col, transfer_column, "date"))
-            }
-        },
-        TransferWriterKind::Time => match col.dtype() {
-            DataType::Time => write_numeric_with_converter(
-                col,
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
-                convert_time_to_stata_millis,
-            ),
-            DataType::Null => {
-                write_all_missing_numeric_range(
-                    transfer_column,
-                    start_index,
-                    start_row,
-                    end_row,
-                    stata_offset,
-                );
-                Ok(())
-            }
-            _ => {
-                record_transfer_conversion_failure();
-                Err(dtype_mismatch_error(col, transfer_column, "time"))
-            }
-        },
-        TransferWriterKind::Datetime => match col.dtype() {
-            DataType::Datetime(_, _) => write_numeric_with_converter(
-                col,
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
-                convert_datetime_to_stata_clock,
-            ),
-            DataType::Null => {
-                write_all_missing_numeric_range(
-                    transfer_column,
-                    start_index,
-                    start_row,
-                    end_row,
-                    stata_offset,
-                );
-                Ok(())
-            }
-            _ => {
-                record_transfer_conversion_failure();
-                Err(dtype_mismatch_error(col, transfer_column, "datetime"))
-            }
-        },
+        TransferWriterKind::Date => write_strict_typed_numeric_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            "date",
+            is_date_dtype,
+            convert_date_to_stata_days,
+        ),
+        TransferWriterKind::Time => write_strict_typed_numeric_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            "time",
+            is_time_dtype,
+            convert_time_to_stata_millis,
+        ),
+        TransferWriterKind::Datetime => write_strict_typed_numeric_column_range(
+            col,
+            transfer_column,
+            start_index,
+            start_row,
+            end_row,
+            stata_offset,
+            "datetime",
+            is_datetime_dtype,
+            convert_datetime_to_stata_clock,
+        ),
         TransferWriterKind::String | TransferWriterKind::Strl => write_string_column_range(
             col,
             transfer_column,

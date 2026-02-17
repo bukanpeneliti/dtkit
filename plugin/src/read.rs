@@ -92,6 +92,7 @@ pub fn sink_dataframe_in_batches(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_lazy_legacy_batches(
     lf: LazyFrame,
     columns: &[Expr],
@@ -140,6 +141,7 @@ fn run_lazy_legacy_batches(
     Ok((loaded_rows, n_batches))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_lazy_single_pass(
     mut lf: LazyFrame,
     columns: &[Expr],
@@ -193,51 +195,57 @@ pub struct ReadRequest<'a> {
     pub batch_size: usize,
 }
 
-pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn Error>> {
-    let request = *request;
+struct ReadEngineOutput {
+    n_batches: usize,
+    loaded_rows: usize,
+    batch_tuner: AdaptiveBatchTuner,
+}
+
+fn resolve_inputs_stage(request: ReadRequest<'_>) -> Result<ReadBoundaryInputs, Box<dyn Error>> {
+    resolve_read_boundary_inputs(request.variables_as_str, request.mapping)
+}
+
+fn build_plan_stage(
+    request: ReadRequest<'_>,
+    boundary_inputs: &ReadBoundaryInputs,
+) -> Result<ReadScanPlan, Box<dyn Error>> {
+    build_read_scan_plan(
+        request.path,
+        boundary_inputs,
+        request.safe_relaxed,
+        request.asterisk_var,
+        request.sql_if,
+        request.order_by,
+        request.random_share,
+    )
+}
+
+fn execute_engine_stage(
+    request: ReadRequest<'_>,
+    cast_json: &str,
+    plan: ReadScanPlan,
+    collect_calls: &mut usize,
+    processed_batches: &mut usize,
+) -> Result<ReadEngineOutput, Box<dyn Error>> {
     let path = request.path;
-    let variables_as_str = request.variables_as_str;
     let n_rows = request.n_rows;
     let offset = request.offset;
     let sql_if = request.sql_if;
-    let mapping = request.mapping;
     let parallel_strategy = request.parallel_strategy;
     let safe_relaxed = request.safe_relaxed;
     let asterisk_var = request.asterisk_var;
     let order_by = request.order_by;
-    let _order_by_type = request.order_by_type;
-    let _order_descending = request.order_descending;
     let stata_offset = request.stata_offset;
     let random_share = request.random_share;
     let random_seed = request.random_seed;
     let batch_size = request.batch_size;
 
-    let started_at = Instant::now();
-    let mut collect_calls = 0usize;
-    let mut processed_batches = 0usize;
-    warm_thread_pools();
-    reset_transfer_metrics();
-    emit_read_runtime_metrics(&CommonRuntimeMetrics::zero());
-    emit_read_init_macros();
-    let boundary_inputs = resolve_read_boundary_inputs(variables_as_str, mapping)?;
-    let cast_json = boundary_inputs.cast_json.as_str();
-
-    let plan = build_read_scan_plan(
-        path,
-        &boundary_inputs,
-        safe_relaxed,
-        asterisk_var,
-        sql_if,
-        order_by,
-        random_share,
-    )?;
     let selected_column_list: Vec<&str> = plan
         .selected_column_list
         .iter()
         .map(|s| s.as_str())
         .collect();
     let transfer_columns = plan.transfer_columns;
-    emit_read_plan_macros(plan.schema_handoff_mode);
 
     if plan.can_use_eager {
         if !selected_column_list.is_empty() {
@@ -299,26 +307,21 @@ pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn 
             )
         });
         set_read_engine_stage(ReadEngineStage::StataSink);
-        let (total_loaded, n_batches) = sink_dataframe_in_batches(
+        let (loaded_rows, n_batches) = sink_dataframe_in_batches(
             &df,
             0,
             &transfer_columns,
             strategy,
             stata_offset,
             &mut batch_tuner,
-            &mut processed_batches,
+            processed_batches,
         )?;
 
-        finalize_read_runtime(
+        return Ok(ReadEngineOutput {
             n_batches,
-            total_loaded,
-            collect_calls,
-            processed_batches,
-            &batch_tuner,
-            started_at,
-        );
-
-        return Ok(0);
+            loaded_rows,
+            batch_tuner,
+        });
     }
 
     let mut lf = open_parquet_scan(path, safe_relaxed, asterisk_var)?;
@@ -338,8 +341,7 @@ pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn 
     if has_filter_expr {
         set_macro("if_filter_mode", "expr", true);
     }
-    let lf_sampled =
-        apply_random_sample(lf_filtered, random_share, random_seed, &mut collect_calls)?;
+    let lf_sampled = apply_random_sample(lf_filtered, random_share, random_seed, collect_calls)?;
     lf = apply_sort_transform(lf_sampled, order_by);
 
     let use_streaming = n_rows > 1_000_000;
@@ -369,8 +371,8 @@ pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn 
             strategy,
             stata_offset,
             &mut batch_tuner,
-            &mut processed_batches,
-            &mut collect_calls,
+            processed_batches,
+            collect_calls,
         )?;
         total_loaded += loaded_rows_legacy;
         n_batches_legacy
@@ -391,19 +393,49 @@ pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn 
             strategy,
             stata_offset,
             &mut batch_tuner,
-            &mut processed_batches,
-            &mut collect_calls,
+            processed_batches,
+            collect_calls,
         )?;
         total_loaded += loaded_rows_single;
         n_batches_single
     };
 
-    finalize_read_runtime(
+    Ok(ReadEngineOutput {
         n_batches,
-        total_loaded,
+        loaded_rows: total_loaded,
+        batch_tuner,
+    })
+}
+
+pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn Error>> {
+    let request = *request;
+
+    let started_at = Instant::now();
+    let mut collect_calls = 0usize;
+    let mut processed_batches = 0usize;
+    warm_thread_pools();
+    reset_transfer_metrics();
+    emit_read_runtime_metrics(&CommonRuntimeMetrics::zero());
+    emit_read_init_macros();
+
+    let boundary_inputs = resolve_inputs_stage(request)?;
+    let plan = build_plan_stage(request, &boundary_inputs)?;
+    emit_read_plan_macros(plan.schema_handoff_mode);
+
+    let engine_output = execute_engine_stage(
+        request,
+        boundary_inputs.cast_json.as_str(),
+        plan,
+        &mut collect_calls,
+        &mut processed_batches,
+    )?;
+
+    finalize_read_runtime(
+        engine_output.n_batches,
+        engine_output.loaded_rows,
         collect_calls,
         processed_batches,
-        &batch_tuner,
+        &engine_output.batch_tuner,
         started_at,
     );
 

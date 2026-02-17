@@ -119,6 +119,42 @@ fn sink_write_plan(
     }
 }
 
+fn resolve_inputs_stage(
+    varlist: &str,
+    mapping: &str,
+) -> Result<WriteBoundaryInputs, Box<dyn Error>> {
+    crate::plan::write::resolve_write_boundary_inputs(varlist, mapping)
+}
+
+fn build_plan_stage(
+    boundary_inputs: &WriteBoundaryInputs,
+    n_rows: usize,
+    offset: usize,
+    partition_by: &str,
+) -> Result<WriteScanPlan, Box<dyn Error>> {
+    crate::plan::write::build_write_scan_plan(boundary_inputs, n_rows, offset, partition_by)
+}
+
+fn execute_engine_stage(
+    request: WriteRequest<'_>,
+    plan: &WriteScanPlan,
+    collect_calls: &mut usize,
+) -> Result<Arc<StataRowSource>, Box<dyn Error>> {
+    let (scan, lf) = build_write_source(plan, request.batch_size)?;
+    let (lf, filter_mode) = apply_write_filter(lf, request.sql_if)?;
+    set_if_filter_mode(filter_mode);
+    sink_write_plan(
+        request.path,
+        lf,
+        request.compression,
+        request.compression_level,
+        request.overwrite_partition,
+        plan,
+        collect_calls,
+    )?;
+    Ok(scan)
+}
+
 // --- Main Entry Point ---
 
 #[derive(Copy, Clone)]
@@ -141,43 +177,24 @@ pub struct WriteRequest<'a> {
 
 pub fn export_parquet_request(request: &WriteRequest<'_>) -> Result<i32, Box<dyn Error>> {
     let request = *request;
-    let path = request.path;
     let varlist = request.varlist;
     let n_rows = request.n_rows;
     let offset = request.offset;
-    let sql_if = request.sql_if;
     let mapping = request.mapping;
-    let _parallel_strategy = request.parallel_strategy;
     let partition_by = request.partition_by;
-    let compression = request.compression;
-    let compression_level = request.compression_level;
-    let overwrite_partition = request.overwrite_partition;
+    let _parallel_strategy = request.parallel_strategy;
     let _compress = request.compress;
     let _compress_string = request.compress_string;
-    let batch_size = request.batch_size;
 
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
     init_write_runtime();
     maybe_warn_deprecated_queue_mode();
-    let boundary_inputs = crate::plan::write::resolve_write_boundary_inputs(varlist, mapping)?;
-
-    let plan =
-        crate::plan::write::build_write_scan_plan(&boundary_inputs, n_rows, offset, partition_by)?;
+    let boundary_inputs = resolve_inputs_stage(varlist, mapping)?;
+    let plan = build_plan_stage(&boundary_inputs, n_rows, offset, partition_by)?;
     emit_write_plan_macros(plan.schema_handoff_mode);
 
-    let (scan, lf) = build_write_source(&plan, batch_size)?;
-    let (lf, filter_mode) = apply_write_filter(lf, sql_if)?;
-    set_if_filter_mode(filter_mode);
-    sink_write_plan(
-        path,
-        lf,
-        compression,
-        compression_level,
-        overwrite_partition,
-        &plan,
-        &mut collect_calls,
-    )?;
+    let scan = execute_engine_stage(request, &plan, &mut collect_calls)?;
 
     scan.join_pipeline_worker();
     finalize_write_runtime(&scan, collect_calls, started_at);
