@@ -31,6 +31,16 @@ pub struct DescribeSchemaPayload {
     pub fields: Vec<DescribeFieldPayload>,
 }
 
+pub struct FileSummaryOptions<'a> {
+    pub quietly: bool,
+    pub detailed: bool,
+    pub sql_if: Option<&'a str>,
+    pub safe_relaxed: bool,
+    pub asterisk_to_variable_name: Option<&'a str>,
+    pub compress: bool,
+    pub compress_string_to_numeric: bool,
+}
+
 pub fn validate_parquet_schema(path: &str, expected_columns: &[&str]) -> Result<(), String> {
     let file = File::open(path).map_err(|e| format!("Failed to open file: {}", e))?;
     let mut reader = ParquetReader::new(file);
@@ -182,21 +192,24 @@ pub fn set_schema_macros(
     Ok(schema.len())
 }
 
-pub fn file_summary(
-    path: &str,
-    quietly: bool,
-    detailed: bool,
-    sql_if: Option<&str>,
-    safe_relaxed: bool,
-    asterisk_to_variable_name: Option<&str>,
-    _compress: bool,
-    _compress_string_to_numeric: bool,
-) -> ST_retcode {
+pub fn file_summary(path: &str, options: FileSummaryOptions<'_>) -> ST_retcode {
+    let FileSummaryOptions {
+        quietly,
+        detailed,
+        sql_if,
+        safe_relaxed,
+        asterisk_to_variable_name,
+        compress,
+        compress_string_to_numeric,
+    } = options;
+
     set_macro("cast_json", "", false);
 
     let _ = sql_if;
     let _ = safe_relaxed;
     let _ = asterisk_to_variable_name;
+    let _ = compress;
+    let _ = compress_string_to_numeric;
 
     let file = match File::open(path) {
         Ok(v) => v,
@@ -234,7 +247,7 @@ pub fn file_summary(
 
     let n_rows = df.height();
 
-    match set_schema_macros(&schema, &string_lengths, detailed, quietly) {
+    match set_schema_macros(schema, &string_lengths, detailed, quietly) {
         Ok(count) => {
             set_macro("n_columns", &count.to_string(), false);
             set_macro("n_rows", &n_rows.to_string(), false);

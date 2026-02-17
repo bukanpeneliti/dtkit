@@ -66,13 +66,15 @@ fn handle_save(args: &SaveArgs) -> Result<ST_retcode, DtparquetError> {
 fn handle_describe(args: &DescribeArgs) -> Result<ST_retcode, DtparquetError> {
     Ok(schema::file_summary(
         &args.file_path,
-        args.detailed,
-        args.memory_savvy,
-        args.sorting.as_deref(),
-        true,
-        args.asterisk_to_variable_name.as_deref(),
-        args.compress,
-        args.compress_string_to_numeric,
+        schema::FileSummaryOptions {
+            quietly: args.detailed,
+            detailed: args.memory_savvy,
+            sql_if: args.sorting.as_deref(),
+            safe_relaxed: true,
+            asterisk_to_variable_name: args.asterisk_to_variable_name.as_deref(),
+            compress: args.compress,
+            compress_string_to_numeric: args.compress_string_to_numeric,
+        },
     ))
 }
 
