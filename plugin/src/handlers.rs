@@ -12,25 +12,30 @@ fn handle_setup_check() -> ST_retcode {
     0
 }
 
+fn build_read_request(args: &ReadArgs) -> read::ReadRequest<'_> {
+    read::ReadRequest {
+        path: &args.file_path,
+        variables_as_str: &args.varlist,
+        n_rows: args.start_row,
+        offset: args.max_rows,
+        sql_if: args.sql_if.as_deref(),
+        mapping: &args.sort_by,
+        parallel_strategy: args.parallel_strategy,
+        safe_relaxed: args.safe_relaxed,
+        asterisk_var: args.asterisk_to_variable_name.as_deref(),
+        order_by: &args.order_by,
+        order_by_type: args.order_by_type,
+        order_descending: args.order_descending,
+        stata_offset: args.stata_offset,
+        random_share: args.random_share,
+        random_seed: args.random_seed,
+        batch_size: args.batch_size,
+    }
+}
+
 fn handle_read(args: &ReadArgs) -> ST_retcode {
-    let read_result = read::import_parquet(
-        &args.file_path,
-        &args.varlist,
-        args.start_row,
-        args.max_rows,
-        args.sql_if.as_deref(),
-        &args.sort_by,
-        args.parallel_strategy,
-        args.safe_relaxed,
-        args.asterisk_to_variable_name.as_deref(),
-        &args.order_by,
-        args.order_by_type,
-        args.order_descending,
-        args.stata_offset,
-        args.random_share,
-        args.random_seed,
-        args.batch_size,
-    );
+    let request = build_read_request(args);
+    let read_result = read::import_parquet_request(&request);
 
     match read_result {
         Ok(code) => code,
@@ -41,23 +46,28 @@ fn handle_read(args: &ReadArgs) -> ST_retcode {
     }
 }
 
+fn build_write_request(args: &SaveArgs) -> write::WriteRequest<'_> {
+    write::WriteRequest {
+        path: &args.file_path,
+        varlist: &args.varlist,
+        n_rows: args.start_row,
+        offset: args.max_rows,
+        sql_if: args.sql_if.as_deref(),
+        mapping: &args.sort_by,
+        parallel_strategy: None,
+        partition_by: &args.partition_by,
+        compression: &args.compression_codec,
+        compression_level: args.compression_level,
+        overwrite_partition: args.include_labels,
+        compress: args.include_notes,
+        compress_string: args.overwrite,
+        batch_size: args.batch_size,
+    }
+}
+
 fn handle_save(args: &SaveArgs) -> ST_retcode {
-    let save_result = write::export_parquet(
-        &args.file_path,
-        &args.varlist,
-        args.start_row,
-        args.max_rows,
-        args.sql_if.as_deref(),
-        &args.sort_by,
-        None,
-        &args.partition_by,
-        &args.compression_codec,
-        args.compression_level,
-        args.include_labels,
-        args.include_notes,
-        args.overwrite,
-        args.batch_size,
-    );
+    let request = build_write_request(args);
+    let save_result = write::export_parquet_request(&request);
 
     match save_result {
         Ok(code) => code,
@@ -120,5 +130,89 @@ pub fn dispatch_command(cmd: CommandArgs) -> ST_retcode {
         CommandArgs::Describe(args) => handle_describe(&args),
         CommandArgs::HasMetadataKey(args) => handle_has_metadata_key(&args),
         CommandArgs::LoadMeta(args) => handle_load_meta(&args),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utilities::BatchMode;
+
+    #[test]
+    fn build_read_request_preserves_legacy_mapping() {
+        let args = ReadArgs {
+            file_path: "in.parquet".to_string(),
+            varlist: "id value".to_string(),
+            start_row: 7,
+            max_rows: 11,
+            sql_if: Some("id > 0".to_string()),
+            sort_by: "from_macros".to_string(),
+            parallel_strategy: Some(BatchMode::ByColumn),
+            safe_relaxed: true,
+            asterisk_to_variable_name: Some("star".to_string()),
+            order_by: "id".to_string(),
+            order_by_type: 2,
+            order_descending: 1.0,
+            stata_offset: 9,
+            random_share: 0.4,
+            random_seed: 123,
+            batch_size: 2048,
+        };
+
+        let request = build_read_request(&args);
+        assert_eq!(request.path, "in.parquet");
+        assert_eq!(request.variables_as_str, "id value");
+        assert_eq!(request.n_rows, 7);
+        assert_eq!(request.offset, 11);
+        assert_eq!(request.sql_if, Some("id > 0"));
+        assert_eq!(request.mapping, "from_macros");
+        assert!(matches!(
+            request.parallel_strategy,
+            Some(BatchMode::ByColumn)
+        ));
+        assert!(request.safe_relaxed);
+        assert_eq!(request.asterisk_var, Some("star"));
+        assert_eq!(request.order_by, "id");
+        assert_eq!(request.order_by_type, 2);
+        assert_eq!(request.order_descending, 1.0);
+        assert_eq!(request.stata_offset, 9);
+        assert_eq!(request.random_share, 0.4);
+        assert_eq!(request.random_seed, 123);
+        assert_eq!(request.batch_size, 2048);
+    }
+
+    #[test]
+    fn build_write_request_preserves_legacy_mapping() {
+        let args = SaveArgs {
+            file_path: "out.parquet".to_string(),
+            varlist: "id value".to_string(),
+            start_row: 5,
+            max_rows: 13,
+            sql_if: Some("id < 10".to_string()),
+            sort_by: "from_macros".to_string(),
+            partition_by: "region".to_string(),
+            compression_codec: "zstd".to_string(),
+            compression_level: Some(3),
+            include_labels: true,
+            include_notes: false,
+            overwrite: true,
+            batch_size: 4096,
+        };
+
+        let request = build_write_request(&args);
+        assert_eq!(request.path, "out.parquet");
+        assert_eq!(request.varlist, "id value");
+        assert_eq!(request.n_rows, 5);
+        assert_eq!(request.offset, 13);
+        assert_eq!(request.sql_if, Some("id < 10"));
+        assert_eq!(request.mapping, "from_macros");
+        assert!(request.parallel_strategy.is_none());
+        assert_eq!(request.partition_by, "region");
+        assert_eq!(request.compression, "zstd");
+        assert_eq!(request.compression_level, Some(3));
+        assert!(request.overwrite_partition);
+        assert!(!request.compress);
+        assert!(request.compress_string);
+        assert_eq!(request.batch_size, 4096);
     }
 }

@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use polars::prelude::*;
 use std::env;
 use std::error::Error;
@@ -175,24 +173,45 @@ fn run_lazy_single_pass(
 
 // --- Main Entry Point ---
 
-pub fn import_parquet(
-    path: &str,
-    variables_as_str: &str,
-    n_rows: usize,
-    offset: usize,
-    sql_if: Option<&str>,
-    mapping: &str,
-    parallel_strategy: Option<BatchMode>,
-    safe_relaxed: bool,
-    asterisk_var: Option<&str>,
-    order_by: &str,
-    _order_by_type: usize,
-    _order_descending: f64,
-    stata_offset: usize,
-    random_share: f64,
-    random_seed: u64,
-    batch_size: usize,
-) -> Result<i32, Box<dyn Error>> {
+#[derive(Copy, Clone)]
+pub struct ReadRequest<'a> {
+    pub path: &'a str,
+    pub variables_as_str: &'a str,
+    pub n_rows: usize,
+    pub offset: usize,
+    pub sql_if: Option<&'a str>,
+    pub mapping: &'a str,
+    pub parallel_strategy: Option<BatchMode>,
+    pub safe_relaxed: bool,
+    pub asterisk_var: Option<&'a str>,
+    pub order_by: &'a str,
+    pub order_by_type: usize,
+    pub order_descending: f64,
+    pub stata_offset: usize,
+    pub random_share: f64,
+    pub random_seed: u64,
+    pub batch_size: usize,
+}
+
+pub fn import_parquet_request(request: &ReadRequest<'_>) -> Result<i32, Box<dyn Error>> {
+    let request = *request;
+    let path = request.path;
+    let variables_as_str = request.variables_as_str;
+    let n_rows = request.n_rows;
+    let offset = request.offset;
+    let sql_if = request.sql_if;
+    let mapping = request.mapping;
+    let parallel_strategy = request.parallel_strategy;
+    let safe_relaxed = request.safe_relaxed;
+    let asterisk_var = request.asterisk_var;
+    let order_by = request.order_by;
+    let _order_by_type = request.order_by_type;
+    let _order_descending = request.order_descending;
+    let stata_offset = request.stata_offset;
+    let random_share = request.random_share;
+    let random_seed = request.random_seed;
+    let batch_size = request.batch_size;
+
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
     let mut processed_batches = 0usize;

@@ -1,5 +1,3 @@
-#![allow(clippy::too_many_arguments)]
-
 use polars::prelude::*;
 use std::error::Error;
 use std::fs::create_dir_all;
@@ -123,22 +121,41 @@ fn sink_write_plan(
 
 // --- Main Entry Point ---
 
-pub fn export_parquet(
-    path: &str,
-    varlist: &str,
-    n_rows: usize,
-    offset: usize,
-    sql_if: Option<&str>,
-    mapping: &str,
-    _parallel_strategy: Option<crate::utilities::BatchMode>,
-    partition_by: &str,
-    compression: &str,
-    compression_level: Option<usize>,
-    overwrite_partition: bool,
-    _compress: bool,
-    _compress_string: bool,
-    batch_size: usize,
-) -> Result<i32, Box<dyn Error>> {
+#[derive(Copy, Clone)]
+pub struct WriteRequest<'a> {
+    pub path: &'a str,
+    pub varlist: &'a str,
+    pub n_rows: usize,
+    pub offset: usize,
+    pub sql_if: Option<&'a str>,
+    pub mapping: &'a str,
+    pub parallel_strategy: Option<crate::utilities::BatchMode>,
+    pub partition_by: &'a str,
+    pub compression: &'a str,
+    pub compression_level: Option<usize>,
+    pub overwrite_partition: bool,
+    pub compress: bool,
+    pub compress_string: bool,
+    pub batch_size: usize,
+}
+
+pub fn export_parquet_request(request: &WriteRequest<'_>) -> Result<i32, Box<dyn Error>> {
+    let request = *request;
+    let path = request.path;
+    let varlist = request.varlist;
+    let n_rows = request.n_rows;
+    let offset = request.offset;
+    let sql_if = request.sql_if;
+    let mapping = request.mapping;
+    let _parallel_strategy = request.parallel_strategy;
+    let partition_by = request.partition_by;
+    let compression = request.compression;
+    let compression_level = request.compression_level;
+    let overwrite_partition = request.overwrite_partition;
+    let _compress = request.compress;
+    let _compress_string = request.compress_string;
+    let batch_size = request.batch_size;
+
     let started_at = Instant::now();
     let mut collect_calls = 0usize;
     init_write_runtime();
@@ -280,11 +297,7 @@ fn emit_write_queue_metrics(metrics: &WriteQueueMetrics) {
         &metrics.queue_capacity.to_string(),
         true,
     );
-    set_macro(
-        "write_queue_peak",
-        &metrics.queue_peak.to_string(),
-        true,
-    );
+    set_macro("write_queue_peak", &metrics.queue_peak.to_string(), true);
     set_macro(
         "write_queue_bp_events",
         &metrics.queue_backpressure_events.to_string(),
