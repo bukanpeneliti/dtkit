@@ -12,19 +12,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Instant;
 
-use crate::config::*;
 use crate::downcast::apply_cast;
 use crate::error::DtparquetError;
 use crate::if_filter::{apply_if_filter, compile_if_expr};
-use crate::mapping::FieldSpec;
-use crate::metadata::{self, extract_dtmeta};
-use crate::metrics::*;
-use crate::stata_interface::{display, read_macro, reset_transfer_metrics, set_macro, ST_retcode};
+use crate::logic::*;
 use crate::transfer::*;
-use crate::utilities::{
-    determine_parallelization_strategy, get_compute_thread_pool, warm_thread_pools,
-    write_pipeline_mode, AdaptiveBatchTuner, BatchMode, WritePipelineMode,
-};
 
 // --- Core Engine Types ---
 
@@ -146,7 +138,7 @@ fn opt_str(s: &str) -> Option<String> {
     (!s.is_empty()).then(|| s.to_string())
 }
 fn validated_path(raw: &str) -> ParseResult<String> {
-    crate::schema::verify_parquet_path(raw)
+    verify_parquet_path(raw)
         .then(|| raw.to_string())
         .ok_or_else(|| DtparquetError::FileNotFound(raw.to_string()))
 }
@@ -291,26 +283,20 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
             compress_string: args.overwrite,
             batch_size: args.batch_size,
         }),
-        CommandArgs::Describe(args) => Ok(crate::schema::file_summary(
+
+        CommandArgs::Describe(args) => Ok(file_summary(
             &args.file_path,
-            crate::schema::FileSummaryOptions {
-                quietly: args.detailed,
-                detailed: args.memory_savvy,
-                sql_if: args.sorting.as_deref(),
-                safe_relaxed: true,
-                asterisk_to_variable_name: args.asterisk_to_variable_name.as_deref(),
-                compress: args.compress,
-                compress_string_to_numeric: args.compress_string_to_numeric,
-            },
+            args.memory_savvy,
+            args.detailed,
         )),
         CommandArgs::HasMetadataKey(args) => {
-            let found = metadata::has_parquet_metadata_key(&args.file_path, &args.key)?;
+            let found = has_parquet_metadata_key(&args.file_path, &args.key)?;
             set_macro("has_metadata_key", if found { "1" } else { "0" }, false);
             Ok(0)
         }
         CommandArgs::LoadMeta(args) => {
-            if let Some(meta) = metadata::load_dtmeta_from_parquet(&args.file_path) {
-                metadata::expose_dtmeta_to_macros(&meta);
+            if let Some(meta) = load_dtmeta_from_parquet(&args.file_path) {
+                expose_dtmeta_to_macros(&meta);
                 set_macro("dtmeta_loaded", "1", false);
             } else {
                 set_macro("dtmeta_loaded", "0", false);
@@ -513,7 +499,7 @@ pub fn build_write_scan_plan(
             .cloned()
             .collect()
     };
-    let total = crate::stata_interface::count_rows() as usize;
+    let total = count_stata_rows() as usize;
     let start = off.min(total);
     let to_read = if n_rows == 0 {
         total - start
@@ -526,7 +512,7 @@ pub fn build_write_scan_plan(
         rows_to_read: to_read,
         row_width_bytes: sel_infos
             .iter()
-            .map(|i| crate::mapping::estimate_export_field_width_bytes(&i.dtype, i.str_length))
+            .map(|i| estimate_export_field_width_bytes(&i.dtype, i.str_length))
             .sum::<usize>()
             .max(1),
         partition_cols: part.split_whitespace().map(PlSmallStr::from).collect(),
@@ -581,7 +567,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         .collect();
     let (loaded, batches, tuner) = if plan.can_use_eager {
         if !col_list.is_empty() {
-            if let Err(e) = crate::schema::validate_parquet_schema(req.path, &col_list) {
+            if let Err(e) = validate_parquet_schema(req.path, &col_list) {
                 display(&format!("Schema validation warning: {e}"));
             }
         }
@@ -1056,7 +1042,7 @@ fn write_single_dataframe(
     let opts = ParquetWriteOptions {
         compression: parquet_compression(comp, level)?,
         key_value_metadata: Some(KeyValueMetadata::from_static(vec![(
-            metadata::DTMETA_KEY.to_string(),
+            DTMETA_KEY.to_string(),
             meta.to_string(),
         )])),
         ..Default::default()
@@ -1103,7 +1089,7 @@ fn write_partitioned_dataframe(
     let opts = ParquetWriteOptions {
         compression: parquet_compression(comp, level)?,
         key_value_metadata: Some(KeyValueMetadata::from_static(vec![(
-            metadata::DTMETA_KEY.to_string(),
+            DTMETA_KEY.to_string(),
             meta.to_string(),
         )])),
         ..Default::default()
@@ -1179,9 +1165,13 @@ fn finalize_runtime(
     m.processed_batches = proc;
     m.collect(start);
     m.emit_to_macros(prefix);
-    set_macro("n_batches", &batches.to_string(), false);
-    set_macro("loaded_rows", &loaded.to_string(), false);
-    set_macro("n_loaded_rows", &loaded.to_string(), false);
+    for (m, v) in [
+        ("n_batches", batches.to_string()),
+        ("loaded_rows", loaded.to_string()),
+        ("n_loaded_rows", loaded.to_string()),
+    ] {
+        set_macro(m, &v, false);
+    }
 }
 fn finalize_runtime_write(scan: &StataRowSource, collects: usize, start: Instant) {
     set_engine_stage("write", EngineStage::StataSink);

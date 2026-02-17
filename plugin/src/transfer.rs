@@ -5,19 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::mapping::{
-    export_field_polars_dtype, is_stata_date_format, is_stata_datetime_format,
-    is_stata_string_dtype, transfer_writer_kind_from_stata_type, FieldSpec, TransferWriterKind,
-};
-use crate::stata_interface::{
-    display, pull_numeric_cell, pull_string_cell_with_buffer, pull_strl_cell_with_arena,
-    record_transfer_conversion_failure, replace_number, replace_string, SF_is_missing, SF_nobs,
-    SF_nvar, StrlArena,
-};
-use crate::utilities::{
-    get_compute_thread_pool, AdaptiveBatchTuner, BatchMode, STATA_DATE_ORIGIN, STATA_EPOCH_MS,
-    TIME_MS, TIME_NS, TIME_US,
-};
+use crate::logic::*;
 
 // --- Types & Enums ---
 
@@ -27,18 +15,6 @@ pub struct TransferColumnSpec {
     pub stata_col_index: usize,
     pub stata_type: String,
     pub writer_kind: TransferWriterKind,
-}
-
-#[derive(Clone, Debug, serde::Deserialize)]
-pub struct ExportField {
-    #[serde(alias = "n")]
-    pub name: String,
-    #[serde(alias = "d")]
-    pub dtype: String,
-    #[serde(alias = "f")]
-    pub format: String,
-    #[serde(alias = "l")]
-    pub str_length: usize,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -610,36 +586,6 @@ pub fn read_batch_from_columns(
     Ok(DataFrame::from_iter(columns))
 }
 
-pub fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn std::error::Error>> {
-    let total_rows = unsafe { SF_nobs() };
-    if total_rows == 0 {
-        return Err("No rows in Stata data to export".into());
-    }
-
-    for info in infos {
-        let col_idx = info.name.parse::<usize>().unwrap_or(0);
-        if col_idx == 0 {
-            continue;
-        }
-
-        if is_stata_string_dtype(&info.dtype) {
-            continue;
-        }
-
-        if let Some(val) = pull_numeric_cell(col_idx, 1) {
-            if val.is_nan() && info.dtype != "float" && info.dtype != "double" {
-                return Err(format!(
-                    "Column '{}' has NaN values but Stata type '{}' cannot store them",
-                    info.name, info.dtype
-                )
-                .into());
-            }
-        }
-    }
-
-    Ok(())
-}
-
 pub fn series_from_stata_column(
     stata_col_index: usize,
     info: &ExportField,
@@ -731,13 +677,6 @@ pub fn series_from_stata_column(
     }
 }
 
-#[derive(Default)]
-struct WriteQueueTelemetry {
-    queue_peak: AtomicUsize,
-    backpressure_events: AtomicUsize,
-    queue_wait_ms: AtomicUsize,
-}
-
 pub struct StataRowSource {
     column_info: Vec<ExportField>,
     start_row: usize,
@@ -749,7 +688,6 @@ pub struct StataRowSource {
     schema: Arc<Schema>,
     batch_tuner: Arc<Mutex<AdaptiveBatchTuner>>,
     queue_capacity: usize,
-    queue_telemetry: Arc<WriteQueueTelemetry>,
 }
 
 impl StataRowSource {
@@ -779,7 +717,6 @@ impl StataRowSource {
         };
 
         let batch_size_hint = Arc::new(AtomicUsize::new(safe_batch_size));
-        let queue_telemetry = Arc::new(WriteQueueTelemetry::default());
 
         StataRowSource {
             column_info,
@@ -792,7 +729,6 @@ impl StataRowSource {
             schema: Arc::new(Schema::from_iter(fields)),
             batch_tuner,
             queue_capacity: 0,
-            queue_telemetry,
         }
     }
 
@@ -822,23 +758,17 @@ impl StataRowSource {
     }
 
     pub fn queue_peak(&self) -> usize {
-        self.queue_telemetry.queue_peak.load(Ordering::Relaxed)
+        0
     }
-
     pub fn queue_backpressure_events(&self) -> usize {
-        self.queue_telemetry
-            .backpressure_events
-            .load(Ordering::Relaxed)
+        0
     }
-
     pub fn queue_wait_ms(&self) -> usize {
-        self.queue_telemetry.queue_wait_ms.load(Ordering::Relaxed)
+        0
     }
-
     pub fn queue_produced_batches(&self) -> usize {
         self.processed_batches()
     }
-
     pub fn queue_consumed_batches(&self) -> usize {
         self.processed_batches()
     }

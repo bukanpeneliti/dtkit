@@ -1,4 +1,4 @@
-use crate::stata_interface::ST_retcode;
+use crate::logic::ST_retcode;
 use std::error::Error as StdError;
 
 #[derive(Debug, Clone, thiserror::Error)]

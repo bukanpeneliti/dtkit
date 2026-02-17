@@ -3,29 +3,20 @@ use std::os::raw::{c_char, c_int};
 use std::ptr;
 use std::slice;
 
-pub mod config;
 pub mod downcast;
 pub mod engine;
 pub mod error;
 pub mod filter;
 pub mod if_filter;
-pub mod mapping;
-pub mod metadata;
-pub mod metrics;
-pub mod schema;
-pub mod stata_interface;
+pub mod logic;
 pub mod transfer;
-pub mod utilities;
 
 pub use engine::{
     dispatch_command, parse_command, CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs,
     ReadArgs, SaveArgs,
 };
 pub use error::DtparquetError;
-
-use stata_interface::{display, ST_retcode};
-
-pub use config::SCHEMA_HANDOFF_PROTOCOL_VERSION;
+pub use logic::{display, ST_retcode, SCHEMA_HANDOFF_PROTOCOL_VERSION};
 
 fn execute_subcommand(
     subfunction_name: &str,
