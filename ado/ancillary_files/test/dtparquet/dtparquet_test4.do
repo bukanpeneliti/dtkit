@@ -9,7 +9,7 @@ capture log close
 // Set working directory to project root
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-capture log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
+log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
 
 // Load programs from ado directory
 discard
@@ -116,6 +116,5 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All Phase 4 tests passed!"
     log close
-    capture erase "dtparquet_test4.log"
     exit 0
 }

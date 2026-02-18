@@ -5,7 +5,7 @@ clear frames
 discard
 capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
-capture log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
+log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
 cap program drop _cleanup_dir_shallow
 program _cleanup_dir_shallow
@@ -604,6 +604,5 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     capture log close
-    capture erase "dtparquet_test7.log"
     exit 0
 }

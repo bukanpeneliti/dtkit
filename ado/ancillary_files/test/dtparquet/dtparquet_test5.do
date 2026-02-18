@@ -8,7 +8,7 @@ macro drop _all
 
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-capture log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
+log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
 
 // Install local versions
 discard
@@ -686,6 +686,5 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     log close
-    capture erase "dtparquet_test5.log"
     exit 0
 }

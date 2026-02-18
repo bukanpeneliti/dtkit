@@ -10,7 +10,7 @@ capture log close
 
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
-capture log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
+log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 
 // Install local versions
 run "ado/dtparquet.ado"
@@ -122,6 +122,5 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     log close
-    capture erase "dtparquet_test3.log"
     exit 0
 }
