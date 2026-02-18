@@ -11,6 +11,7 @@ log using "ado/ancillary_files/test/log/dtparquet_test6.log", replace
 
 // Load programs from ado directory
 discard
+capture program drop dtparquet
 run "ado/dtparquet.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"

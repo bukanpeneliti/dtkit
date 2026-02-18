@@ -34,7 +34,7 @@ display "Timestamp: " c(current_date) " " c(current_time)
 display "==========================================" _newline
 
 // Test Case 1: Streaming Export & Import with DataSignature Verification
-display "=== TEST CASE 1: Streaming Round-trip (DataSignature) ==="
+display _newline "=== TEST CASE 1: Streaming Round-trip (DataSignature) ==="
 local ++total_tests
 
 // 1. Setup Source Data
@@ -114,7 +114,7 @@ if wordcount("`failed_tests'") > 0 {
     exit 1
 }
 else {
-    display as result "All Phase 4 tests passed!"
+    display as result "All tests passed!"
     log close
     exit 0
 }

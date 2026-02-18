@@ -13,6 +13,8 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 
 // Install local versions
+discard
+capture program drop dtparquet
 run "ado/dtparquet.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
 capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
@@ -33,8 +35,8 @@ display "Starting dtparquet Phase 3 Test Suite"
 display "Timestamp: " c(current_date) " " c(current_time)
 display "==========================================" _newline
 
-// Test 1: Metadata key scaffold exists
-display _newline "=== TEST 1: Metadata key scaffold exists ==="
+// Test Case 1: Metadata key scaffold exists
+display _newline "=== TEST CASE 1: Metadata key scaffold exists ==="
 local ++total_tests
 clear
 set obs 100
@@ -49,7 +51,7 @@ if _rc != 0 {
 else {
     plugin call dtparquet_plugin, "has_metadata_key" "`test_file'" "dtparquet.dtmeta"
     if "`has_metadata_key'" == "1" {
-        display as result "Test 1 completed successfully: metadata key present"
+        display as result "Test 1 completed successfully"
         local passed_tests "`passed_tests' 1"
     }
     else {
@@ -58,14 +60,14 @@ else {
     }
 }
 
-// Test 2: Version Gate (legacy pyarrow mutation)
-display _newline "=== TEST 2: Version Gate (legacy pyarrow mutation) ==="
+// Test Case 2: Version Gate (legacy pyarrow mutation)
+display _newline "=== TEST CASE 2: Version Gate (legacy pyarrow mutation) ==="
 local ++total_tests
 display as text "Test 2 skipped: requires pyarrow metadata mutation helper"
 local passed_tests "`passed_tests' 2"
 
-// Test 3: Footer metadata key lookup behavior (T04)
-display _newline "=== TEST 3: Footer metadata key lookup behavior (T04) ==="
+// Test Case 3: Footer metadata key lookup behavior (T04)
+display _newline "=== TEST CASE 3: Footer metadata key lookup behavior (T04) ==="
 local ++total_tests
 clear
 set obs 30
