@@ -318,6 +318,16 @@ impl BooleanParser {
     }
 }
 
+macro_rules! push_token {
+    ($kind:expr, $text:expr, $tokens:expr, $i:expr, $advance:expr) => {{
+        $tokens.push(Token {
+            kind: $kind,
+            text: $text.into(),
+        });
+        $i += $advance;
+    }};
+}
+
 fn tokenize_boolean(input: &str) -> Vec<Token> {
     let mut tokens = Vec::new();
     let mut i = 0usize;
@@ -325,39 +335,19 @@ fn tokenize_boolean(input: &str) -> Vec<Token> {
         let ch = input[i..].chars().next().unwrap();
         match ch {
             '&' => {
-                tokens.push(Token {
-                    kind: TokenKind::And,
-                    text: "&".into(),
-                });
-                i += 1;
+                push_token!(TokenKind::And, "&", tokens, i, 1);
             }
             '|' => {
-                tokens.push(Token {
-                    kind: TokenKind::Or,
-                    text: "|".into(),
-                });
-                i += 1;
+                push_token!(TokenKind::Or, "|", tokens, i, 1);
             }
             '!' => {
-                tokens.push(Token {
-                    kind: TokenKind::Bang,
-                    text: "!".into(),
-                });
-                i += 1;
+                push_token!(TokenKind::Bang, "!", tokens, i, 1);
             }
             '(' => {
-                tokens.push(Token {
-                    kind: TokenKind::LParen,
-                    text: "(".into(),
-                });
-                i += 1;
+                push_token!(TokenKind::LParen, "(", tokens, i, 1);
             }
             ')' => {
-                tokens.push(Token {
-                    kind: TokenKind::RParen,
-                    text: ")".into(),
-                });
-                i += 1;
+                push_token!(TokenKind::RParen, ")", tokens, i, 1);
             }
             '"' | '\'' => {
                 let (q, n) = consume_quoted(input, i, ch);

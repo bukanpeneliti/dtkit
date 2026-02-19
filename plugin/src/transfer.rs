@@ -791,13 +791,26 @@ impl AnonymousScan for StataRowSource {
     }
 
     fn scan(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<DataFrame> {
+        let df = self.read_and_observe_batch(self.n_rows)?;
+        Ok(df)
+    }
+
+    fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
+        let requested_batch_size = self.batch_size_hint.load(Ordering::Relaxed).max(1);
+        let df = self.read_and_observe_batch(requested_batch_size)?;
+        Ok(Some(df))
+    }
+}
+
+impl StataRowSource {
+    fn read_and_observe_batch(&self, requested_size: usize) -> PolarsResult<DataFrame> {
         let offset = self
             .current_offset
-            .fetch_add(self.n_rows, Ordering::Relaxed);
+            .fetch_add(requested_size, Ordering::Relaxed);
         if offset >= self.n_rows {
             return Ok(DataFrame::empty_with_schema(&self.schema));
         }
-        let read_count = std::cmp::min(self.n_rows - offset, self.n_rows);
+        let read_count = std::cmp::min(requested_size, self.n_rows - offset);
 
         let batch_started_at = Instant::now();
         let df = self.read_batch(offset, read_count)?;
@@ -812,30 +825,5 @@ impl AnonymousScan for StataRowSource {
                 .store(next_batch_size.max(1), Ordering::Relaxed);
         }
         Ok(df)
-    }
-
-    fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
-        let requested_batch_size = self.batch_size_hint.load(Ordering::Relaxed).max(1);
-        let offset = self
-            .current_offset
-            .fetch_add(requested_batch_size, Ordering::Relaxed);
-        if offset >= self.n_rows {
-            return Ok(None);
-        }
-        let read_count = std::cmp::min(requested_batch_size, self.n_rows - offset);
-
-        let batch_started_at = Instant::now();
-        let df = self.read_batch(offset, read_count)?;
-        let batch_rows = df.height();
-        if batch_rows > 0 {
-            self.processed_batches.fetch_add(1, Ordering::Relaxed);
-            let next_batch_size = {
-                let mut tuner = self.batch_tuner.lock().unwrap();
-                tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis())
-            };
-            self.batch_size_hint
-                .store(next_batch_size.max(1), Ordering::Relaxed);
-        }
-        Ok(Some(df))
     }
 }
