@@ -1,4 +1,4 @@
-*! Version 1.1.1 11Feb2026
+*! Version 1.1.1 19Feb2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -251,18 +251,18 @@ program dtparquet_save
     local dtmeta_var_note_count 0
 
     if `is_nolabel' == 0 {
-        capture frame _dtinfo: local dtmeta_dta_label = dta_label[1]
+        capture frame _dtinfo: mata: st_local("dtmeta_dta_label", st_sdata(1, "dta_label"))
         capture frame _dtinfo: local dtmeta_dta_obs = dta_obs[1]
         capture frame _dtinfo: local dtmeta_dta_vars = dta_vars[1]
-        capture frame _dtinfo: local dtmeta_dta_ts = dta_ts[1]
+        capture frame _dtinfo: mata: st_local("dtmeta_dta_ts", st_sdata(1, "dta_ts"))
         capture frame _dtlabel: count
         if _rc == 0 {
             local n_lbl = r(N)
             local dtmeta_label_count `n_lbl'
             forvalues j = 1/`n_lbl' {
-                frame _dtlabel: local dtmeta_label_name_`j' = vallab[`j']
+                frame _dtlabel: mata: st_local("dtmeta_label_name_`j'", st_sdata(`j', "vallab"))
                 frame _dtlabel: local dtmeta_label_value_`j' = value[`j']
-                frame _dtlabel: local dtmeta_label_text_`j' = label[`j']
+                frame _dtlabel: mata: st_local("dtmeta_label_text_`j'", st_sdata(`j', "label"))
             }
         }
 
@@ -271,10 +271,10 @@ program dtparquet_save
             local n_dta_note = r(N)
             local dtmeta_dta_note_count 0
             forvalues j = 1/`n_dta_note' {
-                frame _dtinfo: local dta_note_j = dta_note[`j']
+                frame _dtinfo: mata: st_local("dta_note_j", st_sdata(`j', "dta_note"))
                 if `"`dta_note_j'"' != "" {
                     local dtmeta_dta_note_count = `dtmeta_dta_note_count' + 1
-                    local dtmeta_dta_note_`dtmeta_dta_note_count' `dta_note_j'
+                    local dtmeta_dta_note_`dtmeta_dta_note_count' `"`dta_note_j'"'
                 }
             }
         }
@@ -284,8 +284,10 @@ program dtparquet_save
             local n_var_note = r(N)
             local dtmeta_var_note_count `n_var_note'
             forvalues j = 1/`n_var_note' {
-                frame _dtnotes: local dtmeta_var_note_var_`j' = varname[`j']
-                frame _dtnotes: local dtmeta_var_note_text_`j' = _note_text[`j']
+                frame _dtnotes: mata: st_local("vn_j", st_sdata(`j', "varname"))
+                frame _dtnotes: mata: st_local("vt_j", st_sdata(`j', "_note_text"))
+                local dtmeta_var_note_var_`j' `"`vn_j'"'
+                local dtmeta_var_note_text_`j' `"`vt_j'"'
             }
         }
     }
@@ -578,10 +580,14 @@ program dtparquet_use
                     local vlab `dtmeta_varlab_`i''
                     local vfmt `dtmeta_varfmt_`i''
                     local vlbl `dtmeta_vallab_`i''
+                    if `"`vlab'"' != "" {
+                        mata: st_varlabel(st_local("vname"), st_local("vlab"))
+                    }
                     if `"`vfmt'"' != "" format `vname' `vfmt'
                     if (`apply_labels') {
-                        if `"`vlab'"' != "" label variable `vname' `"`vlab'"'
-                        if `"`vlbl'"' != "" capture label values `vname' `vlbl'
+                        if `"`vlbl'"' != "" {
+                            mata: st_varvaluelabel(st_local("vname"), st_local("vlbl"))
+                        }
                     }
                 }
             }
@@ -594,20 +600,31 @@ program dtparquet_use
             if (`ndta' > 0) {
                 capture notes drop _dta
                 forvalues j = 1/`ndta' {
-                    local dnote `dtmeta_dta_note_`j''
-                    if `"`dnote'"' != "" notes: `"`dnote'"'
+                    local dnote : copy local dtmeta_dta_note_`j'
+                    if `"`dnote'"' != "" {
+                        mata: st_global("_dta[note`j']", st_local("dnote"))
+                    }
                 }
+                mata: st_global("_dta[note0]", st_local("ndta"))
             }
 
             local nvarnote = real("`dtmeta_var_note_count'")
             if (`nvarnote' > 0) {
+                local seen_vars ""
                 forvalues j = 1/`nvarnote' {
-                    local vn `dtmeta_var_note_var_`j''
-                    local vt `dtmeta_var_note_text_`j''
+                    local vn : copy local dtmeta_var_note_var_`j'
+                    local vt : copy local dtmeta_var_note_text_`j'
                     capture confirm variable `vn'
                     if (_rc == 0 & `"`vt'"' != "") {
-                        capture notes drop `vn'
-                        notes `vn': `"`vt'"'
+                        if !`: list vn in seen_vars' {
+                            capture notes drop `vn'
+                            local seen_vars `seen_vars' `vn'
+                            local count_`vn' 0
+                        }
+                        local count_`vn' = `count_`vn'' + 1
+                        local c_vn `count_`vn''
+                        mata: st_global(st_local("vn") + "[note" + st_local("c_vn") + "]", st_local("vt"))
+                        mata: st_global(st_local("vn") + "[note0]", st_local("c_vn"))
                     }
                 }
             }
@@ -844,15 +861,19 @@ program _apply_dtmeta
         local nvars = r(N)
         if `nvars' > 0 {
             forvalues i = 1/`nvars' {
-                frame _dtvars: local vname = varname[`i']
+                frame _dtvars: mata: st_local("vname", st_sdata(`i', "varname"))
                 capture confirm variable `vname'
                 if _rc == 0 {
-                    frame _dtvars: local vlab = varlab[`i']
-                    frame _dtvars: local vfmt = format[`i']
-                    frame _dtvars: local vlbl = vallab[`i']
-                    if `"`vlab'"' != "" label variable `vname' `"`vlab'"'
+                    frame _dtvars: mata: st_local("vlab", st_sdata(`i', "varlab"))
+                    frame _dtvars: mata: st_local("vfmt", st_sdata(`i', "format"))
+                    frame _dtvars: mata: st_local("vlbl", st_sdata(`i', "vallab"))
+                    if `"`vlab'"' != "" {
+                        mata: st_varlabel(st_local("vname"), st_local("vlab"))
+                    }
                     if `"`vfmt'"' != "" format `vname' `vfmt'
-                    if `"`vlbl'"' != "" capture label values `vname' `vlbl'
+                    if `"`vlbl'"' != "" {
+                        mata: st_varvaluelabel(st_local("vname"), st_local("vlbl"))
+                    }
                 }
             }
         }
@@ -873,7 +894,7 @@ program _apply_dtmeta
                 if `nlbls' > 0 {
                     forvalues j = 1/`nlbls' {
                         frame `curlblfr': local val = value[`j']
-                        frame `curlblfr': local txt = label[`j']
+                        frame `curlblfr': mata: st_local("txt", st_sdata(`j', "label"))
                         label define `lbl' `val' `"`txt'"', modify
                     }
                 }
@@ -887,12 +908,21 @@ program _apply_dtmeta
     if _rc == 0 {
         local nnotes = r(N)
         if `nnotes' > 0 {
+            local seen_vars ""
             forvalues i = 1/`nnotes' {
-                frame _dtnotes: local vname = varname[`i']
+                frame _dtnotes: mata: st_local("vname", st_sdata(`i', "varname"))
                 capture confirm variable `vname'
                 if _rc == 0 {
-                    frame _dtnotes: local vnote = _note_text[`i']
-                    notes `vname': `"`vnote'"'
+                    if !`: list vname in seen_vars' {
+                        capture notes drop `vname'
+                        local seen_vars `seen_vars' `vname'
+                        local count_`vname' 0
+                    }
+                    local count_`vname' = `count_`vname'' + 1
+                    local c_vn `count_`vname''
+                    frame _dtnotes: mata: st_local("vnote", st_sdata(`i', "_note_text"))
+                    mata: st_global(st_local("vname") + "[note" + st_local("c_vn") + "]", st_local("vnote"))
+                    mata: st_global(st_local("vname") + "[note0]", st_local("c_vn"))
                 }
             }
         }
@@ -903,12 +933,22 @@ program _apply_dtmeta
     if _rc == 0 {
         local ninfo = r(N)
         if `ninfo' > 0 {
-            frame _dtinfo: local dlab = dta_label[1]
+            frame _dtinfo: mata: st_local("dlab", st_sdata(1, "dta_label"))
             if `"`dlab'"' != "" label data `"`dlab'"'
             
+            local dta_note_count 0
             forvalues i = 1/`ninfo' {
-                frame _dtinfo: local dnote = dta_note[`i']
-                if `"`dnote'"' != "" notes: `"`dnote'"'
+                frame _dtinfo: mata: st_local("dnote", st_sdata(`i', "dta_note"))
+                if `"`dnote'"' != "" {
+                    if `dta_note_count' == 0 capture notes drop _dta
+                    local dta_note_count = `dta_note_count' + 1
+                    local c_dn `dta_note_count'
+                    mata: st_global("_dta[note" + st_local("c_dn") + "]", st_local("dnote"))
+                }
+            }
+            if `dta_note_count' > 0 {
+                local c_dn `dta_note_count'
+                mata: st_global("_dta[note0]", st_local("c_dn"))
             }
         }
     }
