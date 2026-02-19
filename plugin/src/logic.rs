@@ -267,15 +267,7 @@ pub fn export_field_polars_dtype(dtype: &str, format: &str) -> DataType {
     if is_stata_datetime_format(format) {
         return DataType::Datetime(TimeUnit::Milliseconds, None);
     }
-    match dtype {
-        "byte" => DataType::Int8,
-        "int" => DataType::Int16,
-        "long" => DataType::Int32,
-        "float" => DataType::Float32,
-        "double" => DataType::Float64,
-        _ if is_stata_string_dtype(dtype) => DataType::String,
-        _ => DataType::Float64,
-    }
+    stata_to_polars_type(dtype)
 }
 
 pub fn estimate_export_field_width_bytes(dtype: &str, len: usize) -> usize {
