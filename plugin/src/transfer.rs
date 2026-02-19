@@ -597,7 +597,6 @@ pub fn series_from_stata_column(
         let values: Vec<Option<String>> = (0..n_rows)
             .map(|row_idx| {
                 pull_strl_cell_with_arena(stata_col_index, offset + row_idx + 1, &mut strl_arena)
-                    .ok()
             })
             .collect();
         return Ok(Series::new((&info.name).into(), values));

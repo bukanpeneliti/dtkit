@@ -189,6 +189,8 @@ program dtparquet_save
     }
 
     if "`replace'" == "" confirm new file `"`file'"'
+    local is_replace = ("`replace'" != "")
+
     if `is_nolabel' == 0 {
         capture which dtmeta
         if _rc == 0 {
@@ -210,8 +212,12 @@ program dtparquet_save
         local typei: type `vari'
         local typei_raw `typei'
         local formati: format `vari'
-        local varlabi : variable label `vari'
-        local vallabi : value label `vari'
+        local varlabi ""
+        local vallabi ""
+        if `is_nolabel' == 0 {
+            local varlabi : variable label `vari'
+            local vallabi : value label `vari'
+        }
         local str_length 0
 
         if ((substr("`typei'", 1, 3) == "str") & (lower("`typei'") != "strl")) {
@@ -251,11 +257,12 @@ program dtparquet_save
     local dtmeta_var_note_count 0
 
     if `is_nolabel' == 0 {
-        capture frame _dtinfo: mata: st_local("dtmeta_dta_label", st_sdata(1, "dta_label"))
+        capture frame _dtinfo: local dtmeta_dta_label = dta_label[1]
         capture frame _dtinfo: local dtmeta_dta_obs = dta_obs[1]
         capture frame _dtinfo: local dtmeta_dta_vars = dta_vars[1]
-        capture frame _dtinfo: mata: st_local("dtmeta_dta_ts", st_sdata(1, "dta_ts"))
+        capture frame _dtinfo: local dtmeta_dta_ts = string(dta_ts[1], "%tc")
         capture frame _dtlabel: count
+
         if _rc == 0 {
             local n_lbl = r(N)
             local dtmeta_label_count `n_lbl'
@@ -292,15 +299,19 @@ program dtparquet_save
         }
     }
 
+    local inc_labels = (`is_nolabel' == 0)
+    local inc_notes  = (`is_nolabel' == 0)
+
     if `is_nolabel' {
-        plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+        plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
     }
     else {
-        capture plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "`schema_payload_json'" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+        capture plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "`schema_payload_json'" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
         if _rc != 0 {
-            plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "1" "0" "0" "`chunksize'"
+            plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
         }
     }
+
 
     if `is_nolabel' == 0 {
         foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {

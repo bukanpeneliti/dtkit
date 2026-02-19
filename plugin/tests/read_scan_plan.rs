@@ -1,5 +1,5 @@
-use dtparquet::mapping::FieldSpec;
-use dtparquet::plan::read::{build_read_scan_plan, ReadBoundaryInputs};
+use dtparquet::engine::{build_read_scan_plan, ReadBoundaryInputs};
+use dtparquet::logic::FieldSpec;
 use std::fs;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,4 +1,4 @@
-use dtparquet::if_filter::compile_if_expr;
+use dtparquet::filter::compile_if_expr;
 
 #[test]
 fn filter_compiler_is_strict() {

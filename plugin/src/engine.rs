@@ -1,4 +1,5 @@
 use glob::glob;
+use polars::error::to_compute_err;
 use polars::prelude::*;
 use regex::Regex;
 use serde::de::DeserializeOwned;
@@ -198,7 +199,7 @@ fn parse_save_args(args: &[&str]) -> ParseResult<CommandArgs> {
         sort_by: args[5].to_string(),
         partition_by: args[6].to_string(),
         compression_codec: args[7].to_string(),
-        compression_level: (l >= 0).then(|| l as usize),
+        compression_level: (l >= 0).then_some(l as usize),
         include_labels: args[9] == "1",
         include_notes: args[10] == "1",
         overwrite: args[11] == "1",
@@ -277,9 +278,9 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
             partition_by: &args.partition_by,
             compression: &args.compression_codec,
             compression_level: args.compression_level,
-            overwrite_partition: args.include_labels,
-            compress: args.include_notes,
-            compress_string: args.overwrite,
+            include_labels: args.include_labels,
+            include_notes: args.include_notes,
+            overwrite: args.overwrite,
             batch_size: args.batch_size,
         }),
         CommandArgs::Describe(args) => Ok(file_summary(
@@ -479,6 +480,8 @@ pub fn build_write_scan_plan(
     n_rows: usize,
     off: usize,
     part: &str,
+    include_labels: bool,
+    include_notes: bool,
 ) -> Result<WriteScanPlan, Box<dyn Error>> {
     validate_stata_schema(&b.all_cols)?;
     let by_name: HashMap<&str, &ExportField> =
@@ -514,7 +517,7 @@ pub fn build_write_scan_plan(
             .sum::<usize>()
             .max(1),
         partition_cols: part.split_whitespace().map(PlSmallStr::from).collect(),
-        dtmeta_json: extract_dtmeta(),
+        dtmeta_json: extract_dtmeta(include_labels, include_notes),
         schema_handoff_mode: b.mode,
     })
 }
@@ -674,8 +677,8 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
 
 fn apply_df_casts(df: &mut DataFrame, cast_json: &str) -> PolarsResult<()> {
     if !cast_json.is_empty() {
-        let m: serde_json::Map<String, serde_json::Value> = serde_json::from_str(cast_json)
-            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        let m: serde_json::Map<String, serde_json::Value> =
+            serde_json::from_str(cast_json).map_err(to_compute_err)?;
         if let Some(serde_json::Value::Array(cols)) = m.get("string") {
             for v in cols {
                 if let serde_json::Value::String(n) = v {
@@ -689,9 +692,8 @@ fn apply_df_casts(df: &mut DataFrame, cast_json: &str) -> PolarsResult<()> {
     let cats: Vec<String> = df
         .schema()
         .iter()
-        .filter_map(|(n, dt)| {
-            matches!(dt, DataType::Categorical(_, _) | DataType::Enum(_, _)).then(|| n.to_string())
-        })
+        .filter(|(_, dt)| matches!(dt, DataType::Categorical(_, _) | DataType::Enum(_, _)))
+        .map(|(n, _)| n.to_string())
         .collect();
     for n in cats {
         df.try_apply(&n, |s| s.cast(&DataType::String))?;
@@ -723,10 +725,8 @@ fn normalize_categorical(lf: LazyFrame) -> Result<LazyFrame, PolarsError> {
         .clone()
         .collect_schema()?
         .iter()
-        .filter_map(|(n, dt)| {
-            matches!(dt, DataType::Categorical(_, _) | DataType::Enum(_, _))
-                .then(|| col(n.clone()).cast(DataType::String))
-        })
+        .filter(|(_, dt)| matches!(dt, DataType::Categorical(_, _) | DataType::Enum(_, _)))
+        .map(|(n, _)| col(n.clone()).cast(DataType::String))
         .collect();
     Ok(if cat_exprs.is_empty() {
         lf
@@ -762,9 +762,9 @@ fn scan_with_filename_extraction(
     ))
     .map_err(|e| PolarsError::ComputeError(format!("Invalid regex: {e}").into()))?;
     let file_paths: Vec<PathBuf> = glob(&pattern)
-        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?
+        .map_err(to_compute_err)?
         .collect::<Result<_, _>>()
-        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        .map_err(to_compute_err)?;
     if file_paths.is_empty() {
         return Err(PolarsError::ComputeError(
             format!("No files: {pattern}").into(),
@@ -878,10 +878,7 @@ fn run_lazy_legacy_batches(
     while off < n_rows {
         let b_len = (n_rows - off).min(tuner.selected_batch_size());
         let b_off = src_off + off;
-        let b_lf = lf
-            .clone()
-            .select(cols.to_vec())
-            .slice(b_off as i64, b_len as u32);
+        let b_lf = lf.clone().select(cols).slice(b_off as i64, b_len as u32);
         *collects += 1;
         let b_df = if streaming {
             b_lf.collect_with_engine(Engine::Streaming)?
@@ -921,7 +918,7 @@ fn run_lazy_single_pass(
     proc: &mut usize,
     collects: &mut usize,
 ) -> PolarsResult<(usize, usize)> {
-    let mut lf = lf.select(cols.to_vec());
+    let mut lf = lf.select(cols);
     if src_off > 0 {
         lf = lf.slice(src_off as i64, n_rows as u32);
     }
@@ -946,9 +943,9 @@ pub struct WriteRequest<'a> {
     pub partition_by: &'a str,
     pub compression: &'a str,
     pub compression_level: Option<usize>,
-    pub overwrite_partition: bool,
-    pub compress: bool,
-    pub compress_string: bool,
+    pub include_labels: bool,
+    pub include_notes: bool,
+    pub overwrite: bool,
     pub batch_size: usize,
 }
 
@@ -965,7 +962,14 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
     }
 
     let boundary = resolve_write_boundary_inputs(req.varlist, req.mapping)?;
-    let plan = build_write_scan_plan(&boundary, req.n_rows, req.offset, req.partition_by)?;
+    let plan = build_write_scan_plan(
+        &boundary,
+        req.n_rows,
+        req.offset,
+        req.partition_by,
+        req.include_labels,
+        req.include_notes,
+    )?;
     emit_plan_macros("write", plan.schema_handoff_mode);
 
     let scan = Arc::new(StataRowSource::new(
@@ -992,7 +996,7 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
             lf,
             req.compression,
             req.compression_level,
-            req.overwrite_partition,
+            req.overwrite,
             &plan.dtmeta_json,
             &mut collects,
         )?
@@ -1005,7 +1009,7 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
             req.compression,
             req.compression_level,
             &plan.partition_cols,
-            req.overwrite_partition,
+            req.overwrite,
             &plan.dtmeta_json,
         )?
     }

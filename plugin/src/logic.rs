@@ -1,4 +1,5 @@
 use glob::glob;
+use polars::error::to_compute_err;
 use polars::prelude::*;
 use rayon::{ThreadPool, ThreadPoolBuilder};
 use serde::{Deserialize, Serialize};
@@ -173,17 +174,13 @@ impl StrlArena {
     }
 }
 
-pub fn pull_strl_cell_with_arena(
-    col: usize,
-    row: usize,
-    arena: &mut StrlArena,
-) -> Result<String, ()> {
+pub fn pull_strl_cell_with_arena(col: usize, row: usize, arena: &mut StrlArena) -> Option<String> {
     use std::ffi::c_char;
     PULL_STRL_CALLS.fetch_add(1, Ordering::Relaxed);
     unsafe {
         let len = SF_sdatalen(col as i32, row as i32);
         if len < 0 {
-            return Err(());
+            return None;
         }
         let len_u = len as usize;
         arena.reserve(len_u + 1);
@@ -199,10 +196,10 @@ pub fn pull_strl_cell_with_arena(
             STRL_TRUNC_EVENTS.fetch_add(1, Ordering::Relaxed);
         }
         let res = String::from_utf8_lossy(&buf[..end]).into_owned();
-        if res.as_bytes().len() != end {
+        if res.len() != end {
             STRL_BINARY_EVENTS.fetch_add(1, Ordering::Relaxed);
         }
-        Ok(res)
+        Some(res)
     }
 }
 
@@ -647,55 +644,87 @@ pub struct VarNoteMeta {
     pub text: String,
 }
 
-pub fn extract_dtmeta() -> String {
-    let vars = (1..=read_macro("dtmeta_var_count", false, None)
-        .parse()
-        .unwrap_or(0usize))
-        .map(|i| VarMeta {
-            name: read_macro(&format!("dtmeta_varname_{i}"), false, None),
-            stata_type: read_macro(&format!("dtmeta_vartype_{i}"), false, None),
-            format: read_macro(&format!("dtmeta_varfmt_{i}"), false, None),
-            var_label: read_macro(&format!("dtmeta_varlab_{i}"), false, Some(65536)),
-            value_label: read_macro(&format!("dtmeta_vallab_{i}"), false, None),
-        })
-        .collect();
-    let labels = (1..=read_macro("dtmeta_label_count", false, None)
-        .parse()
-        .unwrap_or(0usize))
-        .map(|i| ValueLabelMeta {
-            name: read_macro(&format!("dtmeta_label_name_{i}"), false, None),
-            value: read_macro(&format!("dtmeta_label_value_{i}"), false, None)
-                .parse()
-                .unwrap_or(0),
-            text: read_macro(&format!("dtmeta_label_text_{i}"), false, Some(65536)),
-        })
-        .collect();
+pub fn extract_dtmeta(include_labels: bool, include_notes: bool) -> String {
+    let vars = if include_labels {
+        (1..=read_macro("dtmeta_var_count", false, None)
+            .parse()
+            .unwrap_or(0usize))
+            .map(|i| VarMeta {
+                name: read_macro(&format!("dtmeta_varname_{i}"), false, None),
+                stata_type: read_macro(&format!("dtmeta_vartype_{i}"), false, None),
+                format: read_macro(&format!("dtmeta_varfmt_{i}"), false, None),
+                var_label: read_macro(&format!("dtmeta_varlab_{i}"), false, Some(65536)),
+                value_label: read_macro(&format!("dtmeta_vallab_{i}"), false, None),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+    let labels = if include_labels {
+        (1..=read_macro("dtmeta_label_count", false, None)
+            .parse()
+            .unwrap_or(0usize))
+            .map(|i| ValueLabelMeta {
+                name: read_macro(&format!("dtmeta_label_name_{i}"), false, None),
+                value: read_macro(&format!("dtmeta_label_value_{i}"), false, None)
+                    .parse()
+                    .unwrap_or(0),
+                text: read_macro(&format!("dtmeta_label_text_{i}"), false, Some(65536)),
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     let meta = DtMeta {
         schema_version: 1,
         min_reader_version: 1,
         vars,
         value_labels: labels,
-        dta_label: read_macro("dtmeta_dta_label", false, Some(65536)),
-        dta_obs: read_macro("dtmeta_dta_obs", false, None)
-            .parse()
-            .unwrap_or(0),
-        dta_vars: read_macro("dtmeta_dta_vars", false, None)
-            .parse()
-            .unwrap_or(0),
-        dta_ts: read_macro("dtmeta_dta_ts", false, Some(65536)),
-        dta_notes: (1..=read_macro("dtmeta_dta_note_count", false, None)
-            .parse()
-            .unwrap_or(0usize))
-            .map(|i| read_macro(&format!("dtmeta_dta_note_{i}"), false, Some(65536)))
-            .collect(),
-        var_notes: (1..=read_macro("dtmeta_var_note_count", false, None)
-            .parse()
-            .unwrap_or(0usize))
-            .map(|i| VarNoteMeta {
-                varname: read_macro(&format!("dtmeta_var_note_var_{i}"), false, None),
-                text: read_macro(&format!("dtmeta_var_note_text_{i}"), false, Some(65536)),
-            })
-            .collect(),
+        dta_label: if include_labels {
+            read_macro("dtmeta_dta_label", false, Some(65536))
+        } else {
+            String::new()
+        },
+        dta_obs: if include_labels {
+            read_macro("dtmeta_dta_obs", false, None)
+                .parse()
+                .unwrap_or(0)
+        } else {
+            0
+        },
+        dta_vars: if include_labels {
+            read_macro("dtmeta_dta_vars", false, None)
+                .parse()
+                .unwrap_or(0)
+        } else {
+            0
+        },
+        dta_ts: if include_labels {
+            read_macro("dtmeta_dta_ts", false, Some(65536))
+        } else {
+            String::new()
+        },
+        dta_notes: if include_notes {
+            (1..=read_macro("dtmeta_dta_note_count", false, None)
+                .parse()
+                .unwrap_or(0usize))
+                .map(|i| read_macro(&format!("dtmeta_dta_note_{i}"), false, Some(65536)))
+                .collect()
+        } else {
+            Vec::new()
+        },
+        var_notes: if include_notes {
+            (1..=read_macro("dtmeta_var_note_count", false, None)
+                .parse()
+                .unwrap_or(0usize))
+                .map(|i| VarNoteMeta {
+                    varname: read_macro(&format!("dtmeta_var_note_var_{i}"), false, None),
+                    text: read_macro(&format!("dtmeta_var_note_text_{i}"), false, Some(65536)),
+                })
+                .collect()
+        } else {
+            Vec::new()
+        },
     };
     serde_json::to_string(&meta).unwrap_or_default()
 }
@@ -867,7 +896,7 @@ pub fn set_schema_macros(
             v: SCHEMA_HANDOFF_PROTOCOL_VERSION,
             f: fields,
         })
-        .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?,
+        .map_err(to_compute_err)?,
         false,
     );
     Ok(s.len())
@@ -947,7 +976,7 @@ pub fn verify_parquet_path(path: &str) -> bool {
             .any(|e| {
                 e.path()
                     .extension()
-                    .map_or(false, |ext| ext.eq_ignore_ascii_case("parquet"))
+                    .is_some_and(|ext| ext.eq_ignore_ascii_case("parquet"))
             });
     }
     if path.contains('*') || path.contains('?') || path.contains('[') {

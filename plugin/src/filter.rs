@@ -1,3 +1,4 @@
+use polars::error::to_compute_err;
 use polars::prelude::*;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -48,8 +49,7 @@ pub fn apply_cast(df: LazyFrame, type_mapping_json: &str) -> PolarsResult<LazyFr
         return Ok(df);
     }
     let type_mapping: serde_json::Map<String, serde_json::Value> =
-        serde_json::from_str(type_mapping_json)
-            .map_err(|e| PolarsError::ComputeError(e.to_string().into()))?;
+        serde_json::from_str(type_mapping_json).map_err(to_compute_err)?;
     let schema = df.clone().collect_schema()?;
     let mut pairs = Vec::new();
     for (t_str, cols_v) in type_mapping {

@@ -71,7 +71,9 @@ display "==========================================" _newline
 // Test Case 1: Check plugin loads
 display _newline "=== TEST CASE 1: Plugin loads ==="
 local ++total_tests
-plugin call dtparquet_plugin, "setup_check"
+capture plugin call dtparquet_plugin, "setup_check"
+display as text "rc after load: " as result _rc
+
 if _rc == 0 {
     display as result "Test 1 completed successfully"
     local passed_tests "`passed_tests' 1"
