@@ -1019,6 +1019,21 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
     Ok(0)
 }
 
+fn build_parquet_write_opts(
+    comp: &str,
+    level: Option<usize>,
+    meta: &str,
+) -> Result<ParquetWriteOptions, DtparquetError> {
+    Ok(ParquetWriteOptions {
+        compression: parquet_compression(comp, level)?,
+        key_value_metadata: Some(KeyValueMetadata::from_static(vec![(
+            DTMETA_KEY.to_string(),
+            meta.to_string(),
+        )])),
+        ..Default::default()
+    })
+}
+
 fn write_single_dataframe(
     path: &str,
     lf: LazyFrame,
@@ -1041,14 +1056,7 @@ fn write_single_dataframe(
         let _ = std::fs::remove_file(out);
     }
     let tmp = format!("{path}.tmp");
-    let opts = ParquetWriteOptions {
-        compression: parquet_compression(comp, level)?,
-        key_value_metadata: Some(KeyValueMetadata::from_static(vec![(
-            DTMETA_KEY.to_string(),
-            meta.to_string(),
-        )])),
-        ..Default::default()
-    };
+    let opts = build_parquet_write_opts(comp, level, meta)?;
     *collects += 1;
     lf.sink_parquet(
         SinkTarget::Path(PlPath::new(&tmp)),
@@ -1088,14 +1096,7 @@ fn write_partitioned_dataframe(
         }
     }
     create_dir_all(out)?;
-    let opts = ParquetWriteOptions {
-        compression: parquet_compression(comp, level)?,
-        key_value_metadata: Some(KeyValueMetadata::from_static(vec![(
-            DTMETA_KEY.to_string(),
-            meta.to_string(),
-        )])),
-        ..Default::default()
-    };
+    let opts = build_parquet_write_opts(comp, level, meta)?;
     write_partitioned_dataset(
         df,
         PlPathRef::Local(out),
