@@ -23,6 +23,15 @@ pub enum CellConversion<T> {
     Mismatch,
 }
 
+pub struct TransferContext<'a> {
+    pub col: &'a Column,
+    pub transfer_column: &'a TransferColumnSpec,
+    pub start_index: usize,
+    pub start_row: usize,
+    pub end_row: usize,
+    pub stata_offset: usize,
+}
+
 // --- Numeric Converters (Macro-Generated) ---
 
 macro_rules! generate_numeric_converter {
@@ -276,15 +285,8 @@ fn process_row_range(
     Ok(())
 }
 
-pub fn write_numeric_column_range(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    let converter = match col.dtype() {
+pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
+    let converter = match ctx.col.dtype() {
         DataType::Boolean => convert_boolean_to_f64,
         DataType::Int8 => convert_i8_to_f64,
         DataType::Int16 => convert_i16_to_f64,
@@ -301,106 +303,78 @@ pub fn write_numeric_column_range(
         DataType::Datetime(_, _) => convert_datetime_to_stata_clock,
         DataType::Null => {
             write_all_missing_numeric_range(
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
+                ctx.transfer_column,
+                ctx.start_index,
+                ctx.start_row,
+                ctx.end_row,
+                ctx.stata_offset,
             );
             return Ok(());
         }
         _ => {
             record_transfer_conversion_failure();
             return Err(dtype_mismatch_error(
-                col,
-                transfer_column,
+                ctx.col,
+                ctx.transfer_column,
                 "numeric/date/time/datetime",
             ));
         }
     };
 
-    write_numeric_with_converter(
-        col,
-        transfer_column,
-        start_index,
-        start_row,
-        end_row,
-        stata_offset,
-        converter,
-    )
+    write_numeric_with_converter(ctx, converter)
 }
 
-pub fn write_string_column_range(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    match col.dtype() {
-        DataType::String => write_string_with_converter(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-            convert_strict_string,
-        ),
+pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
+    match ctx.col.dtype() {
+        DataType::String => write_string_with_converter(ctx, convert_strict_string),
         DataType::Null => {
             write_all_missing_string_range(
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
+                ctx.transfer_column,
+                ctx.start_index,
+                ctx.start_row,
+                ctx.end_row,
+                ctx.stata_offset,
             );
             Ok(())
         }
         _ => {
-            let casted = col.cast(&DataType::String).map_err(|_| {
+            let casted = ctx.col.cast(&DataType::String).map_err(|_| {
                 record_transfer_conversion_failure();
-                dtype_mismatch_error(col, transfer_column, "string")
+                dtype_mismatch_error(ctx.col, ctx.transfer_column, "string")
             })?;
-            write_string_with_converter(
-                &casted,
-                transfer_column,
-                start_index,
-                start_row,
-                end_row,
-                stata_offset,
-                convert_strict_string,
-            )
+            let casted_ctx = TransferContext {
+                col: &casted,
+                transfer_column: ctx.transfer_column,
+                start_index: ctx.start_index,
+                start_row: ctx.start_row,
+                end_row: ctx.end_row,
+                stata_offset: ctx.stata_offset,
+            };
+            write_string_with_converter(&casted_ctx, convert_strict_string)
         }
     }
 }
 
 fn write_numeric_with_converter(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
+    ctx: &TransferContext,
     converter: fn(AnyValue<'_>) -> CellConversion<f64>,
 ) -> PolarsResult<()> {
-    for row_idx in start_row..end_row {
-        let global_row_idx = row_idx + start_index;
-        let value = col.get(row_idx)?;
+    for row_idx in ctx.start_row..ctx.end_row {
+        let global_row_idx = row_idx + ctx.start_index;
+        let value = ctx.col.get(row_idx)?;
         match converter(value) {
             CellConversion::Value(number) => {
                 replace_number(
                     number,
-                    global_row_idx + 1 + stata_offset,
-                    transfer_column.stata_col_index + 1,
+                    global_row_idx + 1 + ctx.stata_offset,
+                    ctx.transfer_column.stata_col_index + 1,
                 );
             }
             CellConversion::Mismatch => {
                 record_transfer_conversion_failure();
                 return Err(dtype_mismatch_error(
-                    col,
-                    transfer_column,
+                    ctx.col,
+                    ctx.transfer_column,
                     "numeric/date/time/datetime",
                 ));
             }
@@ -427,28 +401,23 @@ fn write_all_missing_numeric_range(
 }
 
 fn write_string_with_converter(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
+    ctx: &TransferContext,
     converter: fn(AnyValue<'_>) -> CellConversion<String>,
 ) -> PolarsResult<()> {
-    for row_idx in start_row..end_row {
-        let global_row_idx = row_idx + start_index;
-        let value = col.get(row_idx)?;
+    for row_idx in ctx.start_row..ctx.end_row {
+        let global_row_idx = row_idx + ctx.start_index;
+        let value = ctx.col.get(row_idx)?;
         match converter(value) {
             CellConversion::Value(text) => {
                 replace_string(
                     text,
-                    global_row_idx + 1 + stata_offset,
-                    transfer_column.stata_col_index + 1,
+                    global_row_idx + 1 + ctx.stata_offset,
+                    ctx.transfer_column.stata_col_index + 1,
                 );
             }
             CellConversion::Mismatch => {
                 record_transfer_conversion_failure();
-                return Err(dtype_mismatch_error(col, transfer_column, "string"));
+                return Err(dtype_mismatch_error(ctx.col, ctx.transfer_column, "string"));
             }
         }
     }
@@ -472,43 +441,33 @@ fn write_all_missing_string_range(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_strict_typed_numeric_column_range(
-    col: &Column,
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
+    ctx: &TransferContext,
     expected_name: &'static str,
     expected_dtype: fn(&DataType) -> bool,
     converter: fn(AnyValue<'_>) -> CellConversion<f64>,
 ) -> PolarsResult<()> {
-    if expected_dtype(col.dtype()) {
-        return write_numeric_with_converter(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-            converter,
-        );
+    if expected_dtype(ctx.col.dtype()) {
+        return write_numeric_with_converter(ctx, converter);
     }
 
-    if matches!(col.dtype(), DataType::Null) {
+    if matches!(ctx.col.dtype(), DataType::Null) {
         write_all_missing_numeric_range(
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
+            ctx.transfer_column,
+            ctx.start_index,
+            ctx.start_row,
+            ctx.end_row,
+            ctx.stata_offset,
         );
         return Ok(());
     }
 
     record_transfer_conversion_failure();
-    Err(dtype_mismatch_error(col, transfer_column, expected_name))
+    Err(dtype_mismatch_error(
+        ctx.col,
+        ctx.transfer_column,
+        expected_name,
+    ))
 }
 
 pub(crate) fn write_transfer_column_range(
@@ -520,55 +479,76 @@ pub(crate) fn write_transfer_column_range(
     stata_offset: usize,
 ) -> PolarsResult<()> {
     match transfer_column.writer_kind {
-        TransferWriterKind::Numeric => write_numeric_column_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
-        TransferWriterKind::Date => write_strict_typed_numeric_column_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-            "date",
-            |dt| matches!(dt, DataType::Date),
-            convert_date_to_stata_days,
-        ),
-        TransferWriterKind::Time => write_strict_typed_numeric_column_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-            "time",
-            |dt| matches!(dt, DataType::Time),
-            convert_time_to_stata_millis,
-        ),
-        TransferWriterKind::Datetime => write_strict_typed_numeric_column_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-            "datetime",
-            |dt| matches!(dt, DataType::Datetime(_, _)),
-            convert_datetime_to_stata_clock,
-        ),
-        TransferWriterKind::String | TransferWriterKind::Strl => write_string_column_range(
-            col,
-            transfer_column,
-            start_index,
-            start_row,
-            end_row,
-            stata_offset,
-        ),
+        TransferWriterKind::Numeric => {
+            let ctx = TransferContext {
+                col,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            };
+            write_numeric_column_range(&ctx)
+        }
+        TransferWriterKind::Date => {
+            let ctx = TransferContext {
+                col,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            };
+            write_strict_typed_numeric_column_range(
+                &ctx,
+                "date",
+                |dt| matches!(dt, DataType::Date),
+                convert_date_to_stata_days,
+            )
+        }
+        TransferWriterKind::Time => {
+            let ctx = TransferContext {
+                col,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            };
+            write_strict_typed_numeric_column_range(
+                &ctx,
+                "time",
+                |dt| matches!(dt, DataType::Time),
+                convert_time_to_stata_millis,
+            )
+        }
+        TransferWriterKind::Datetime => {
+            let ctx = TransferContext {
+                col,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            };
+            write_strict_typed_numeric_column_range(
+                &ctx,
+                "datetime",
+                |dt| matches!(dt, DataType::Datetime(_, _)),
+                convert_datetime_to_stata_clock,
+            )
+        }
+        TransferWriterKind::String | TransferWriterKind::Strl => {
+            let ctx = TransferContext {
+                col,
+                transfer_column,
+                start_index,
+                start_row,
+                end_row,
+                stata_offset,
+            };
+            write_string_column_range(&ctx)
+        }
     }
 }
 
