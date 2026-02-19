@@ -34,6 +34,15 @@ pub struct TransferContext<'a> {
 
 // --- Numeric Converters (Macro-Generated) ---
 
+macro_rules! pull_numeric_col {
+    ($T:ty, $col:expr, $off:expr, $n:expr, $name:expr, $cast:expr) => {{
+        let values: Vec<Option<$T>> = (0..$n)
+            .map(|r| pull_numeric_cell($col, $off + r + 1).map($cast))
+            .collect();
+        Ok(Series::new($name, values))
+    }};
+}
+
 macro_rules! generate_numeric_converter {
     ($name:ident, $variant:ident, $type:ty) => {
         pub fn $name(value: AnyValue<'_>) -> CellConversion<f64> {
@@ -302,12 +311,15 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Time => convert_time_to_stata_millis,
         DataType::Datetime(_, _) => convert_datetime_to_stata_clock,
         DataType::Null => {
-            write_all_missing_numeric_range(
+            write_all_missing_range(
                 ctx.transfer_column,
                 ctx.start_index,
                 ctx.start_row,
                 ctx.end_row,
                 ctx.stata_offset,
+                |row, col| {
+                    replace_number(None, row, col);
+                },
             );
             return Ok(());
         }
@@ -328,12 +340,15 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
         DataType::String => write_string_with_converter(ctx, convert_strict_string),
         DataType::Null => {
-            write_all_missing_string_range(
+            write_all_missing_range(
                 ctx.transfer_column,
                 ctx.start_index,
                 ctx.start_row,
                 ctx.end_row,
                 ctx.stata_offset,
+                |row, col| {
+                    replace_string(None, row, col);
+                },
             );
             Ok(())
         }
@@ -383,17 +398,17 @@ fn write_numeric_with_converter(
     Ok(())
 }
 
-fn write_all_missing_numeric_range(
+fn write_all_missing_range(
     transfer_column: &TransferColumnSpec,
     start_index: usize,
     start_row: usize,
     end_row: usize,
     stata_offset: usize,
+    replacer: impl Fn(usize, usize),
 ) {
     for row_idx in start_row..end_row {
         let global_row_idx = row_idx + start_index;
-        replace_number(
-            None,
+        replacer(
             global_row_idx + 1 + stata_offset,
             transfer_column.stata_col_index + 1,
         );
@@ -424,23 +439,6 @@ fn write_string_with_converter(
     Ok(())
 }
 
-fn write_all_missing_string_range(
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-) {
-    for row_idx in start_row..end_row {
-        let global_row_idx = row_idx + start_index;
-        replace_string(
-            None,
-            global_row_idx + 1 + stata_offset,
-            transfer_column.stata_col_index + 1,
-        );
-    }
-}
-
 fn write_strict_typed_numeric_column_range(
     ctx: &TransferContext,
     expected_name: &'static str,
@@ -452,12 +450,15 @@ fn write_strict_typed_numeric_column_range(
     }
 
     if matches!(ctx.col.dtype(), DataType::Null) {
-        write_all_missing_numeric_range(
+        write_all_missing_range(
             ctx.transfer_column,
             ctx.start_index,
             ctx.start_row,
             ctx.end_row,
             ctx.stata_offset,
+            |row, col| {
+                replace_number(None, row, col);
+            },
         );
         return Ok(());
     }
@@ -615,44 +616,46 @@ pub fn series_from_stata_column(
     }
 
     match info.dtype.as_str() {
-        "byte" => {
-            let values: Vec<Option<i8>> = (0..n_rows)
-                .map(|row_idx| {
-                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i8)
-                })
-                .collect();
-            Ok(Series::new((&info.name).into(), values))
-        }
-        "int" => {
-            let values: Vec<Option<i16>> = (0..n_rows)
-                .map(|row_idx| {
-                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i16)
-                })
-                .collect();
-            Ok(Series::new((&info.name).into(), values))
-        }
-        "long" => {
-            let values: Vec<Option<i32>> = (0..n_rows)
-                .map(|row_idx| {
-                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as i32)
-                })
-                .collect();
-            Ok(Series::new((&info.name).into(), values))
-        }
-        "float" => {
-            let values: Vec<Option<f32>> = (0..n_rows)
-                .map(|row_idx| {
-                    pull_numeric_cell(stata_col_index, offset + row_idx + 1).map(|v| v as f32)
-                })
-                .collect();
-            Ok(Series::new((&info.name).into(), values))
-        }
-        _ => {
-            let values: Vec<Option<f64>> = (0..n_rows)
-                .map(|row_idx| pull_numeric_cell(stata_col_index, offset + row_idx + 1))
-                .collect();
-            Ok(Series::new((&info.name).into(), values))
-        }
+        "byte" => pull_numeric_col!(
+            i8,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i8
+        ),
+        "int" => pull_numeric_col!(
+            i16,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i16
+        ),
+        "long" => pull_numeric_col!(
+            i32,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i32
+        ),
+        "float" => pull_numeric_col!(
+            f32,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as f32
+        ),
+        _ => pull_numeric_col!(
+            f64,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v
+        ),
     }
 }
 
