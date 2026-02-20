@@ -1,5 +1,6 @@
 use std::ffi::CStr;
 use std::os::raw::{c_char, c_int};
+use std::panic::AssertUnwindSafe;
 use std::ptr;
 use std::slice;
 
@@ -37,7 +38,7 @@ pub extern "C" fn pginit(p: *mut stata_sys::ST_plugin) -> stata_sys::ST_retcode 
 #[no_mangle]
 #[allow(clippy::not_unsafe_ptr_arg_deref)]
 pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retcode {
-    std::panic::catch_unwind(|| {
+    std::panic::catch_unwind(AssertUnwindSafe(|| {
         if argc < 1 || argv.is_null() {
             display("Error: No subfunction specified");
             return 198;
@@ -75,7 +76,7 @@ pub extern "C" fn stata_call(argc: c_int, argv: *const *const c_char) -> ST_retc
                 e.to_retcode()
             }
         }
-    })
+    }))
     .unwrap_or_else(|_| {
         display("Panic occurred in dtparquet plugin");
         198
