@@ -10,6 +10,9 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 log using ado/ancillary_files/test/log/dtparquet_test5.log, replace
 
+timer clear 99
+timer on 99
+
 // Install local versions
 discard
 capture program drop dtparquet
@@ -35,6 +38,8 @@ display "==========================================" _newline
 
 // Test Case 1: Wide Data (Row-Major check)
 display _newline "=== TEST CASE 1: Wide Data ==="
+timer clear 1
+timer on 1
 local ++total_tests
 clear
 set obs 100
@@ -64,9 +69,14 @@ else {
         local failed_tests "`failed_tests' 1"
     }
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
 // Test Case 2: Chunk Boundary Test
 display _newline "=== TEST CASE 2: Chunk Boundary (N not multiple of chunksize) ==="
+timer clear 2
+timer on 2
 local ++total_tests
 clear
 set obs 55
@@ -91,9 +101,14 @@ else {
         local failed_tests "`failed_tests' 2"
     }
 }
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 
 // Test Case 3: UTF-8 Symmetric Handling
 display _newline "=== TEST CASE 3: UTF-8 Special Characters ==="
+timer clear 3
+timer on 3
 local ++total_tests
 clear
 set obs 3
@@ -123,9 +138,14 @@ else {
         local failed_tests "`failed_tests' 3"
     }
 }
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Test Case 4: Manual Chunksize Override
 display _newline "=== TEST CASE 4: Chunksize Override ==="
+timer clear 4
+timer on 4
 local ++total_tests
 clear
 set obs 10
@@ -150,9 +170,14 @@ else {
         local failed_tests "`failed_tests' 4"
     }
 }
+timer off 4
+timer list 4
+display as text "Test 4 finished in" as result %6.2f r(t4) "s"
 
 // Test Case 5: Data Signature Fidelity
 display _newline "=== TEST CASE 5: Data Signature Fidelity ==="
+timer clear 5
+timer on 5
 local ++total_tests
 clear
 set obs 100
@@ -187,9 +212,14 @@ else {
         local failed_tests "`failed_tests' 5"
     }
 }
+timer off 5
+timer list 5
+display as text "Test 5 finished in" as result %6.2f r(t5) "s"
 
 // Test Case 5b: strL Stress Case
 display _newline "=== TEST CASE 5b: strL Stress Case ==="
+timer clear 51
+timer on 51
 local ++total_tests
 clear
 set obs 10
@@ -226,9 +256,14 @@ else {
         local failed_tests "`failed_tests' 5b"
     }
 }
+timer off 51
+timer list 51
+display as text "Test 5b finished in" as result %6.2f r(t51) "s"
 
 // Test Case 6: Foreign Categorical (Pandas)
 display _newline "=== TEST CASE 6: Foreign Categorical (Pandas) ==="
+timer clear 6
+timer on 6
 local ++total_tests
 local foreign_pandas "ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
 if fileexists("`foreign_pandas'") {
@@ -254,9 +289,14 @@ else {
     display as text "Test 6 skipped: fixture missing"
     local passed_tests "`passed_tests' 6"
 }
+timer off 6
+timer list 6
+display as text "Test 6 finished in" as result %6.2f r(t6) "s"
 
 // Test Case 7: Foreign Dictionary (Arrow)
 display _newline "=== TEST CASE 7: Foreign Dictionary (Arrow) ==="
+timer clear 7
+timer on 7
 local ++total_tests
 local foreign_arrow "ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
 if fileexists("`foreign_arrow'") {
@@ -281,9 +321,14 @@ else {
     display as text "Test 7 skipped: fixture missing"
     local passed_tests "`passed_tests' 7"
 }
+timer off 7
+timer list 7
+display as text "Test 7 finished in" as result %6.2f r(t7) "s"
 
 // Test Case 11: Native Round-Trip (No Epoch Offset)
 display _newline "=== TEST CASE 11: Native Round-Trip (No Epoch Offset) ==="
+timer clear 11
+timer on 11
 local ++total_tests
 capture noisily {
     clear
@@ -310,9 +355,14 @@ else {
     display as error "Test 11 failed: native round-trip error"
     local failed_tests "`failed_tests' 11"
 }
+timer off 11
+timer list 11
+display as text "Test 11 finished in" as result %6.2f r(t11) "s"
 
 // Test Case 12: T03 pool lifecycle metrics
 display _newline "=== TEST CASE 12: T03 Pool Lifecycle Metrics ==="
+timer clear 12
+timer on 12
 local ++total_tests
 local t12_n_rows 50000
 local t12_chunk_size 5000
@@ -363,9 +413,14 @@ else {
     display as error "Test 12 failed: pool lifecycle metrics mismatch"
     local failed_tests "`failed_tests' 12"
 }
+timer off 12
+timer list 12
+display as text "Test 12 finished in" as result %6.2f r(t12) "s"
 
 // Test Case 13: T05 typed transfer writer metrics
 display _newline "=== TEST CASE 13: T05 Typed Transfer Writer Metrics ==="
+timer clear 13
+timer on 13
 local ++total_tests
 local t13_n_rows 10000
 local t13_chunk_size 2500
@@ -417,9 +472,14 @@ else {
     display as error "Test 13 failed: typed transfer metrics mismatch"
     local failed_tests "`failed_tests' 13"
 }
+timer off 13
+timer list 13
+display as text "Test 13 finished in" as result %6.2f r(t13) "s"
 
 // Test Case 14: T06 single-pass lazy execution metrics
 display _newline "=== TEST CASE 14: T06 Single-Pass Lazy Execution Metrics ==="
+timer clear 14
+timer on 14
 local ++total_tests
 local t14_n_rows 120000
 local t14_chunk_size 4000
@@ -461,9 +521,14 @@ else {
     display as error "Test 14 failed: single-pass lazy execution mismatch"
     local failed_tests "`failed_tests' 14"
 }
+timer off 14
+timer list 14
+display as text "Test 14 finished in" as result %6.2f r(t14) "s"
 
 // Test Case 15: T07 adaptive batch autotuning metrics
 display _newline "=== TEST CASE 15: T07 Adaptive Batch Autotuning Metrics ==="
+timer clear 15
+timer on 15
 local ++total_tests
 local t15_n_rows 150000
 local t15_save_chunk 3000
@@ -524,9 +589,14 @@ else {
     display as error "Test 15 failed: adaptive batch autotuning mismatch"
     local failed_tests "`failed_tests' 15"
 }
+timer off 15
+timer list 15
+display as text "Test 15 finished in" as result %6.2f r(t15) "s"
 
 // Test Case 16: T08 producer-consumer write pipeline metrics
 display _newline "=== TEST CASE 16: T08 Producer-Consumer Write Pipeline Metrics ==="
+timer clear 16
+timer on 16
 local ++total_tests
 local t16_n_rows 180000
 local t16_chunk_size 2000
@@ -582,9 +652,14 @@ else {
     display as error "Test 16 failed: producer-consumer write pipeline mismatch"
     local failed_tests "`failed_tests' 16"
 }
+timer off 16
+timer list 16
+display as text "Test 16 finished in" as result %6.2f r(t16) "s"
 
 // Test Case 17: T10 strL arena path diagnostics
 display _newline "=== TEST CASE 17: T10 strL Arena Path Diagnostics ==="
+timer clear 17
+timer on 17
 local ++total_tests
 local t17_n_rows 12000
 
@@ -626,9 +701,14 @@ else {
     display as error "Test 17 failed: strL arena path mismatch"
     local failed_tests "`failed_tests' 17"
 }
+timer off 17
+timer list 17
+display as text "Test 17 finished in" as result %6.2f r(t17) "s"
 
 // Test Case 18: T12 execution boundaries and typed payload entry points
 display _newline "=== TEST CASE 18: T12 Execution Boundaries ==="
+timer clear 18
+timer on 18
 local ++total_tests
 
 capture noisily {
@@ -656,6 +736,9 @@ else {
     display as error "Test 18 failed: execution boundary mismatch"
     local failed_tests "`failed_tests' 18"
 }
+timer off 18
+timer list 18
+display as text "Test 18 finished in" as result %6.2f r(t18) "s"
 
 // Cleanup
 capture erase "test_wide.parquet"
@@ -670,6 +753,19 @@ capture erase "test_t07_autotune.parquet"
 capture erase "test_t08_pipeline.parquet"
 capture erase "test_t10_strl.parquet"
 capture erase "test_t12_boundaries.parquet"
+
+timer off 99
+capture timer list 99
+local elapsed = r(t99)
+if `elapsed' < 60 {
+    display as result "Total elapsed time: " %9.2f `elapsed' " seconds"
+}
+else if `elapsed' < 3600 {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/60) " minutes (" %9.2f `elapsed' " seconds)"
+}
+else {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/3600) " hours (" %9.2f (`elapsed'/60) " minutes)"
+}
 
 // Test Summary
 display _newline "=========================================="

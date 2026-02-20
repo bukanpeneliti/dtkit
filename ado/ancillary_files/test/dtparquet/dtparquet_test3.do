@@ -12,6 +12,9 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 
+timer clear 99
+timer on 99
+
 // Install local versions
 discard
 capture program drop dtparquet
@@ -37,6 +40,8 @@ display "==========================================" _newline
 
 // Test Case 1: Metadata key scaffold exists
 display _newline "=== TEST CASE 1: Metadata key scaffold exists ==="
+timer clear 1
+timer on 1
 local ++total_tests
 clear
 set obs 100
@@ -59,15 +64,25 @@ else {
         local failed_tests "`failed_tests' 1"
     }
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
 // Test Case 2: Version Gate (legacy pyarrow mutation)
 display _newline "=== TEST CASE 2: Version Gate (legacy pyarrow mutation) ==="
+timer clear 2
+timer on 2
 local ++total_tests
 display as text "Test 2 skipped: requires pyarrow metadata mutation helper"
 local passed_tests "`passed_tests' 2"
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 
 // Test Case 3: Footer metadata key lookup behavior (T04)
 display _newline "=== TEST CASE 3: Footer metadata key lookup behavior (T04) ==="
+timer clear 3
+timer on 3
 local ++total_tests
 clear
 set obs 30
@@ -103,10 +118,26 @@ else {
         local failed_tests "`failed_tests' 3"
     }
 }
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Cleanup
 capture erase "`test_file'"
 capture erase "`with_meta_file'"
+
+timer off 99
+capture timer list 99
+local elapsed = r(t99)
+if `elapsed' < 60 {
+    display as result "Total elapsed time: " %9.2f `elapsed' " seconds"
+}
+else if `elapsed' < 3600 {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/60) " minutes (" %9.2f `elapsed' " seconds)"
+}
+else {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/3600) " hours (" %9.2f (`elapsed'/60) " minutes)"
+}
 
 // Test Summary
 display _newline "=========================================="

@@ -7,6 +7,9 @@ capture log close
 cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
+timer clear 99
+timer on 99
+
 cap program drop _cleanup_dir_shallow
 program _cleanup_dir_shallow
     args target_dir
@@ -70,6 +73,8 @@ display "==========================================" _newline
 
 // Test Case 1: Check plugin loads
 display _newline "=== TEST CASE 1: Plugin loads ==="
+timer clear 1
+timer on 1
 local ++total_tests
 capture plugin call dtparquet_plugin, "setup_check"
 display as text "rc after load: " as result _rc
@@ -82,9 +87,14 @@ else {
     display as error "Test 1 failed: plugin did not load"
     local failed_tests "`failed_tests' 1"
 }
+timer off 1
+capture timer list 1
+display as text "Test 1 finished in " as result %4.2f r(t1) "s"
 
 // Test Case 1b: Plugin contract failure paths are deterministic
 display _newline "=== TEST CASE 1b: Plugin contract failure paths ==="
+timer clear 15
+timer on 15
 local ++total_tests
 local t1b_err 0
 capture plugin call dtparquet_plugin, "unknown_subfunction"
@@ -113,9 +123,14 @@ else {
     display as error "Test 1b failed: plugin contract failure paths not deterministic"
     local failed_tests "`failed_tests' 1b"
 }
+timer off 15
+capture timer list 15
+display as text "Test 1b finished in " as result %4.2f r(t15) "s"
 
 // Test Case 2: Describe contract macros from plugin
 display _newline "=== TEST CASE 2: Describe contract macros ==="
+timer clear 2
+timer on 2
 local ++total_tests
 plugin call dtparquet_plugin, "describe" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "1" "0" "" "" "0" "0"
 local t2_err 0
@@ -136,9 +151,14 @@ else {
     display as error "Test 2 failed: describe macro contract not available"
     local failed_tests "`failed_tests' 2"
 }
+timer off 2
+capture timer list 2
+display as text "Test 2 finished in " as result %4.2f r(t2) "s"
 
 // Test Case 2b: schema protocol mismatch is explicit
 display _newline "=== TEST CASE 2b: Schema protocol mismatch ==="
+timer clear 21
+timer on 21
 local ++total_tests
 clear
 set obs 2
@@ -157,9 +177,14 @@ else {
     display as error "Test 2b failed: protocol mismatch did not fail fast"
     local failed_tests "`failed_tests' 2b"
 }
+timer off 21
+capture timer list 21
+display as text "Test 2b finished in " as result %4.2f r(t21) "s"
 
 // Test Case 3: Call read through ado against real parquet fixture
 display _newline "=== TEST CASE 3: Read path with ado pre-read setup ==="
+timer clear 3
+timer on 3
 local ++total_tests
 capture program drop dtparquet
 run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
@@ -179,9 +204,14 @@ else {
     display as error "Test 3 failed: read path did not execute correctly"
     local failed_tests "`failed_tests' 3"
 }
+timer off 3
+capture timer list 3
+display as text "Test 3 finished in " as result %4.2f r(t3) "s"
 
 // Test Case 4: Subset varlist path
 display _newline "=== TEST CASE 4: Subset varlist path ==="
+timer clear 4
+timer on 4
 local ++total_tests
 dtparquet use ID PRODUCT_ID fetchdate using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear
 local t4_err 0
@@ -197,9 +227,14 @@ else {
     display as error "Test 4 failed: varlist subset did not work"
     local failed_tests "`failed_tests' 4"
 }
+timer off 4
+capture timer list 4
+display as text "Test 4 finished in " as result %4.2f r(t4) "s"
 
 // Test Case 5: in-range path
 display _newline "=== TEST CASE 5: In-range read ==="
+timer clear 5
+timer on 5
 local ++total_tests
 dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/100, clear
 count
@@ -211,9 +246,14 @@ else {
     display as error "Test 5 failed: in-range read did not work"
     local failed_tests "`failed_tests' 5"
 }
+timer off 5
+capture timer list 5
+display as text "Test 5 finished in " as result %4.2f r(t5) "s"
 
 // Test Case 5b: if-qualifier pushdown path
 display _newline "=== TEST CASE 5b: If-qualifier pushdown ==="
+timer clear 51
+timer on 51
 local ++total_tests
 dtparquet use year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" if year > 2015 in 1/2000, clear
 local t5b_err 0
@@ -232,9 +272,14 @@ else {
     display as error "Test 5b failed: if-qualifier pushdown did not work"
     local failed_tests "`failed_tests' 5b"
 }
+timer off 51
+capture timer list 51
+display as text "Test 5b finished in " as result %4.2f r(t51) "s"
 
 // Test Case 6: allstring path for int64->string cast
 display _newline "=== TEST CASE 6: Allstring int64 cast ==="
+timer clear 6
+timer on 6
 local ++total_tests
 dtparquet use ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear allstring
 local id_type: type ID
@@ -247,9 +292,14 @@ else {
     display as error "Test 6 failed: allstring int64 cast did not work"
     local failed_tests "`failed_tests' 6"
 }
+timer off 6
+capture timer list 6
+display as text "Test 6 finished in " as result %4.2f r(t6) "s"
 
 // Test Case 6b: foreign categorical compatibility mapping is deterministic
 display _newline "=== TEST CASE 6b: Foreign categorical mapping ==="
+timer clear 61
+timer on 61
 local ++total_tests
 clear
 set obs 4
@@ -283,9 +333,14 @@ else {
     display as error "Test 6b failed: foreign categorical mapping not deterministic"
     local failed_tests "`failed_tests' 6b"
 }
+timer off 61
+capture timer list 61
+display as text "Test 6b finished in " as result %4.2f r(t61) "s"
 
 // Test Case 6c: catmode(raw) keeps foreign categorical as string
 display _newline "=== TEST CASE 6c: Catmode(raw) preserves strings ==="
+timer clear 62
+timer on 62
 local ++total_tests
 dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/500, clear catmode(raw)
 local product_id_type_raw: type PRODUCT_ID
@@ -298,9 +353,14 @@ else {
     display as error "Test 6c failed: catmode(raw) did not preserve strings"
     local failed_tests "`failed_tests' 6c"
 }
+timer off 62
+capture timer list 62
+display as text "Test 6c finished in " as result %4.2f r(t62) "s"
 
 // Test Case 6d: catmode(both) keeps string and adds deterministic id labels
 display _newline "=== TEST CASE 6d: Catmode(both) adds labeled id ==="
+timer clear 63
+timer on 63
 local ++total_tests
 clear
 set obs 4
@@ -332,9 +392,14 @@ else {
     display as error "Test 6d failed: catmode(both) did not add labeled id"
     local failed_tests "`failed_tests' 6d"
 }
+timer off 63
+capture timer list 63
+display as text "Test 6d finished in " as result %4.2f r(t63) "s"
 
 // Test Case 6e: catmode() validation is deterministic
 display _newline "=== TEST CASE 6e: Catmode validation ==="
+timer clear 64
+timer on 64
 local ++total_tests
 capture dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear catmode(invalid)
 if _rc == 198 {
@@ -345,9 +410,14 @@ else {
     display as error "Test 6e failed: catmode invalid value not rejected"
     local failed_tests "`failed_tests' 6e"
 }
+timer off 64
+capture timer list 64
+display as text "Test 6e finished in " as result %4.2f r(t64) "s"
 
 // Test Case 6f: fixture-backed pandas categorical in catmode(encode)
 display _newline "=== TEST CASE 6f: Pandas categorical encode ==="
+timer clear 65
+timer on 65
 local ++total_tests
 local foreign_pandas "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
 dtparquet use cat using "`foreign_pandas'", clear catmode(encode)
@@ -371,9 +441,14 @@ else {
     display as error "Test 6f failed: pandas categorical encode not deterministic"
     local failed_tests "`failed_tests' 6f"
 }
+timer off 65
+capture timer list 65
+display as text "Test 6f finished in " as result %4.2f r(t65) "s"
 
 // Test Case 6g: fixture-backed dictionary parquet in catmode(raw)
 display _newline "=== TEST CASE 6g: Dictionary raw mode ==="
+timer clear 66
+timer on 66
 local ++total_tests
 local foreign_arrow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
 dtparquet use cat using "`foreign_arrow'", clear catmode(raw)
@@ -398,9 +473,14 @@ else {
     display as error "Test 6g failed: dictionary raw mode did not preserve strings"
     local failed_tests "`failed_tests' 6g"
 }
+timer off 66
+capture timer list 66
+display as text "Test 6g finished in " as result %4.2f r(t66) "s"
 
 // Test Case 6h: fixture-backed dictionary parquet in catmode(both)
 display _newline "=== TEST CASE 6h: Dictionary both mode ==="
+timer clear 67
+timer on 67
 local ++total_tests
 dtparquet use cat using "`foreign_arrow'", clear catmode(both)
 local cat_id_vallab_fixture: value label cat_id
@@ -427,9 +507,14 @@ else {
     display as error "Test 6h failed: dictionary both mode not deterministic"
     local failed_tests "`failed_tests' 6h"
 }
+timer off 67
+capture timer list 67
+display as text "Test 6h finished in " as result %4.2f r(t67) "s"
 
 // Test Case 7: Save and read back through dtparquet
 display _newline "=== TEST CASE 7: Save and read-back roundtrip ==="
+timer clear 7
+timer on 7
 local ++total_tests
 local roundtrip_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "`roundtrip_file'"
@@ -460,9 +545,14 @@ else {
     display as error "Test 7 failed: save and read-back roundtrip did not work"
     local failed_tests "`failed_tests' 7"
 }
+timer off 7
+capture timer list 7
+display as text "Test 7 finished in " as result %4.2f r(t7) "s"
 
 // Test Case 8: Plugin save with partition_by + overwrite behavior
 display _newline "=== TEST CASE 8: Partition_by save + overwrite guard ==="
+timer clear 8
+timer on 8
 local ++total_tests
 local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 capture noisily _cleanup_dir_shallow "`partition_dir'"
@@ -510,9 +600,14 @@ else {
     display as error "Test 8 failed: partition_by save + overwrite guard did not work"
     local failed_tests "`failed_tests' 8"
 }
+timer off 8
+capture timer list 8
+display as text "Test 8 finished in " as result %4.2f r(t8) "s"
 
 // Test Case 9: Plugin save sql_if filter semantics
 display _newline "=== TEST CASE 9: Save sql_if filtering ==="
+timer clear 9
+timer on 9
 local ++total_tests
 local filtered_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
 capture erase "`filtered_file'"
@@ -539,9 +634,14 @@ else {
     display as error "Test 9 failed: save sql_if filtering did not work"
     local failed_tests "`failed_tests' 9"
 }
+timer off 9
+capture timer list 9
+display as text "Test 9 finished in " as result %4.2f r(t9) "s"
 
 // Test Case 9b: Plugin save compression accepted values + default fallback
 display _newline "=== TEST CASE 9b: Compression codec/default semantics ==="
+timer clear 91
+timer on 91
 local ++total_tests
 local compress_zstd "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet"
 local compress_uncompressed "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet"
@@ -595,9 +695,14 @@ else {
     display as error "Test 9b failed: compress() codec/default semantics not deterministic"
     local failed_tests "`failed_tests' 9b"
 }
+timer off 91
+capture timer list 91
+display as text "Test 9b finished in " as result %4.2f r(t91) "s"
 
 // Test Case 9c: compress_string_to_numeric remains unsupported
 display _newline "=== TEST CASE 9c: Compress_string_to_numeric unsupported ==="
+timer clear 92
+timer on 92
 local ++total_tests
 capture dtparquet save "`compress_bad'", replace compress_string_to_numeric
 if _rc == 198 {
@@ -608,9 +713,14 @@ else {
     display as error "Test 9c failed: compress_string_to_numeric not rejected"
     local failed_tests "`failed_tests' 9c"
 }
+timer off 92
+capture timer list 92
+display as text "Test 9c finished in " as result %4.2f r(t92) "s"
 
 // Test Case 10: Metadata key scaffold is embedded
 display _newline "=== TEST CASE 10: Metadata key scaffold ==="
+timer clear 10
+timer on 10
 local ++total_tests
 plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
 if "`has_metadata_key'" == "1" {
@@ -621,9 +731,14 @@ else {
     display as error "Test 10 failed: metadata key scaffold not present"
     local failed_tests "`failed_tests' 10"
 }
+timer off 10
+capture timer list 10
+display as text "Test 10 finished in " as result %4.2f r(t10) "s"
 
 // Test Case 11: dtparquet export/import command paths
 display _newline "=== TEST CASE 11: Export/import command paths ==="
+timer clear 11
+timer on 11
 local ++total_tests
 local export_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/export import tmp"
 capture mkdir "`export_dir'"
@@ -688,9 +803,14 @@ else {
     display as error "Test 11 failed: export/import command paths did not work"
     local failed_tests "`failed_tests' 11"
 }
+timer off 11
+capture timer list 11
+display as text "Test 11 finished in " as result %4.2f r(t11) "s"
 
 // Test Case 12: parser edge-case failures for export/import
 display _newline "=== TEST CASE 12: Export/import parser failures ==="
+timer clear 12
+timer on 12
 local ++total_tests
 local t12_err 0
 capture dtparquet export "`export_parquet'" "`source_dta'"
@@ -719,9 +839,14 @@ else {
     display as error "Test 12 failed: export/import parser failures not stable"
     local failed_tests "`failed_tests' 12"
 }
+timer off 12
+capture timer list 12
+display as text "Test 12 finished in " as result %4.2f r(t12) "s"
 
 // Test Case 13: metadata roundtrip semantics
 display _newline "=== TEST CASE 13: Metadata roundtrip ==="
+timer clear 13
+timer on 13
 local ++total_tests
 local meta_parquet "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/meta_roundtrip.parquet"
 capture erase "`meta_parquet'"
@@ -787,9 +912,14 @@ else {
     display as error "Test 13 failed: metadata behavior not deterministic"
     local failed_tests "`failed_tests' 13"
 }
+timer off 13
+capture timer list 13
+display as text "Test 13 finished in " as result %4.2f r(t13) "s"
 
 // Test Case 14: partitioned metadata embedding
 display _newline "=== TEST CASE 14: Partitioned metadata embedding ==="
+timer clear 14
+timer on 14
 local ++total_tests
 local partition_meta_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/partition_meta"
 capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
@@ -827,6 +957,9 @@ else {
     display as error "Test 14 failed: partitioned metadata embedding did not work"
     local failed_tests "`failed_tests' 14"
 }
+timer off 14
+capture timer list 14
+display as text "Test 14 finished in " as result %4.2f r(t14) "s"
 capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
 
 capture erase "`meta_parquet'"
@@ -853,46 +986,18 @@ capture erase "`import_allstring_dta'"
 capture noisily _cleanup_dir_shallow "`export_dir'"
 
 * Native deterministic cleanup for tmp artifacts
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_bad.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet.tmp"
-
-// Cleanup
-capture erase "`meta_parquet'"
-capture erase "`roundtrip_file'"
-capture erase "`filtered_file'"
-capture erase "`compress_zstd'"
-capture erase "`compress_uncompressed'"
-capture erase "`compress_default'"
-capture erase "`compress_bad'"
-capture erase "`compress_level_bad'"
-capture erase "`roundtrip_file'.tmp"
-capture erase "`filtered_file'.tmp"
-capture erase "`compress_zstd'.tmp"
-capture erase "`compress_uncompressed'.tmp"
-capture erase "`compress_default'.tmp"
-capture erase "`compress_bad'.tmp"
-capture erase "`compress_level_bad'.tmp"
-capture noisily _cleanup_dir_shallow "`partition_dir'"
-
-capture erase "`source_dta'"
-capture erase "`export_parquet'"
-capture erase "`import_default_dta'"
-capture erase "`import_allstring_dta'"
-capture noisily _cleanup_dir_shallow "`export_dir'"
-
-* Native deterministic cleanup for tmp artifacts
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_bad.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet.tmp"
+timer off 99
+capture timer list 99
+local elapsed = r(t99)
+if `elapsed' < 60 {
+    display as result "Total elapsed time: " %4.2f `elapsed' " seconds"
+}
+else if `elapsed' < 3600 {
+    display as result "Total elapsed time: " %4.2f (`elapsed'/60) " minutes (" %4.2f `elapsed' " seconds)"
+}
+else {
+    display as result "Total elapsed time: " %4.2f (`elapsed'/3600) " hours (" %4.2f (`elapsed'/60) " minutes)"
+}
 
 // Test Summary
 display _newline(2) "=========================================="

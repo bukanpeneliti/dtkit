@@ -97,23 +97,16 @@ pub fn convert_time_to_stata_millis(value: AnyValue<'_>) -> CellConversion<f64> 
     }
 }
 
-fn datetime_unit_factor(unit: TimeUnit) -> f64 {
-    match unit {
-        TimeUnit::Nanoseconds => (TIME_NS / TIME_MS) as f64,
-        TimeUnit::Microseconds => (TIME_US / TIME_MS) as f64,
-        TimeUnit::Milliseconds => 1.0,
-    }
-}
-
-fn datetime_to_stata_clock(value: i64, unit: TimeUnit) -> f64 {
-    let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
-    value as f64 / datetime_unit_factor(unit) + sec_shift_scaled
-}
-
 pub fn convert_datetime_to_stata_clock(value: AnyValue<'_>) -> CellConversion<f64> {
     match value {
         AnyValue::Datetime(v, unit, _) => {
-            CellConversion::Value(Some(datetime_to_stata_clock(v, unit)))
+            let factor = match unit {
+                TimeUnit::Nanoseconds => (TIME_NS / TIME_MS) as f64,
+                TimeUnit::Microseconds => (TIME_US / TIME_MS) as f64,
+                TimeUnit::Milliseconds => 1.0,
+            };
+            let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
+            CellConversion::Value(Some(v as f64 / factor + sec_shift_scaled))
         }
         AnyValue::Null => CellConversion::Value(None),
         _ => CellConversion::Mismatch,
@@ -370,17 +363,19 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     }
 }
 
-fn write_numeric_with_converter(
+fn write_with_converter<T>(
     ctx: &TransferContext,
-    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
+    converter: fn(AnyValue<'_>) -> CellConversion<T>,
+    replacer: impl Fn(Option<T>, usize, usize),
+    type_name: &str,
 ) -> PolarsResult<()> {
     for row_idx in ctx.start_row..ctx.end_row {
         let global_row_idx = row_idx + ctx.start_index;
         let value = ctx.col.get(row_idx)?;
         match converter(value) {
-            CellConversion::Value(number) => {
-                replace_number(
-                    number,
+            CellConversion::Value(v) => {
+                replacer(
+                    v,
                     global_row_idx + 1 + ctx.stata_offset,
                     ctx.transfer_column.stata_col_index + 1,
                 );
@@ -390,12 +385,26 @@ fn write_numeric_with_converter(
                 return Err(dtype_mismatch_error(
                     ctx.col,
                     ctx.transfer_column,
-                    "numeric/date/time/datetime",
+                    type_name,
                 ));
             }
         }
     }
     Ok(())
+}
+
+fn write_numeric_with_converter(
+    ctx: &TransferContext,
+    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
+) -> PolarsResult<()> {
+    write_with_converter(
+        ctx,
+        converter,
+        |v, row, col| {
+            replace_number(v, row, col);
+        },
+        "numeric/date/time/datetime",
+    )
 }
 
 fn write_all_missing_range(
@@ -419,24 +428,14 @@ fn write_string_with_converter(
     ctx: &TransferContext,
     converter: fn(AnyValue<'_>) -> CellConversion<String>,
 ) -> PolarsResult<()> {
-    for row_idx in ctx.start_row..ctx.end_row {
-        let global_row_idx = row_idx + ctx.start_index;
-        let value = ctx.col.get(row_idx)?;
-        match converter(value) {
-            CellConversion::Value(text) => {
-                replace_string(
-                    text,
-                    global_row_idx + 1 + ctx.stata_offset,
-                    ctx.transfer_column.stata_col_index + 1,
-                );
-            }
-            CellConversion::Mismatch => {
-                record_transfer_conversion_failure();
-                return Err(dtype_mismatch_error(ctx.col, ctx.transfer_column, "string"));
-            }
-        }
-    }
-    Ok(())
+    write_with_converter(
+        ctx,
+        converter,
+        |v, row, col| {
+            replace_string(v, row, col);
+        },
+        "string",
+    )
 }
 
 fn write_strict_typed_numeric_column_range(

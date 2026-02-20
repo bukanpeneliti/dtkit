@@ -636,7 +636,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 determine_parallelization_strategy(columns.len(), req.n_rows, n_t)
             });
             set_engine_stage("read", EngineStage::StataSink);
-            run_lazy_legacy_batches(
+            run_lazy_pipeline(
                 lf_sorted,
                 &columns,
                 req.n_rows,
@@ -648,6 +648,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 &mut t,
                 &mut processed,
                 &mut collects,
+                true,
             )?
         } else {
             set_macro("read_lazy_mode", "single_pass", true);
@@ -655,7 +656,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 determine_parallelization_strategy(columns.len(), req.n_rows, n_t)
             });
             set_engine_stage("read", EngineStage::StataSink);
-            run_lazy_single_pass(
+            run_lazy_pipeline(
                 lf_sorted,
                 &columns,
                 req.n_rows,
@@ -667,6 +668,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 &mut t,
                 &mut processed,
                 &mut collects,
+                false,
             )?
         };
         (l, b, t)
@@ -861,7 +863,7 @@ fn apply_sort_transform(lf: LazyFrame, sort: &str) -> LazyFrame {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn run_lazy_legacy_batches(
+fn run_lazy_pipeline(
     lf: LazyFrame,
     cols: &[Expr],
     n_rows: usize,
@@ -873,62 +875,51 @@ fn run_lazy_legacy_batches(
     tuner: &mut AdaptiveBatchTuner,
     proc: &mut usize,
     collects: &mut usize,
-) -> PolarsResult<(usize, usize)> {
-    let (mut off, mut loaded, mut batches) = (0, 0, 0);
-    while off < n_rows {
-        let b_len = (n_rows - off).min(tuner.selected_batch_size());
-        let b_off = src_off + off;
-        let b_lf = lf.clone().select(cols).slice(b_off as i64, b_len as u32);
-        *collects += 1;
-        let b_df = if streaming {
-            b_lf.collect_with_engine(Engine::Streaming)?
-        } else {
-            b_lf.collect()?
-        };
-        if b_df.height() == 0 {
-            break;
-        }
-        sink_dataframe_in_batches(
-            &b_df,
-            b_off - src_off,
-            trans_cols,
-            strategy,
-            stata_off,
-            tuner,
-            proc,
-        )?;
-        loaded += b_df.height();
-        batches += 1;
-        off += b_len;
-    }
-    Ok((loaded, batches))
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_lazy_single_pass(
-    lf: LazyFrame,
-    cols: &[Expr],
-    n_rows: usize,
-    src_off: usize,
-    streaming: bool,
-    trans_cols: &[TransferColumnSpec],
-    strategy: BatchMode,
-    stata_off: usize,
-    tuner: &mut AdaptiveBatchTuner,
-    proc: &mut usize,
-    collects: &mut usize,
+    batch_mode: bool,
 ) -> PolarsResult<(usize, usize)> {
     let mut lf = lf.select(cols);
     if src_off > 0 {
         lf = lf.slice(src_off as i64, n_rows as u32);
     }
-    *collects += 1;
-    let df = if streaming {
-        lf.collect_with_engine(Engine::Streaming)?
+
+    if batch_mode {
+        let (mut off, mut loaded, mut batches) = (0, 0, 0);
+        while off < n_rows {
+            let b_len = (n_rows - off).min(tuner.selected_batch_size());
+            let b_off = src_off + off;
+            let b_lf = lf.clone().slice(b_off as i64, b_len as u32);
+            *collects += 1;
+            let b_df = if streaming {
+                b_lf.collect_with_engine(Engine::Streaming)?
+            } else {
+                b_lf.collect()?
+            };
+            if b_df.height() == 0 {
+                break;
+            }
+            sink_dataframe_in_batches(
+                &b_df,
+                b_off - src_off,
+                trans_cols,
+                strategy,
+                stata_off,
+                tuner,
+                proc,
+            )?;
+            loaded += b_df.height();
+            batches += 1;
+            off += b_len;
+        }
+        Ok((loaded, batches))
     } else {
-        lf.collect()?
-    };
-    sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc)
+        *collects += 1;
+        let df = if streaming {
+            lf.collect_with_engine(Engine::Streaming)?
+        } else {
+            lf.collect()?
+        };
+        sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc)
+    }
 }
 
 // --- Execution Runtime (Write Path) ---

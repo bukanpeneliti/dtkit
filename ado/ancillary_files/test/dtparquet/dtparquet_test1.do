@@ -34,6 +34,8 @@ local total_tests 0
 
 // Test Case 1: dtparquet command availability
 display _newline "=== TEST CASE 1: dtparquet command availability ==="
+timer clear 1
+timer on 1
 local ++total_tests
 capture which dtparquet
 if _rc == 0 {
@@ -44,9 +46,14 @@ else {
     display as error "Test 1 failed: dtparquet command not available, rc=" _rc
     local failed_tests "`failed_tests' 1"
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
 // Test Case 2: Basic Save and Use roundtrip with all types
 display _newline "=== TEST CASE 2: Basic Save and Use (All Data Types) ==="
+timer clear 1
+timer on 1
 local ++total_tests
 clear
 set obs 10
@@ -97,25 +104,30 @@ else {
         local sig_after = r(datasignature)
 
         if "`sig_before'" != "`sig_after'" {
-            display as error "Test 2 failed: datasignature mismatch"
-            display as error "  Before: `sig_before'"
-            display as error "  After:  `sig_after'"
-            local ++t2_err
-        }
-
-        if `t2_err' == 0 {
-            display as result "Test 2 completed successfully"
-            local passed_tests "`passed_tests' 2"
-        }
-        else {
-            display as error "Test 2 verification failed"
-            local failed_tests "`failed_tests' 2"
-        }
+        display as error "Test 2 failed: datasignature mismatch"
+        display as error "  Before: `sig_before'"
+        display as error "  After:  `sig_after'"
+        local ++t2_err
     }
+
+    if `t2_err' == 0 {
+        display as result "Test 2 completed successfully"
+        local passed_tests "`passed_tests' 2"
+    }
+    else {
+        display as error "Test 2 verification failed"
+        local failed_tests "`failed_tests' 2"
+    }
+}
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 }
 
 // Test Case 3: Metadata Preservation
 display _newline "=== TEST CASE 3: Metadata Preservation (Labels and Notes) ==="
+timer clear 3
+timer on 3
 local ++total_tests
 clear
 set obs 5
@@ -153,9 +165,14 @@ else {
     display as error "Test 3 metadata verification failed"
     local failed_tests "`failed_tests' 3"
 }
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Test Case 4: Varlist Subsetting
 display _newline "=== TEST CASE 4: Varlist Subsetting ==="
+timer clear 4
+timer on 4
 local ++total_tests
 clear
 set obs 1
@@ -174,9 +191,14 @@ else {
     display as error "Test 4 failed: expected 2 variables, got " c(k)
     local failed_tests "`failed_tests' 4"
 }
+timer off 4
+timer list 4
+display as text "Test 4 finished in" as result %6.2f r(t4) "s"
 
 // Test Case 5: nolabel option
 display _newline "=== TEST CASE 5: nolabel Option ==="
+timer clear 5
+timer on 5
 local ++total_tests
 clear
 set obs 1
@@ -195,9 +217,14 @@ else {
     display as error "Test 5 failed: label should have been empty"
     local failed_tests "`failed_tests' 5"
 }
+timer off 5
+timer list 5
+display as text "Test 5 finished in" as result %6.2f r(t5) "s"
 
 // Test Case 6: IF/IN conditions
 display _newline "=== TEST CASE 6: IF/IN conditions ==="
+timer clear 6
+timer on 6
 local ++total_tests
 clear
 set obs 10
@@ -214,9 +241,14 @@ else {
     display as error "Test 6 failed: expected 3 observations, got " c(N)
     local failed_tests "`failed_tests' 6"
 }
+timer off 6
+timer list 6
+display as text "Test 6 finished in" as result %6.2f r(t6) "s"
 
 // Test Case 7: Error Handling (Missing file)
 display _newline "=== TEST CASE 7: Error Handling (Missing File) ==="
+timer clear 7
+timer on 7
 local ++total_tests
 clear
 capture dtparquet use using "non_existent.parquet"
@@ -228,9 +260,14 @@ else {
     display as error "Test 7 failed: did not catch missing file"
     local failed_tests "`failed_tests' 7"
 }
+timer off 7
+timer list 7
+display as text "Test 7 finished in" as result %6.2f r(t7) "s"
 
 // Test Case 8: Extension Handling
 display _newline "=== TEST CASE 8: Extension Handling ==="
+timer clear 8
+timer on 8
 local ++total_tests
 clear
 set obs 1
@@ -267,6 +304,9 @@ else {
     display as error "  8c (no ext use) success: `rc8c'"
     local failed_tests "`failed_tests' 8"
 }
+timer off 8
+timer list 8
+display as text "Test 8 finished in" as result %6.2f r(t8) "s"
 
 // Cleanup
 capture erase "test_case1.parquet"

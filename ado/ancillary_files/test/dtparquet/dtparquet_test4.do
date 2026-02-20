@@ -11,6 +11,9 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 log using "ado/ancillary_files/test/log/dtparquet_test4.log", replace
 
+timer clear 99
+timer on 99
+
 // Load programs from ado directory
 discard
 adopath ++ "D:/OneDrive/MyWork/00personal/stata/dtkit/ado"
@@ -70,6 +73,8 @@ forvalues i = 1/`expected_make_note_count' {
 
 // Test Case 1: Streaming Export with Small Chunksize
 display _newline "=== TEST CASE 1: Streaming Export (chunksize=1000) ==="
+timer clear 1
+timer on 1
 local ++total_tests
 dtparquet export "test_stream.parquet" using "`original_dta'", replace chunksize(1000)
 if _rc == 0 {
@@ -87,9 +92,14 @@ else {
     display as error "Test 1 failed: rc=" _rc
     local failed_tests "`failed_tests' 1"
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
 // Test Case 2: Streaming Import with Different Chunksize
 display _newline "=== TEST CASE 2: Streaming Import (chunksize=750) ==="
+timer clear 2
+timer on 2
 local ++total_tests
 dtparquet import "test_restored.dta" using "test_stream.parquet", replace chunksize(750)
 if _rc == 0 {
@@ -107,9 +117,14 @@ else {
     display as error "Test 2 failed: rc=" _rc
     local failed_tests "`failed_tests' 2"
 }
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 
 // Test Case 3: DataSignature Verification After Round-trip
 display _newline "=== TEST CASE 3: DataSignature Verification ==="
+timer clear 3
+timer on 3
 local ++total_tests
 use "test_restored.dta", clear
 datasignature
@@ -126,9 +141,14 @@ else {
     display as error "  Restored:  `restored'"
     local failed_tests "`failed_tests' 3"
 }
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Test Case 4: Variable Label Preservation
 display _newline "=== TEST CASE 4: Variable Label Preservation ==="
+timer clear 4
+timer on 4
 local ++total_tests
 use "test_restored.dta", clear
 local vlab : var label mpg
@@ -143,9 +163,14 @@ else {
     display as error "  Got:      `vlab'"
     local failed_tests "`failed_tests' 4"
 }
+timer off 4
+timer list 4
+display as text "Test 4 finished in" as result %6.2f r(t4) "s"
 
 // Test Case 5: Value Label Preservation
 display _newline "=== TEST CASE 5: Value Label Preservation ==="
+timer clear 5
+timer on 5
 local ++total_tests
 use "test_restored.dta", clear
 local l0 : label origin_lab 0
@@ -162,9 +187,14 @@ else {
     display as error "  Expected 1: `expected_l1', Got: `l1'"
     local failed_tests "`failed_tests' 5"
 }
+timer off 5
+timer list 5
+display as text "Test 5 finished in" as result %6.2f r(t5) "s"
 
 // Test Case 6: Expanded Dataset Integrity
 display _newline "=== TEST CASE 6: Expanded Dataset Integrity ==="
+timer clear 6
+timer on 6
 local ++total_tests
 use "test_restored.dta", clear
 if c(N) == 7400 {
@@ -177,9 +207,14 @@ else {
     display as error "  Expected: 7400, Got: `c(N)'"
     local failed_tests "`failed_tests' 6"
 }
+timer off 6
+timer list 6
+display as text "Test 6 finished in" as result %6.2f r(t6) "s"
 
 // Test Case 7: Notes Preservation
 display _newline "=== TEST CASE 7: Notes Preservation ==="
+timer clear 7
+timer on 7
 local ++total_tests
 use "test_restored.dta", clear
 local dta_note_count : char _dta[note0]
@@ -229,9 +264,14 @@ else {
     display as error "Test 7 failed: `t7_err' note preservation error(s)"
     local failed_tests "`failed_tests' 7"
 }
+timer off 7
+timer list 7
+display as text "Test 7 finished in" as result %6.2f r(t7) "s"
 
 // Test Case 8: Streaming with Very Small Chunksize (Boundary Test)
 display _newline "=== TEST CASE 8: Streaming with Very Small Chunksize ==="
+timer clear 8
+timer on 8
 local ++total_tests
 use "`original_dta'", clear
 dtparquet export "test_tiny_chunk.parquet" using "`original_dta'", replace chunksize(10)
@@ -260,9 +300,14 @@ else {
     display as error "Test 8 failed: export with tiny chunksize failed, rc=" _rc
     local failed_tests "`failed_tests' 8"
 }
+timer off 8
+timer list 8
+display as text "Test 8 finished in" as result %6.2f r(t8) "s"
 
 // Test Case 9: Streaming with Large Chunksize (Above N)
 display _newline "=== TEST CASE 9: Streaming with Large Chunksize ==="
+timer clear 9
+timer on 9
 local ++total_tests
 use "`original_dta'", clear
 dtparquet export "test_large_chunk.parquet" using "`original_dta'", replace chunksize(10000)
@@ -289,6 +334,9 @@ else {
     display as error "Test 9 failed: export with large chunksize failed, rc=" _rc
     local failed_tests "`failed_tests' 9"
 }
+timer off 9
+timer list 9
+display as text "Test 9 finished in" as result %6.2f r(t9) "s"
 
 // Cleanup
 capture erase "test_stream.parquet"
@@ -297,6 +345,19 @@ capture erase "test_tiny_chunk.parquet"
 capture erase "test_tiny_restored.dta"
 capture erase "test_large_chunk.parquet"
 capture erase "test_large_restored.dta"
+
+timer off 99
+capture timer list 99
+local elapsed = r(t99)
+if `elapsed' < 60 {
+    display as result "Total elapsed time: " %9.2f `elapsed' " seconds"
+}
+else if `elapsed' < 3600 {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/60) " minutes (" %9.2f `elapsed' " seconds)"
+}
+else {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/3600) " hours (" %9.2f (`elapsed'/60) " minutes)"
+}
 
 // Test Summary
 display _newline "=========================================="
