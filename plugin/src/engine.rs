@@ -1068,7 +1068,10 @@ fn write_partitioned_dataframe(
     meta: &str,
 ) -> Result<(), DtparquetError> {
     let out = Path::new(path);
-    if out.exists() && overwrite {
+    if out.exists() {
+        if !overwrite {
+            return Err(format!("Path exists: {path}").into());
+        }
         if out.is_file() {
             std::fs::remove_file(out)?;
         } else {
