@@ -18,15 +18,18 @@ name = "dtparquet"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-polars = { version = "0.52.0", features=["lazy",
+polars = { version = "0.52.0", default-features = false, features=[
+    "lazy",
     "parquet",
     "dtype-categorical",
     "dtype-i8",
     "dtype-i16",
     "dtype-u8",
     "dtype-u16",
+    "fmt",
 ] }
-polars-sql = "0.52.0"
+polars-io = { version = "0.52.0", default-features = false, features = ["parquet"] }
+polars-core = { version = "0.52.0", default-features = false }
 
 stata-sys = { path = "./crates/stata-sys" }
 rayon = "1.8"
@@ -44,9 +47,9 @@ lto = "fat"
 codegen-units = 1
 
 [profile.dev]
-debug = 0
-split-debuginfo = "packed"
-strip = "symbols"
+debug = 1
+panic = "abort"
 
 [profile.test]
-debug = 0
+debug = 1
+panic = "abort"

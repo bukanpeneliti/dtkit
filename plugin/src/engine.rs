@@ -493,10 +493,13 @@ pub fn build_write_scan_plan(
         sel_names
             .iter()
             .map(|n| {
-                *by_name
+                by_name
                     .get(n)
-                    .unwrap_or_else(|| panic!("Missing metadata: {n}"))
+                    .copied()
+                    .ok_or_else(|| DtparquetError::Custom(format!("Missing metadata: {n}")))
             })
+            .collect::<Result<Vec<&ExportField>, DtparquetError>>()?
+            .into_iter()
             .cloned()
             .collect()
     };
@@ -868,7 +871,7 @@ fn run_lazy_pipeline(
     cols: &[Expr],
     n_rows: usize,
     src_off: usize,
-    streaming: bool,
+    _streaming: bool,
     trans_cols: &[TransferColumnSpec],
     strategy: BatchMode,
     stata_off: usize,
@@ -889,11 +892,7 @@ fn run_lazy_pipeline(
             let b_off = src_off + off;
             let b_lf = lf.clone().slice(b_off as i64, b_len as u32);
             *collects += 1;
-            let b_df = if streaming {
-                b_lf.collect_with_engine(Engine::Streaming)?
-            } else {
-                b_lf.collect()?
-            };
+            let b_df = b_lf.collect()?;
             if b_df.height() == 0 {
                 break;
             }
@@ -913,11 +912,7 @@ fn run_lazy_pipeline(
         Ok((loaded, batches))
     } else {
         *collects += 1;
-        let df = if streaming {
-            lf.collect_with_engine(Engine::Streaming)?
-        } else {
-            lf.collect()?
-        };
+        let df = lf.collect()?;
         sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc)
     }
 }
@@ -1035,9 +1030,6 @@ fn write_single_dataframe(
     collects: &mut usize,
 ) -> Result<(), DtparquetError> {
     let out = Path::new(path);
-    if out.exists() && !overwrite {
-        return Err(format!("Path exists: {path}").into());
-    }
     if let Some(p) = out.parent() {
         if !p.as_os_str().is_empty() {
             create_dir_all(p)?;
@@ -1049,13 +1041,13 @@ fn write_single_dataframe(
     let tmp = format!("{path}.tmp");
     let opts = build_parquet_write_opts(comp, level, meta)?;
     *collects += 1;
-    lf.sink_parquet(
-        SinkTarget::Path(PlPath::new(&tmp)),
-        opts,
-        None,
-        SinkOptions::default(),
-    )?
-    .collect()?;
+    let mut df = lf.collect()?;
+    let f = File::create(&tmp)?;
+    ParquetWriter::new(f)
+        .with_compression(opts.compression)
+        .with_key_value_metadata(opts.key_value_metadata)
+        .finish(&mut df)?;
+
     std::fs::rename(&tmp, path)
         .or_else(|_| {
             if out.exists() {
@@ -1076,10 +1068,7 @@ fn write_partitioned_dataframe(
     meta: &str,
 ) -> Result<(), DtparquetError> {
     let out = Path::new(path);
-    if out.exists() {
-        if !overwrite {
-            return Err(format!("Path exists: {path}").into());
-        }
+    if out.exists() && overwrite {
         if out.is_file() {
             std::fs::remove_file(out)?;
         } else {

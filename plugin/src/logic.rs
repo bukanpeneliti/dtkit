@@ -118,11 +118,33 @@ pub fn read_macro(name: &str, global: bool, buffer_size: Option<usize>) -> Strin
 
 pub fn replace_number(value: Option<f64>, row: usize, col: usize) -> i32 {
     REPLACE_NUMBER_CALLS.fetch_add(1, Ordering::Relaxed);
+    unsafe {
+        let nobs = SF_nobs();
+        let nvar = SF_nvar();
+        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
+            display(&format!(
+                "dtparquet: bounds error - row {}/{} col {}/{}",
+                row, nobs, col, nvar
+            ));
+            return 198;
+        }
+    }
     stata_sys::replace_number(value, row, col)
 }
 
 pub fn replace_string(value: Option<String>, row: usize, col: usize) -> i32 {
     REPLACE_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
+    unsafe {
+        let nobs = SF_nobs();
+        let nvar = SF_nvar();
+        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
+            display(&format!(
+                "dtparquet: bounds error - row {}/{} col {}/{}",
+                row, nobs, col, nvar
+            ));
+            return 198;
+        }
+    }
     stata_sys::replace_string(value, row, col)
 }
 
@@ -137,6 +159,15 @@ pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
     PULL_NUMERIC_CALLS.fetch_add(1, Ordering::Relaxed);
     let mut val: f64 = 0.0;
     unsafe {
+        let nobs = SF_nobs();
+        let nvar = SF_nvar();
+        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
+            display(&format!(
+                "dtparquet: bounds error in pull - row {}/{} col {}/{}",
+                row, nobs, col, nvar
+            ));
+            return None;
+        }
         if SF_vdata(col as i32, row as i32, &mut val) != 0 || SF_is_missing(val) {
             None
         } else {
@@ -149,10 +180,24 @@ pub fn pull_string_cell_with_buffer(col: usize, row: usize, buffer: &mut Vec<i8>
     use std::ffi::{c_char, CStr};
     PULL_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
     unsafe {
-        if !buffer.is_empty() {
+        let nobs = SF_nobs();
+        let nvar = SF_nvar();
+        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
+            display(&format!(
+                "dtparquet: bounds error in pull_string - row {}/{} col {}/{}",
+                row, nobs, col, nvar
+            ));
+            return String::new();
+        }
+        if buffer.is_empty() {
+            display("dtparquet: pull_string buffer was empty; resizing to 2 bytes");
+            buffer.resize(2, 0);
+        } else {
             buffer[0] = 0;
         }
-        SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char);
+        if SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char) != 0 {
+            return String::new();
+        }
         CStr::from_ptr(buffer.as_ptr() as *const c_char)
             .to_string_lossy()
             .into_owned()
@@ -178,6 +223,15 @@ pub fn pull_strl_cell_with_arena(col: usize, row: usize, arena: &mut StrlArena) 
     use std::ffi::c_char;
     PULL_STRL_CALLS.fetch_add(1, Ordering::Relaxed);
     unsafe {
+        let nobs = SF_nobs();
+        let nvar = SF_nvar();
+        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
+            display(&format!(
+                "dtparquet: bounds error in pull_strl - row {}/{} col {}/{}",
+                row, nobs, col, nvar
+            ));
+            return None;
+        }
         let len = SF_sdatalen(col as i32, row as i32);
         if len < 0 {
             return None;
@@ -321,11 +375,20 @@ fn get_hw_threads() -> usize {
 pub fn get_io_thread_pool() -> &'static ThreadPool {
     IO_THREAD_POOL.get_or_init(|| {
         IO_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
-        ThreadPoolBuilder::new()
+        if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(get_hw_threads().clamp(2, 8))
             .thread_name(|i| format!("dtpq-io-{i}"))
             .build()
-            .unwrap()
+        {
+            pool
+        } else {
+            display("dtparquet: failed to initialize IO thread pool, falling back to 1 thread");
+            ThreadPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(|_| "dtpq-io-fallback".to_string())
+                .build()
+                .expect("dtparquet: fallback IO thread pool initialization failed")
+        }
     })
 }
 
@@ -335,11 +398,22 @@ pub fn get_compute_thread_pool() -> &'static ThreadPool {
         let n = get_env_u(ENV_DTPARQUET_THREADS)
             .or_else(|| get_env_u(ENV_POLARS_MAX_THREADS))
             .unwrap_or_else(get_hw_threads);
-        ThreadPoolBuilder::new()
+        if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(n.max(1))
             .thread_name(|i| format!("dtpq-cpu-{i}"))
             .build()
-            .unwrap()
+        {
+            pool
+        } else {
+            display(
+                "dtparquet: failed to initialize compute thread pool, falling back to 1 thread",
+            );
+            ThreadPoolBuilder::new()
+                .num_threads(1)
+                .thread_name(|_| "dtpq-cpu-fallback".to_string())
+                .build()
+                .expect("dtparquet: fallback compute thread pool initialization failed")
+        }
     })
 }
 
