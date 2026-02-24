@@ -4,7 +4,8 @@
 ~*
 .DS_Store
 Thumbs.db
-*.xlsx
+**/*.xlsx
+**/*.csv
 *.do 
 **/*.dta
 **/*.parquet
@@ -17,6 +18,7 @@ ref/
 # Private configuration files
 # Claude Code instructions (keep private)
 CLAUDE.md
+AGENTS.md
 
 # Claude folder
 .claude/
