@@ -561,9 +561,9 @@ pub fn read_batch_from_columns(
 ) -> PolarsResult<DataFrame> {
     let mut columns = Vec::with_capacity(column_info.len());
     for (idx, info) in column_info.iter().enumerate() {
-        columns.push(series_from_stata_column(idx + 1, info, offset, n_rows)?);
+        columns.push(series_from_stata_column(idx + 1, info, offset, n_rows)?.into_column());
     }
-    Ok(DataFrame::from_iter(columns))
+    DataFrame::new_infer_height(columns)
 }
 
 pub fn series_from_stata_column(
@@ -775,12 +775,6 @@ impl AnonymousScan for StataRowSource {
     fn scan(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<DataFrame> {
         let df = self.read_and_observe_batch(self.n_rows)?;
         Ok(df)
-    }
-
-    fn next_batch(&self, _scan_opts: AnonymousScanArgs) -> PolarsResult<Option<DataFrame>> {
-        let requested_batch_size = self.batch_size_hint.load(Ordering::Relaxed).max(1);
-        let df = self.read_and_observe_batch(requested_batch_size)?;
-        Ok(Some(df))
     }
 }
 

@@ -716,7 +716,7 @@ fn open_parquet_scan(path: &str, asterisk_var: Option<&str>) -> Result<LazyFrame
         normalize_scan_pattern(path)
     };
     LazyFrame::scan_parquet(
-        PlPath::new(&source),
+        PlRefPath::new(&source),
         ScanArgsParquet {
             allow_missing_columns: true,
             cache: false,
@@ -786,7 +786,7 @@ fn scan_with_filename_extraction(
                 .map(|m| m.as_str())
                 .unwrap_or("unknown");
             LazyFrame::scan_parquet(
-                PlPath::new(p_str.as_ref()),
+                PlRefPath::new(p_str.as_ref()),
                 ScanArgsParquet {
                     allow_missing_columns: true,
                     cache: false,
@@ -803,6 +803,7 @@ fn scan_with_filename_extraction(
             rechunk: false,
             to_supertypes: true,
             diagonal: true,
+            strict: false,
             from_partitioned_ds: true,
             maintain_order: true,
         },
@@ -1080,15 +1081,62 @@ fn write_partitioned_dataframe(
     }
     create_dir_all(out)?;
     let opts = build_parquet_write_opts(comp, level, meta)?;
-    write_partitioned_dataset(
-        df,
-        PlPathRef::Local(out),
-        part.to_vec(),
-        &opts,
-        None,
-        100_000,
-    )
-    .map_err(|e| e.into())
+    write_partitioned_dataset_local(df, out, part, &opts)
+}
+
+fn write_partitioned_dataset_local(
+    df: &mut DataFrame,
+    out_dir: &Path,
+    partition_by: &[PlSmallStr],
+    opts: &ParquetWriteOptions,
+) -> Result<(), DtparquetError> {
+    df.align_chunks_par();
+
+    let get_partition_path = |part_df: &DataFrame| -> Result<PathBuf, DtparquetError> {
+        let mut dir = out_dir.to_path_buf();
+        for name in partition_by {
+            let casted = part_df
+                .column(name.as_str())?
+                .slice(0, 1)
+                .cast(&DataType::String)?;
+            let value = casted.str()?.get(0).unwrap_or("__HIVE_DEFAULT_PARTITION__");
+            dir.push(format!("{}={}", name, encode_partition_value(value)));
+        }
+        Ok(dir)
+    };
+
+    let mut part_idx = 0usize;
+    for mut part_df in df.partition_by_stable(partition_by.to_vec(), true)? {
+        let partition_dir = get_partition_path(&part_df)?;
+        create_dir_all(&partition_dir)?;
+        let file_path = partition_dir.join("00000000.parquet");
+        let file = File::create(&file_path)?;
+        ParquetWriter::new(file)
+            .with_compression(opts.compression)
+            .with_key_value_metadata(opts.key_value_metadata.clone())
+            .finish(&mut part_df)?;
+        part_idx += 1;
+    }
+
+    if part_idx == 0 {
+        return Err(DtparquetError::Custom(
+            "partitioned write produced no groups".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn encode_partition_value(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for b in input.bytes() {
+        if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'~') {
+            out.push(b as char);
+        } else {
+            out.push('%');
+            out.push_str(&format!("{b:02X}"));
+        }
+    }
+    out
 }
 
 fn parquet_compression(c: &str, l: Option<usize>) -> Result<ParquetCompression, DtparquetError> {
@@ -1102,7 +1150,6 @@ fn parquet_compression(c: &str, l: Option<usize>) -> Result<ParquetCompression, 
         "uncompressed" => ParquetCompression::Uncompressed,
         "snappy" => ParquetCompression::Snappy,
         "gzip" => ParquetCompression::Gzip(None),
-        "lzo" => ParquetCompression::Lzo,
         "brotli" => ParquetCompression::Brotli(None),
         _ => ParquetCompression::Zstd(None),
     })
