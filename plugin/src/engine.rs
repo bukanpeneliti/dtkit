@@ -1030,6 +1030,7 @@ fn write_single_dataframe(
     meta: &str,
     collects: &mut usize,
 ) -> Result<(), DtparquetError> {
+    let collect_started = Instant::now();
     let out = Path::new(path);
     if let Some(p) = out.parent() {
         if !p.as_os_str().is_empty() {
@@ -1043,20 +1044,31 @@ fn write_single_dataframe(
     let opts = build_parquet_write_opts(comp, level, meta)?;
     *collects += 1;
     let mut df = lf.collect()?;
+    set_macro(
+        "write_collect_elapsed_ms",
+        &collect_started.elapsed().as_millis().to_string(),
+        true,
+    );
+
+    let parquet_started = Instant::now();
     let f = File::create(&tmp)?;
     ParquetWriter::new(f)
         .with_compression(opts.compression)
         .with_key_value_metadata(opts.key_value_metadata)
         .finish(&mut df)?;
 
-    std::fs::rename(&tmp, path)
-        .or_else(|_| {
-            if out.exists() {
-                let _ = std::fs::remove_file(out);
-            }
-            std::fs::copy(&tmp, path).and_then(|_| std::fs::remove_file(&tmp))
-        })
-        .map_err(|e| e.into())
+    std::fs::rename(&tmp, path).or_else(|_| {
+        if out.exists() {
+            let _ = std::fs::remove_file(out);
+        }
+        std::fs::copy(&tmp, path).and_then(|_| std::fs::remove_file(&tmp))
+    })?;
+    set_macro(
+        "write_parquet_elapsed_ms",
+        &parquet_started.elapsed().as_millis().to_string(),
+        true,
+    );
+    Ok(())
 }
 
 fn write_partitioned_dataframe(
@@ -1068,6 +1080,7 @@ fn write_partitioned_dataframe(
     overwrite: bool,
     meta: &str,
 ) -> Result<(), DtparquetError> {
+    let parquet_started = Instant::now();
     let out = Path::new(path);
     if out.exists() {
         if !overwrite {
@@ -1081,7 +1094,13 @@ fn write_partitioned_dataframe(
     }
     create_dir_all(out)?;
     let opts = build_parquet_write_opts(comp, level, meta)?;
-    write_partitioned_dataset_local(df, out, part, &opts)
+    write_partitioned_dataset_local(df, out, part, &opts)?;
+    set_macro(
+        "write_parquet_elapsed_ms",
+        &parquet_started.elapsed().as_millis().to_string(),
+        true,
+    );
+    Ok(())
 }
 
 fn write_partitioned_dataset_local(
@@ -1090,8 +1109,6 @@ fn write_partitioned_dataset_local(
     partition_by: &[PlSmallStr],
     opts: &ParquetWriteOptions,
 ) -> Result<(), DtparquetError> {
-    df.align_chunks_par();
-
     let get_partition_path = |part_df: &DataFrame| -> Result<PathBuf, DtparquetError> {
         let mut dir = out_dir.to_path_buf();
         for name in partition_by {
@@ -1171,6 +1188,9 @@ fn emit_init_macros(prefix: &str) {
     set_macro("if_filter_mode", "none", true);
     if prefix == "read" {
         set_macro("read_lazy_mode", "none", true);
+    } else if prefix == "write" {
+        set_macro("write_collect_elapsed_ms", "0", true);
+        set_macro("write_parquet_elapsed_ms", "0", true);
     }
     set_engine_stage(prefix, EngineStage::ScanPlan);
 }
@@ -1209,17 +1229,6 @@ fn finalize_runtime(
 fn finalize_runtime_write(scan: &StataRowSource, collects: usize, start: Instant) {
     set_engine_stage("write", EngineStage::StataSink);
     CommonBatchTunerMetrics::from_tuner(&scan.batch_tuner_snapshot()).emit_to_macros("write");
-    for (m, v) in [
-        ("mode", scan.pipeline_mode_name().to_string()),
-        ("capacity", scan.queue_capacity().to_string()),
-        ("peak", scan.queue_peak().to_string()),
-        ("bp_events", scan.queue_backpressure_events().to_string()),
-        ("wait_ms", scan.queue_wait_ms().to_string()),
-        ("prod_batches", scan.queue_produced_batches().to_string()),
-        ("cons_batches", scan.queue_consumed_batches().to_string()),
-    ] {
-        set_macro(&format!("write_queue_{m}"), &v, true);
-    }
     let mut m = CommonRuntimeMetrics::zero();
     m.collect_calls = collects;
     m.planned_batches = scan.planned_batches();

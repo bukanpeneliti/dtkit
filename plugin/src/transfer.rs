@@ -37,7 +37,7 @@ pub struct TransferContext<'a> {
 macro_rules! pull_numeric_col {
     ($T:ty, $col:expr, $off:expr, $n:expr, $name:expr, $cast:expr) => {{
         let values: Vec<Option<$T>> = (0..$n)
-            .map(|r| pull_numeric_cell($col, $off + r + 1).map($cast))
+            .map(|r| pull_numeric_cell_unchecked($col, $off + r + 1).map($cast))
             .collect();
         Ok(Series::new($name, values))
     }};
@@ -108,15 +108,6 @@ pub fn convert_datetime_to_stata_clock(value: AnyValue<'_>) -> CellConversion<f6
             let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
             CellConversion::Value(Some(v as f64 / factor + sec_shift_scaled))
         }
-        AnyValue::Null => CellConversion::Value(None),
-        _ => CellConversion::Mismatch,
-    }
-}
-
-pub fn convert_strict_string(value: AnyValue<'_>) -> CellConversion<String> {
-    match value {
-        AnyValue::String(v) => CellConversion::Value(Some(v.to_string())),
-        AnyValue::StringOwned(v) => CellConversion::Value(Some(v.to_string())),
         AnyValue::Null => CellConversion::Value(None),
         _ => CellConversion::Mismatch,
     }
@@ -287,6 +278,48 @@ fn process_row_range(
     Ok(())
 }
 
+fn to_range_error(context: &str) -> PolarsError {
+    PolarsError::ComputeError(format!("Invalid Stata bounds in {context}").into())
+}
+
+fn validate_write_transfer_range(
+    transfer_column: &TransferColumnSpec,
+    start_index: usize,
+    start_row: usize,
+    end_row: usize,
+    stata_offset: usize,
+) -> PolarsResult<()> {
+    if start_row >= end_row {
+        return Ok(());
+    }
+    let row_start = start_index + start_row + 1 + stata_offset;
+    let row_end_exclusive = start_index + end_row + 1 + stata_offset;
+    let col = transfer_column.stata_col_index + 1;
+    validate_stata_range(
+        row_start,
+        row_end_exclusive,
+        col,
+        col + 1,
+        "write_transfer_column_range",
+    )
+    .map_err(|_| to_range_error("write_transfer_column_range"))
+}
+
+fn validate_read_transfer_range(
+    col: usize,
+    offset: usize,
+    n_rows: usize,
+    context: &str,
+) -> PolarsResult<()> {
+    if n_rows == 0 {
+        return Ok(());
+    }
+    let row_start = offset + 1;
+    let row_end_exclusive = offset + n_rows + 1;
+    validate_stata_range(row_start, row_end_exclusive, col, col + 1, context)
+        .map_err(|_| to_range_error(context))
+}
+
 pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     let converter = match ctx.col.dtype() {
         DataType::Boolean => convert_boolean_to_f64,
@@ -304,6 +337,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Time => convert_time_to_stata_millis,
         DataType::Datetime(_, _) => convert_datetime_to_stata_clock,
         DataType::Null => {
+            let n_calls = (ctx.end_row - ctx.start_row) as u64;
             write_all_missing_range(
                 ctx.transfer_column,
                 ctx.start_index,
@@ -311,9 +345,10 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
                 ctx.end_row,
                 ctx.stata_offset,
                 |row, col| {
-                    replace_number(None, row, col);
+                    replace_number_unchecked(None, row, col);
                 },
             );
+            add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
             return Ok(());
         }
         _ => {
@@ -331,8 +366,9 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
 
 pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
-        DataType::String => write_string_with_converter(ctx, convert_strict_string),
+        DataType::String => write_string_values(ctx),
         DataType::Null => {
+            let n_calls = (ctx.end_row - ctx.start_row) as u64;
             write_all_missing_range(
                 ctx.transfer_column,
                 ctx.start_index,
@@ -340,9 +376,10 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
                 ctx.end_row,
                 ctx.stata_offset,
                 |row, col| {
-                    replace_string(None, row, col);
+                    replace_string_unchecked(None, row, col);
                 },
             );
+            add_transfer_metric_counts(0, n_calls, 0, 0, 0);
             Ok(())
         }
         _ => {
@@ -358,7 +395,7 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
                 end_row: ctx.end_row,
                 stata_offset: ctx.stata_offset,
             };
-            write_string_with_converter(&casted_ctx, convert_strict_string)
+            write_string_values(&casted_ctx)
         }
     }
 }
@@ -367,8 +404,10 @@ fn write_with_converter<T>(
     ctx: &TransferContext,
     converter: fn(AnyValue<'_>) -> CellConversion<T>,
     replacer: impl Fn(Option<T>, usize, usize),
+    on_batch_done: impl Fn(u64),
     type_name: &str,
 ) -> PolarsResult<()> {
+    let mut write_calls = 0u64;
     for row_idx in ctx.start_row..ctx.end_row {
         let global_row_idx = row_idx + ctx.start_index;
         let value = ctx.col.get(row_idx)?;
@@ -379,8 +418,10 @@ fn write_with_converter<T>(
                     global_row_idx + 1 + ctx.stata_offset,
                     ctx.transfer_column.stata_col_index + 1,
                 );
+                write_calls += 1;
             }
             CellConversion::Mismatch => {
+                on_batch_done(write_calls);
                 record_transfer_conversion_failure();
                 return Err(dtype_mismatch_error(
                     ctx.col,
@@ -390,6 +431,7 @@ fn write_with_converter<T>(
             }
         }
     }
+    on_batch_done(write_calls);
     Ok(())
 }
 
@@ -401,8 +443,9 @@ fn write_numeric_with_converter(
         ctx,
         converter,
         |v, row, col| {
-            replace_number(v, row, col);
+            replace_number_unchecked(v, row, col);
         },
+        |calls| add_transfer_metric_counts(calls, 0, 0, 0, 0),
         "numeric/date/time/datetime",
     )
 }
@@ -424,18 +467,34 @@ fn write_all_missing_range(
     }
 }
 
-fn write_string_with_converter(
-    ctx: &TransferContext,
-    converter: fn(AnyValue<'_>) -> CellConversion<String>,
-) -> PolarsResult<()> {
-    write_with_converter(
-        ctx,
-        converter,
-        |v, row, col| {
-            replace_string(v, row, col);
-        },
-        "string",
-    )
+fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
+    let mut write_calls = 0u64;
+    for row_idx in ctx.start_row..ctx.end_row {
+        let global_row_idx = row_idx + ctx.start_index;
+        let row = global_row_idx + 1 + ctx.stata_offset;
+        let col = ctx.transfer_column.stata_col_index + 1;
+        match ctx.col.get(row_idx)? {
+            AnyValue::String(v) => {
+                replace_string_ref_unchecked(Some(v), row, col);
+                write_calls += 1;
+            }
+            AnyValue::StringOwned(v) => {
+                replace_string_ref_unchecked(Some(v.as_str()), row, col);
+                write_calls += 1;
+            }
+            AnyValue::Null => {
+                replace_string_ref_unchecked(None, row, col);
+                write_calls += 1;
+            }
+            _ => {
+                add_transfer_metric_counts(0, write_calls, 0, 0, 0);
+                record_transfer_conversion_failure();
+                return Err(dtype_mismatch_error(ctx.col, ctx.transfer_column, "string"));
+            }
+        }
+    }
+    add_transfer_metric_counts(0, write_calls, 0, 0, 0);
+    Ok(())
 }
 
 fn write_strict_typed_numeric_column_range(
@@ -449,6 +508,7 @@ fn write_strict_typed_numeric_column_range(
     }
 
     if matches!(ctx.col.dtype(), DataType::Null) {
+        let n_calls = (ctx.end_row - ctx.start_row) as u64;
         write_all_missing_range(
             ctx.transfer_column,
             ctx.start_index,
@@ -456,9 +516,10 @@ fn write_strict_typed_numeric_column_range(
             ctx.end_row,
             ctx.stata_offset,
             |row, col| {
-                replace_number(None, row, col);
+                replace_number_unchecked(None, row, col);
             },
         );
+        add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
         return Ok(());
     }
 
@@ -478,6 +539,13 @@ pub(crate) fn write_transfer_column_range(
     end_row: usize,
     stata_offset: usize,
 ) -> PolarsResult<()> {
+    validate_write_transfer_range(
+        transfer_column,
+        start_index,
+        start_row,
+        end_row,
+        stata_offset,
+    )?;
     match transfer_column.writer_kind {
         TransferWriterKind::Numeric => {
             let ctx = TransferContext {
@@ -559,9 +627,34 @@ pub fn read_batch_from_columns(
     offset: usize,
     n_rows: usize,
 ) -> PolarsResult<DataFrame> {
-    let mut columns = Vec::with_capacity(column_info.len());
-    for (idx, info) in column_info.iter().enumerate() {
-        columns.push(series_from_stata_column(idx + 1, info, offset, n_rows)?.into_column());
+    let pool = get_compute_thread_pool();
+    let use_parallel = pool.current_num_threads() > 1 && column_info.len() >= 6 && n_rows >= 20_000;
+
+    let columns = if use_parallel {
+        let mut indexed: Vec<(usize, Column)> = pool.install(|| {
+            column_info
+                .par_iter()
+                .enumerate()
+                .map(|(idx, info)| {
+                    series_from_stata_column(idx + 1, info, offset, n_rows)
+                        .map(|s| (idx, s.into_column()))
+                })
+                .collect::<PolarsResult<Vec<(usize, Column)>>>()
+        })?;
+        indexed.sort_by_key(|(idx, _)| *idx);
+        indexed.into_iter().map(|(_, c)| c).collect()
+    } else {
+        let mut cols = Vec::with_capacity(column_info.len());
+        for (idx, info) in column_info.iter().enumerate() {
+            cols.push(series_from_stata_column(idx + 1, info, offset, n_rows)?.into_column());
+        }
+        cols
+    };
+
+    if use_parallel {
+        set_macro("write_collect_parallel", "1", true);
+    } else {
+        set_macro("write_collect_parallel", "0", true);
     }
     DataFrame::new_infer_height(columns)
 }
@@ -572,49 +665,61 @@ pub fn series_from_stata_column(
     offset: usize,
     n_rows: usize,
 ) -> Result<Series, PolarsError> {
+    validate_read_transfer_range(stata_col_index, offset, n_rows, "series_from_stata_column")?;
+
     if info.dtype == "strl" {
         let mut strl_arena = StrlArena::new();
-        let values: Vec<Option<String>> = (0..n_rows)
-            .map(|row_idx| {
-                pull_strl_cell_with_arena(stata_col_index, offset + row_idx + 1, &mut strl_arena)
-            })
-            .collect();
+        let mut values = Vec::with_capacity(n_rows);
+        for row_idx in 0..n_rows {
+            values.push(pull_strl_cell_with_arena_unchecked(
+                stata_col_index,
+                offset + row_idx + 1,
+                &mut strl_arena,
+            ));
+        }
+        add_transfer_metric_counts(0, 0, 0, 0, n_rows as u64);
         return Ok(Series::new((&info.name).into(), values));
     }
 
     if is_stata_string_dtype(&info.dtype) {
         let width = info.str_length.max(1);
         let mut str_buffer: Vec<i8> = vec![0; width.saturating_add(1)];
-        let values: Vec<String> = (0..n_rows)
-            .map(|row_idx| {
-                pull_string_cell_with_buffer(stata_col_index, offset + row_idx + 1, &mut str_buffer)
-            })
-            .collect();
+        let mut values = Vec::with_capacity(n_rows);
+        for row_idx in 0..n_rows {
+            values.push(pull_string_cell_with_buffer_unchecked(
+                stata_col_index,
+                offset + row_idx + 1,
+                &mut str_buffer,
+            ));
+        }
+        add_transfer_metric_counts(0, 0, 0, n_rows as u64, 0);
         return Ok(Series::new((&info.name).into(), values));
     }
 
     if is_stata_date_format(&info.format) {
         let values: Vec<Option<i32>> = (0..n_rows)
             .map(|row_idx| {
-                pull_numeric_cell(stata_col_index, offset + row_idx + 1)
+                pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i32 - STATA_DATE_ORIGIN)
             })
             .collect();
+        add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
         return Series::new((&info.name).into(), values).cast(&DataType::Date);
     }
 
     if is_stata_datetime_format(&info.format) {
         let values: Vec<Option<i64>> = (0..n_rows)
             .map(|row_idx| {
-                pull_numeric_cell(stata_col_index, offset + row_idx + 1)
+                pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i64 - ((STATA_EPOCH_MS as f64) * (TIME_MS as f64)) as i64)
             })
             .collect();
+        add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
         return Series::new((&info.name).into(), values)
             .cast(&DataType::Datetime(TimeUnit::Milliseconds, None));
     }
 
-    match info.dtype.as_str() {
+    let s = match info.dtype.as_str() {
         "byte" => pull_numeric_col!(
             i8,
             stata_col_index,
@@ -655,7 +760,11 @@ pub fn series_from_stata_column(
             (&info.name).into(),
             |v| v
         ),
+    };
+    if s.is_ok() {
+        add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
     }
+    s
 }
 
 pub struct StataRowSource {
@@ -668,7 +777,6 @@ pub struct StataRowSource {
     processed_batches: AtomicUsize,
     schema: Arc<Schema>,
     batch_tuner: Arc<Mutex<AdaptiveBatchTuner>>,
-    queue_capacity: usize,
 }
 
 impl StataRowSource {
@@ -709,7 +817,6 @@ impl StataRowSource {
             processed_batches: AtomicUsize::new(0),
             schema: Arc::new(Schema::from_iter(fields)),
             batch_tuner,
-            queue_capacity: 0,
         }
     }
 
@@ -734,29 +841,7 @@ impl StataRowSource {
         "legacy_direct"
     }
 
-    pub fn queue_capacity(&self) -> usize {
-        self.queue_capacity
-    }
-
-    pub fn queue_peak(&self) -> usize {
-        0
-    }
-    pub fn queue_backpressure_events(&self) -> usize {
-        0
-    }
-    pub fn queue_wait_ms(&self) -> usize {
-        0
-    }
-    pub fn queue_produced_batches(&self) -> usize {
-        self.processed_batches()
-    }
-    pub fn queue_consumed_batches(&self) -> usize {
-        self.processed_batches()
-    }
-
-    pub fn join_pipeline_worker(&self) {
-        let _ = self;
-    }
+    pub fn join_pipeline_worker(&self) {}
 
     fn read_batch(&self, batch_offset: usize, batch_rows: usize) -> PolarsResult<DataFrame> {
         read_batch_from_columns(&self.column_info, self.start_row + batch_offset, batch_rows)

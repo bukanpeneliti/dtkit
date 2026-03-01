@@ -58,6 +58,12 @@ static STRL_BINARY_EVENTS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_CONVERSION_FAILURES: AtomicU64 = AtomicU64::new(0);
 
+#[derive(Copy, Clone, Debug)]
+pub struct StataBounds {
+    pub nobs: usize,
+    pub nvar: usize,
+}
+
 pub fn reset_transfer_metrics() {
     let a = [
         &REPLACE_NUMBER_CALLS,
@@ -132,6 +138,10 @@ pub fn replace_number(value: Option<f64>, row: usize, col: usize) -> i32 {
     stata_sys::replace_number(value, row, col)
 }
 
+pub fn replace_number_unchecked(value: Option<f64>, row: usize, col: usize) -> i32 {
+    stata_sys::replace_number(value, row, col)
+}
+
 pub fn replace_string(value: Option<String>, row: usize, col: usize) -> i32 {
     REPLACE_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
     unsafe {
@@ -148,11 +158,75 @@ pub fn replace_string(value: Option<String>, row: usize, col: usize) -> i32 {
     stata_sys::replace_string(value, row, col)
 }
 
+pub fn replace_string_unchecked(value: Option<String>, row: usize, col: usize) -> i32 {
+    stata_sys::replace_string(value, row, col)
+}
+
+pub fn replace_string_ref_unchecked(value: Option<&str>, row: usize, col: usize) -> i32 {
+    stata_sys::replace_string_ref(value, row, col)
+}
+
 pub fn record_transfer_conversion_failure() {
     TRANSFER_CONVERSION_FAILURES.fetch_add(1, Ordering::Relaxed);
 }
 pub fn count_stata_rows() -> i32 {
     unsafe { SF_nobs() }
+}
+
+pub fn load_stata_bounds() -> StataBounds {
+    unsafe {
+        StataBounds {
+            nobs: SF_nobs() as usize,
+            nvar: SF_nvar() as usize,
+        }
+    }
+}
+
+pub fn validate_stata_range(
+    row_start: usize,
+    row_end_exclusive: usize,
+    col_start: usize,
+    col_end_exclusive: usize,
+    err_context: &str,
+) -> Result<(), i32> {
+    let b = load_stata_bounds();
+    let rows_ok =
+        row_start >= 1 && row_start < row_end_exclusive && row_end_exclusive <= b.nobs + 1;
+    let cols_ok =
+        col_start >= 1 && col_start < col_end_exclusive && col_end_exclusive <= b.nvar + 1;
+    if rows_ok && cols_ok {
+        Ok(())
+    } else {
+        display(&format!(
+            "dtparquet: bounds error in {err_context} - rows [{row_start}, {})/{} cols [{col_start}, {})/{}",
+            row_end_exclusive, b.nobs, col_end_exclusive, b.nvar
+        ));
+        Err(198)
+    }
+}
+
+pub fn add_transfer_metric_counts(
+    replace_number_calls: u64,
+    replace_string_calls: u64,
+    pull_numeric_calls: u64,
+    pull_string_calls: u64,
+    pull_strl_calls: u64,
+) {
+    if replace_number_calls > 0 {
+        REPLACE_NUMBER_CALLS.fetch_add(replace_number_calls, Ordering::Relaxed);
+    }
+    if replace_string_calls > 0 {
+        REPLACE_STRING_CALLS.fetch_add(replace_string_calls, Ordering::Relaxed);
+    }
+    if pull_numeric_calls > 0 {
+        PULL_NUMERIC_CALLS.fetch_add(pull_numeric_calls, Ordering::Relaxed);
+    }
+    if pull_string_calls > 0 {
+        PULL_STRING_CALLS.fetch_add(pull_string_calls, Ordering::Relaxed);
+    }
+    if pull_strl_calls > 0 {
+        PULL_STRL_CALLS.fetch_add(pull_strl_calls, Ordering::Relaxed);
+    }
 }
 
 pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
@@ -176,6 +250,17 @@ pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
     }
 }
 
+pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
+    let mut val: f64 = 0.0;
+    unsafe {
+        if SF_vdata(col as i32, row as i32, &mut val) != 0 || SF_is_missing(val) {
+            None
+        } else {
+            Some(val)
+        }
+    }
+}
+
 pub fn pull_string_cell_with_buffer(col: usize, row: usize, buffer: &mut Vec<i8>) -> String {
     use std::ffi::{c_char, CStr};
     PULL_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
@@ -189,6 +274,28 @@ pub fn pull_string_cell_with_buffer(col: usize, row: usize, buffer: &mut Vec<i8>
             ));
             return String::new();
         }
+        if buffer.is_empty() {
+            display("dtparquet: pull_string buffer was empty; resizing to 2 bytes");
+            buffer.resize(2, 0);
+        } else {
+            buffer[0] = 0;
+        }
+        if SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char) != 0 {
+            return String::new();
+        }
+        CStr::from_ptr(buffer.as_ptr() as *const c_char)
+            .to_string_lossy()
+            .into_owned()
+    }
+}
+
+pub fn pull_string_cell_with_buffer_unchecked(
+    col: usize,
+    row: usize,
+    buffer: &mut Vec<i8>,
+) -> String {
+    use std::ffi::{c_char, CStr};
+    unsafe {
         if buffer.is_empty() {
             display("dtparquet: pull_string buffer was empty; resizing to 2 bytes");
             buffer.resize(2, 0);
@@ -232,6 +339,38 @@ pub fn pull_strl_cell_with_arena(col: usize, row: usize, arena: &mut StrlArena) 
             ));
             return None;
         }
+        let len = SF_sdatalen(col as i32, row as i32);
+        if len < 0 {
+            return None;
+        }
+        let len_u = len as usize;
+        arena.reserve(len_u + 1);
+        let buf = &mut arena.buffer[..len_u + 1];
+        SF_strldata(
+            col as i32,
+            row as i32,
+            buf.as_mut_ptr() as *mut c_char,
+            len + 1,
+        );
+        let end = buf[..len_u].iter().position(|&b| b == 0).unwrap_or(len_u);
+        if end < len_u {
+            STRL_TRUNC_EVENTS.fetch_add(1, Ordering::Relaxed);
+        }
+        let res = String::from_utf8_lossy(&buf[..end]).into_owned();
+        if res.len() != end {
+            STRL_BINARY_EVENTS.fetch_add(1, Ordering::Relaxed);
+        }
+        Some(res)
+    }
+}
+
+pub fn pull_strl_cell_with_arena_unchecked(
+    col: usize,
+    row: usize,
+    arena: &mut StrlArena,
+) -> Option<String> {
+    use std::ffi::c_char;
+    unsafe {
         let len = SF_sdatalen(col as i32, row as i32);
         if len < 0 {
             return None;
