@@ -1252,7 +1252,7 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     fn temp_parquet_file(tag: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!(
-            "dtpq_{tag}_{}.parquet",
+            "dtparquet_{tag}_{}.parquet",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()

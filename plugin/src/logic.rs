@@ -516,7 +516,7 @@ pub fn get_io_thread_pool() -> &'static ThreadPool {
         IO_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
         if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(get_hw_threads().clamp(2, 8))
-            .thread_name(|i| format!("dtpq-io-{i}"))
+            .thread_name(|i| format!("dtparquet-io-{i}"))
             .build()
         {
             pool
@@ -524,7 +524,7 @@ pub fn get_io_thread_pool() -> &'static ThreadPool {
             display("dtparquet: failed to initialize IO thread pool, falling back to 1 thread");
             ThreadPoolBuilder::new()
                 .num_threads(1)
-                .thread_name(|_| "dtpq-io-fallback".to_string())
+                .thread_name(|_| "dtparquet-io-fallback".to_string())
                 .build()
                 .expect("dtparquet: fallback IO thread pool initialization failed")
         }
@@ -539,7 +539,7 @@ pub fn get_compute_thread_pool() -> &'static ThreadPool {
             .unwrap_or_else(get_hw_threads);
         if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(n.max(1))
-            .thread_name(|i| format!("dtpq-cpu-{i}"))
+            .thread_name(|i| format!("dtparquet-cpu-{i}"))
             .build()
         {
             pool
@@ -549,7 +549,7 @@ pub fn get_compute_thread_pool() -> &'static ThreadPool {
             );
             ThreadPoolBuilder::new()
                 .num_threads(1)
-                .thread_name(|_| "dtpq-cpu-fallback".to_string())
+                .thread_name(|_| "dtparquet-cpu-fallback".to_string())
                 .build()
                 .expect("dtparquet: fallback compute thread pool initialization failed")
         }
