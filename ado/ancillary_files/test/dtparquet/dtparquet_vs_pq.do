@@ -23,7 +23,7 @@ if !fileexists("ado/ancillary_files/dtparquet.dll") {
 * Check pq is available
 capture which pq
 if _rc != 0 {
-    display as error "pq command not found. Install stata_parquet_io"
+    display as error "pq command not found. Install with ssc install pq"
     exit 601
 }
 
