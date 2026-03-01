@@ -22,8 +22,6 @@ pub use stata_sys::{
 // --- Config Constants ---
 
 pub const SCHEMA_HANDOFF_PROTOCOL_VERSION: u32 = 2;
-pub const SCHEMA_VALIDATION_SAMPLE_ROWS: usize = 100;
-pub const DEFAULT_BATCH_SIZE: usize = 50_000;
 
 pub const ENV_DTPARQUET_THREADS: &str = "DTPARQUET_THREADS";
 pub const ENV_POLARS_MAX_THREADS: &str = "POLARS_MAX_THREADS";
@@ -122,40 +120,8 @@ pub fn read_macro(name: &str, global: bool, buffer_size: Option<usize>) -> Strin
     stata_sys::get_macro(name, global, buffer_size).unwrap_or_default()
 }
 
-pub fn replace_number(value: Option<f64>, row: usize, col: usize) -> i32 {
-    REPLACE_NUMBER_CALLS.fetch_add(1, Ordering::Relaxed);
-    unsafe {
-        let nobs = SF_nobs();
-        let nvar = SF_nvar();
-        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
-            display(&format!(
-                "dtparquet: bounds error - row {}/{} col {}/{}",
-                row, nobs, col, nvar
-            ));
-            return 198;
-        }
-    }
-    stata_sys::replace_number(value, row, col)
-}
-
 pub fn replace_number_unchecked(value: Option<f64>, row: usize, col: usize) -> i32 {
     stata_sys::replace_number(value, row, col)
-}
-
-pub fn replace_string(value: Option<String>, row: usize, col: usize) -> i32 {
-    REPLACE_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
-    unsafe {
-        let nobs = SF_nobs();
-        let nvar = SF_nvar();
-        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
-            display(&format!(
-                "dtparquet: bounds error - row {}/{} col {}/{}",
-                row, nobs, col, nvar
-            ));
-            return 198;
-        }
-    }
-    stata_sys::replace_string(value, row, col)
 }
 
 pub fn replace_string_unchecked(value: Option<String>, row: usize, col: usize) -> i32 {
@@ -261,34 +227,6 @@ pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     }
 }
 
-pub fn pull_string_cell_with_buffer(col: usize, row: usize, buffer: &mut Vec<i8>) -> String {
-    use std::ffi::{c_char, CStr};
-    PULL_STRING_CALLS.fetch_add(1, Ordering::Relaxed);
-    unsafe {
-        let nobs = SF_nobs();
-        let nvar = SF_nvar();
-        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
-            display(&format!(
-                "dtparquet: bounds error in pull_string - row {}/{} col {}/{}",
-                row, nobs, col, nvar
-            ));
-            return String::new();
-        }
-        if buffer.is_empty() {
-            display("dtparquet: pull_string buffer was empty; resizing to 2 bytes");
-            buffer.resize(2, 0);
-        } else {
-            buffer[0] = 0;
-        }
-        if SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char) != 0 {
-            return String::new();
-        }
-        CStr::from_ptr(buffer.as_ptr() as *const c_char)
-            .to_string_lossy()
-            .into_owned()
-    }
-}
-
 pub fn pull_string_cell_with_buffer_unchecked(
     col: usize,
     row: usize,
@@ -323,44 +261,6 @@ impl StrlArena {
         if self.buffer.len() < len {
             self.buffer.resize((len.div_ceil(16384)) * 16384, 0);
         }
-    }
-}
-
-pub fn pull_strl_cell_with_arena(col: usize, row: usize, arena: &mut StrlArena) -> Option<String> {
-    use std::ffi::c_char;
-    PULL_STRL_CALLS.fetch_add(1, Ordering::Relaxed);
-    unsafe {
-        let nobs = SF_nobs();
-        let nvar = SF_nvar();
-        if row < 1 || row > nobs as usize || col < 1 || col > nvar as usize {
-            display(&format!(
-                "dtparquet: bounds error in pull_strl - row {}/{} col {}/{}",
-                row, nobs, col, nvar
-            ));
-            return None;
-        }
-        let len = SF_sdatalen(col as i32, row as i32);
-        if len < 0 {
-            return None;
-        }
-        let len_u = len as usize;
-        arena.reserve(len_u + 1);
-        let buf = &mut arena.buffer[..len_u + 1];
-        SF_strldata(
-            col as i32,
-            row as i32,
-            buf.as_mut_ptr() as *mut c_char,
-            len + 1,
-        );
-        let end = buf[..len_u].iter().position(|&b| b == 0).unwrap_or(len_u);
-        if end < len_u {
-            STRL_TRUNC_EVENTS.fetch_add(1, Ordering::Relaxed);
-        }
-        let res = String::from_utf8_lossy(&buf[..end]).into_owned();
-        if res.len() != end {
-            STRL_BINARY_EVENTS.fetch_add(1, Ordering::Relaxed);
-        }
-        Some(res)
     }
 }
 

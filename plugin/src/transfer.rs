@@ -837,10 +837,6 @@ impl StataRowSource {
         self.batch_tuner.lock().unwrap().clone()
     }
 
-    pub fn pipeline_mode_name(&self) -> &'static str {
-        "legacy_direct"
-    }
-
     pub fn join_pipeline_worker(&self) {}
 
     fn read_batch(&self, batch_offset: usize, batch_rows: usize) -> PolarsResult<DataFrame> {

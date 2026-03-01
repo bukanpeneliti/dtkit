@@ -70,8 +70,6 @@ pub struct ReadArgs {
     pub safe_relaxed: bool,
     pub asterisk_to_variable_name: Option<String>,
     pub order_by: String,
-    pub order_by_type: usize,
-    pub order_descending: f64,
     pub stata_offset: usize,
     pub random_share: f64,
     pub random_seed: u64,
@@ -100,10 +98,6 @@ pub struct DescribeArgs {
     pub file_path: String,
     pub detailed: bool,
     pub memory_savvy: bool,
-    pub sorting: Option<String>,
-    pub compress: bool,
-    pub asterisk_to_variable_name: Option<String>,
-    pub compress_string_to_numeric: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -161,6 +155,8 @@ fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
     if args.len() < 16 {
         return Err(DtparquetError::SubcommandArgCount("read", 16));
     }
+    let _ = parse_arg::<usize>("order_by_type", args[10])?;
+    let _ = parse_arg::<f64>("order_descending", args[11])?;
     Ok(CommandArgs::Read(ReadArgs {
         file_path: validated_path(args[0])?,
         varlist: args[1].to_string(),
@@ -176,8 +172,6 @@ fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
         safe_relaxed: args[7] == "1",
         asterisk_to_variable_name: opt_str(args[8]),
         order_by: args[9].to_string(),
-        order_by_type: parse_arg("order_by_type", args[10])?,
-        order_descending: parse_arg("order_descending", args[11])?,
         stata_offset: parse_arg("stata_offset", args[12])?,
         random_share: parse_arg("random_share", args[13])?,
         random_seed: parse_arg("random_seed", args[14])?,
@@ -219,10 +213,6 @@ fn parse_describe_args(args: &[&str]) -> ParseResult<CommandArgs> {
         file_path: validated_path(args[0])?,
         detailed: args[1] == "1",
         memory_savvy: args[2] == "1",
-        sorting: opt_str(args[3]),
-        compress: args[5] == "1",
-        asterisk_to_variable_name: opt_str(args[4]),
-        compress_string_to_numeric: args[6] == "1",
     }))
 }
 

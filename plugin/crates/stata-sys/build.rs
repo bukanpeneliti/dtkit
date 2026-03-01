@@ -24,8 +24,7 @@ fn main() {
             build
                 .define("SYSTEM", "OPUNIX")
                 .flag("-shared")
-                .flag("-fPIC")
-                .define("SYSTEM", "OPUNIX");
+                .flag("-fPIC");
         }
     }
 
