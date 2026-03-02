@@ -581,6 +581,8 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             &read_cast_started.elapsed().as_millis().to_string(),
             true,
         );
+        set_macro("read_cast_mode", "eager", true);
+        set_macro("read_cast_defer_reason", "eager_path", true);
         let mut t = AdaptiveBatchTuner::new(
             estimate_transfer_row_width_bytes(&plan.transfer_columns),
             req.batch_size,
@@ -606,7 +608,11 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         (l, b, t)
     } else {
         let mut lf = open_parquet_scan(req.path, req.asterisk_var)?;
-        if !boundary.cast_json.is_empty() {
+        let (cast_early, cast_mode, cast_reason) =
+            should_apply_cast_early(&boundary.cast_json, req.sql_if, req.order_by);
+        set_macro("read_cast_mode", cast_mode, true);
+        set_macro("read_cast_defer_reason", cast_reason, true);
+        if cast_early {
             let read_cast_started = Instant::now();
             lf = apply_cast(lf, &boundary.cast_json)?;
             set_macro(
@@ -629,7 +635,16 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             set_macro("if_filter_mode", "expr", true);
         }
         let lf_s = apply_random_sample(lf_f, req.random_share, req.random_seed, &mut collects)?;
-        let lf_sorted = apply_sort_transform(lf_s, req.order_by);
+        let mut lf_sorted = apply_sort_transform(lf_s, req.order_by);
+        if !cast_early && !boundary.cast_json.is_empty() {
+            let read_cast_started = Instant::now();
+            lf_sorted = apply_cast(lf_sorted, &boundary.cast_json)?;
+            set_macro(
+                "read_apply_cast_elapsed_ms",
+                &read_cast_started.elapsed().as_millis().to_string(),
+                true,
+            );
+        }
         let mut t = AdaptiveBatchTuner::new(
             estimate_transfer_row_width_bytes(&plan.transfer_columns),
             req.batch_size,
@@ -708,6 +723,49 @@ fn apply_df_casts(df: &mut DataFrame, cast_json: &str) -> PolarsResult<()> {
         df.try_apply(&n, |s| s.cast(&DataType::String))?;
     }
     Ok(())
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum CastPositionMode {
+    Early,
+    DeferSafe,
+    DeferForce,
+}
+
+fn cast_position_mode() -> CastPositionMode {
+    match env::var(ENV_CAST_POSITION_MODE)
+        .unwrap_or_else(|_| "defer_safe".to_string())
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "early" => CastPositionMode::Early,
+        "defer_force" | "force" => CastPositionMode::DeferForce,
+        _ => CastPositionMode::DeferSafe,
+    }
+}
+
+fn should_apply_cast_early(
+    cast_json: &str,
+    sql_if: Option<&str>,
+    order_by: &str,
+) -> (bool, &'static str, &'static str) {
+    if cast_json.is_empty() {
+        return (false, "none", "empty_cast_json");
+    }
+    match cast_position_mode() {
+        CastPositionMode::Early => (true, "early", "env_early"),
+        CastPositionMode::DeferForce => (false, "defer_force", "env_defer_force"),
+        CastPositionMode::DeferSafe => {
+            if sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false) {
+                return (true, "early", "safe_mode_if_present");
+            }
+            if !order_by.trim().is_empty() {
+                return (true, "early", "safe_mode_sort_present");
+            }
+            (false, "defer_safe", "safe_to_defer")
+        }
+    }
 }
 
 fn open_parquet_scan(path: &str, asterisk_var: Option<&str>) -> Result<LazyFrame, PolarsError> {
@@ -1192,6 +1250,8 @@ fn emit_init_macros(prefix: &str) {
     set_macro("if_filter_mode", "none", true);
     if prefix == "read" {
         set_macro("read_lazy_mode", "none", true);
+        set_macro("read_cast_mode", "none", true);
+        set_macro("read_cast_defer_reason", "none", true);
     } else if prefix == "write" {
         set_macro("write_collect_elapsed_ms", "0", true);
         set_macro("write_parquet_elapsed_ms", "0", true);
