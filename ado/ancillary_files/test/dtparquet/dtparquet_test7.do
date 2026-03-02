@@ -34,13 +34,33 @@ program _cleanup_dir_shallow
     capture rmdir "`target_dir'"
 end
 
+cap program drop _cleanup_dir_recursive
+program _cleanup_dir_recursive
+    args target_dir
+    if "`target_dir'" == "" {
+        exit
+    }
+
+    local subdirs : dir "`target_dir'" dirs "*"
+    foreach d of local subdirs {
+        capture noisily _cleanup_dir_recursive "`target_dir'/`d'"
+    }
+
+    local files : dir "`target_dir'" files "*"
+    foreach f of local files {
+        capture erase "`target_dir'/`f'"
+    }
+
+    capture rmdir "`target_dir'"
+end
+
 * Deterministic pre-clean for generated outputs from prior interrupted runs
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
-capture noisily _cleanup_dir_shallow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
+capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
@@ -554,8 +574,9 @@ display _newline "=== TEST CASE 8: Partition_by save + overwrite guard ==="
 timer clear 8
 timer on 8
 local ++total_tests
-local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
-capture noisily _cleanup_dir_shallow "`partition_dir'"
+local partition_run_id = string(floor(runiform()*1000000000))
+local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out_`partition_run_id'"
+capture noisily _cleanup_dir_recursive "`partition_dir'"
 capture error 0
 
 dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
@@ -933,7 +954,7 @@ label values z zlbl
 label variable z "z label"
 label data "partitioned meta test"
 
-dtparquet save "`partition_meta_dir'", partition_by(group) replace
+dtparquet save "`partition_meta_dir'", partitionby(group) replace
 
 * Check metadata in one of the leaf files
 local leaf_file "`partition_meta_dir'/group=0"

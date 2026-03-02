@@ -1,4 +1,4 @@
-*! Version 1.1.1 19Feb2026
+*! Version 2.0.0 02Mar2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -170,7 +170,7 @@ program dtparquet_plugin, plugin using("ado/ancillary_files/dtparquet.dll")
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTITION_by(string)]
+    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTitionby(string)]
     local is_nolabel = ("`nolabel'" != "")
     local compression = lower(trim("`compress'"))
     if "`compression'" == "" local compression zstd
@@ -184,7 +184,7 @@ program dtparquet_save
     if lower(substr("`file'", -8, .)) == ".parquet" {
         local file = substr("`file'", 1, length("`file'") - 8)
     }
-    if "`partition_by'" == "" {
+    if "`partitionby'" == "" {
         local file "`file'.parquet"
     }
 
@@ -303,12 +303,12 @@ program dtparquet_save
     local inc_notes  = (`is_nolabel' == 0)
 
     if `is_nolabel' {
-        plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
+        plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partitionby'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
     }
     else {
-        capture plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "`schema_payload_json'" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
+        capture plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "`schema_payload_json'" "`partitionby'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
         if _rc != 0 {
-            plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partition_by'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
+            plugin call dtparquet_plugin, "save" "`file'" "from_macro" "0" "0" "" "from_macros" "`partitionby'" "`compression'" "-1" "`inc_labels'" "`inc_notes'" "`is_replace'" "`chunksize'"
         }
     }
 

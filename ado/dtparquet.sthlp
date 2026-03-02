@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.0  14jan2026}{...}
+{* *! version 2.0.0  02Mar2026}{...}
 {vieweralsosee "[D] use" "help use"}{...}
 {vieweralsosee "[D] save" "help save"}{...}
 {vieweralsosee "[D] import" "help import"}{...}
@@ -114,6 +114,7 @@ Options are presented under the following headings:
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
 {synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
+{synopt :{opt part:itionby(varlist)}}write partitioned Parquet output by variables{p_end}
 {synoptline}
 
 {marker use_options}{...}
@@ -157,6 +158,9 @@ Options are presented under the following headings:
 
 {pstd}Save the current dataset to Parquet (abbreviated){p_end}
 {phang2}{cmd:. dtparquet sa mydata.parquet, re}
+
+{pstd}Save partitioned output by selected variables{p_end}
+{phang2}{cmd:. dtparquet sa sales, partitionby(year region)}
 
 {pstd}Load specific variables from a Parquet file (abbreviated){p_end}
 {phang2}{cmd:. dtparquet u id price mpg using mydata.parquet, c}
