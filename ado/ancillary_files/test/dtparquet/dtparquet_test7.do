@@ -574,7 +574,7 @@ display _newline "=== TEST CASE 8: Partition_by save + overwrite guard ==="
 timer clear 8
 timer on 8
 local ++total_tests
-local partition_run_id = string(floor(runiform()*1000000000))
+local partition_run_id = string(floor(runiform()*1000000000), "%12.0f")
 local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out_`partition_run_id'"
 capture noisily _cleanup_dir_recursive "`partition_dir'"
 capture error 0
@@ -810,6 +810,13 @@ if id[1] != 1 local ++t11_err
 if code[3] != 1234567890123 local ++t11_err
 
 dtparquet import "`import_allstring_dta'" using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
+local t11_import_read_ms = real("$dtparquet_import_read_elapsed_ms")
+local t11_import_save_ms = real("$dtparquet_import_save_elapsed_ms")
+local t11_read_cast_ms = real("$read_apply_cast_elapsed_ms")
+if missing(`t11_import_read_ms') local t11_import_read_ms = 0
+if missing(`t11_import_save_ms') local t11_import_save_ms = 0
+if missing(`t11_read_cast_ms') local t11_read_cast_ms = 0
+display as text "Test 11 allstring import stage timings (ms): read=" as result %9.0f `t11_import_read_ms' as text " save=" as result %9.0f `t11_import_save_ms' as text " cast=" as result %9.0f `t11_read_cast_ms'
 quietly use "`import_allstring_dta'", clear
 local id_type: type ID
 local year_type: type year

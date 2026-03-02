@@ -574,7 +574,13 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 .map(|s| PlSmallStr::from(*s))
                 .collect::<Vec<_>>(),
         )?;
+        let read_cast_started = Instant::now();
         apply_df_casts(&mut df, &boundary.cast_json)?;
+        set_macro(
+            "read_apply_cast_elapsed_ms",
+            &read_cast_started.elapsed().as_millis().to_string(),
+            true,
+        );
         let mut t = AdaptiveBatchTuner::new(
             estimate_transfer_row_width_bytes(&plan.transfer_columns),
             req.batch_size,
@@ -601,7 +607,15 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
     } else {
         let mut lf = open_parquet_scan(req.path, req.asterisk_var)?;
         if !boundary.cast_json.is_empty() {
+            let read_cast_started = Instant::now();
             lf = apply_cast(lf, &boundary.cast_json)?;
+            set_macro(
+                "read_apply_cast_elapsed_ms",
+                &read_cast_started.elapsed().as_millis().to_string(),
+                true,
+            );
+        } else {
+            set_macro("read_apply_cast_elapsed_ms", "0", true);
         }
         lf = normalize_categorical(lf)?;
         let has_if = req.sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false);

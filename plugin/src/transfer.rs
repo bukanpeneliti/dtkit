@@ -210,10 +210,11 @@ fn process_batch_with_strategy(
     stata_offset: usize,
 ) -> PolarsResult<()> {
     let row_count = batch.height();
+    let prepared_columns = prepare_transfer_columns(batch, transfer_columns)?;
     let pool = get_compute_thread_pool();
     if pool.current_num_threads() <= 1 || row_count < 4_096 {
         return process_row_range(
-            batch,
+            &prepared_columns,
             start_index,
             0,
             row_count,
@@ -233,7 +234,7 @@ fn process_batch_with_strategy(
                     let start_row = chunk[0];
                     let end_row = chunk[chunk.len() - 1] + 1;
                     process_row_range(
-                        batch,
+                        &prepared_columns,
                         start_index,
                         start_row,
                         end_row,
@@ -242,30 +243,55 @@ fn process_batch_with_strategy(
                     )
                 })
         }
-        BatchMode::ByColumn => transfer_columns.par_iter().try_for_each(|transfer_column| {
-            let col = batch.column(&transfer_column.name)?;
-            write_transfer_column_range(
-                col,
-                transfer_column,
-                start_index,
-                0,
-                row_count,
-                stata_offset,
-            )
-        }),
+        BatchMode::ByColumn => transfer_columns
+            .par_iter()
+            .zip(prepared_columns.par_iter())
+            .try_for_each(|(transfer_column, col)| {
+                write_transfer_column_range(
+                    col,
+                    transfer_column,
+                    start_index,
+                    0,
+                    row_count,
+                    stata_offset,
+                )
+            }),
     })
 }
 
-fn process_row_range(
+fn prepare_transfer_columns(
     batch: &DataFrame,
+    transfer_columns: &[TransferColumnSpec],
+) -> PolarsResult<Vec<Column>> {
+    let mut prepared = Vec::with_capacity(transfer_columns.len());
+    for transfer_column in transfer_columns {
+        let col = batch.column(&transfer_column.name)?;
+        let needs_string_cast = matches!(
+            transfer_column.writer_kind,
+            TransferWriterKind::String | TransferWriterKind::Strl
+        ) && !matches!(col.dtype(), DataType::String | DataType::Null);
+
+        if needs_string_cast {
+            prepared.push(col.cast(&DataType::String).map_err(|_| {
+                record_transfer_conversion_failure();
+                dtype_mismatch_error(col, transfer_column, "string")
+            })?);
+        } else {
+            prepared.push(col.clone());
+        }
+    }
+    Ok(prepared)
+}
+
+fn process_row_range(
+    prepared_columns: &[Column],
     start_index: usize,
     start_row: usize,
     end_row: usize,
     transfer_columns: &[TransferColumnSpec],
     stata_offset: usize,
 ) -> PolarsResult<()> {
-    for transfer_column in transfer_columns {
-        let col = batch.column(&transfer_column.name)?;
+    for (transfer_column, col) in transfer_columns.iter().zip(prepared_columns.iter()) {
         write_transfer_column_range(
             col,
             transfer_column,

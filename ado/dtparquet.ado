@@ -522,6 +522,20 @@ program dtparquet_use
     }
 
     local cast_json ""
+    local n_cast_string_vars : word count `cast_string_vars'
+    if (`n_cast_string_vars' > 0) {
+        local q = char(34)
+        local cast_json "{`q'string`q':["
+        local cast_i = 0
+        foreach cvar of local cast_string_vars {
+            local cast_i = `cast_i' + 1
+            if (`cast_i' > 1) {
+                local cast_json "`cast_json',"
+            }
+            local cast_json "`cast_json'`q'`cvar'`q'"
+        }
+        local cast_json "`cast_json']}"
+    }
 
     local schema_protocol_version 2
     local mapping `"{""v"":`schema_protocol_version',""f"":[`read_fields_json']}"'
@@ -536,7 +550,7 @@ program dtparquet_use
     local order_descending 0
     local plugin_offset = max(0, `offset' - 1)
 
-    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
+    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'"
     if _rc != 0 {
         plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     }
@@ -804,6 +818,8 @@ program dtparquet_import
     frame create `import_frame'
     frame change `import_frame'
 
+    local import_read_started = clock("$S_TIME", "hms")
+
     if "`nolabel'" == "" & "`allstring'" == "" {
         dtparquet_use using `"`source'"', clear
     }
@@ -817,12 +833,22 @@ program dtparquet_import
         dtparquet_use using `"`source'"', clear nolabel allstring
     }
 
+    local import_read_elapsed_ms = clock("$S_TIME", "hms") - `import_read_started'
+    if (`import_read_elapsed_ms' < 0) local import_read_elapsed_ms = 0
+
+    local import_save_started = clock("$S_TIME", "hms")
+
     if "`replace'" == "" {
         quietly save `"`target'"'
     }
     else {
         quietly save `"`target'"', `replace'
     }
+
+    local import_save_elapsed_ms = clock("$S_TIME", "hms") - `import_save_started'
+    if (`import_save_elapsed_ms' < 0) local import_save_elapsed_ms = 0
+    global dtparquet_import_read_elapsed_ms `import_read_elapsed_ms'
+    global dtparquet_import_save_elapsed_ms `import_save_elapsed_ms'
 
     frame change `orig_frame'
     frame drop `import_frame'
