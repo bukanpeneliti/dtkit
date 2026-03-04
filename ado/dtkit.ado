@@ -45,6 +45,7 @@ program dtkit
     if (`do_update') {
         capture net uninstall dtkit
         net install dtkit, from(`github') replace
+        dtkit_sync_dtparquet_plugin, branch(`branch')
         if ( `"`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
@@ -260,3 +261,47 @@ program dtkit_test_basic
     
     display "Basic tests completed."
 end 
+
+capture program drop dtkit_sync_dtparquet_plugin
+program dtkit_sync_dtparquet_plugin
+    syntax [, branch(str)]
+
+    if ( `"`branch'"' == "" ) local branch main
+
+    if ( lower("`c(os)'") != "windows" ) {
+        display as text "Skipping dtparquet plugin download on `c(os)'."
+        exit 0
+    }
+
+    capture quietly findfile dtparquet.ado
+    if _rc {
+        display as error "Unable to locate dtparquet.ado after install."
+        exit 601
+    }
+
+    local ado_file `"`r(fn)'"'
+    local target_dir : subinstr local ado_file "dtparquet.ado" "", all
+    local target_dll `"`target_dir'dtparquet.dll"'
+    local release_base "https://github.com/bukanpeneliti/dtkit/releases"
+    local url1 `"`release_base'/download/`branch'/dtparquet.dll"'
+    local url2 `"`release_base'/latest/download/dtparquet.dll"'
+
+    local download_ok 0
+    foreach try_url in `"`url1'"' `"`url2'"' {
+        capture copy `"`try_url'"' `"`target_dll'"', replace
+        if _rc == 0 {
+            local download_ok 1
+            continue, break
+        }
+    }
+
+    if `download_ok' == 0 {
+        display as error "Failed to download dtparquet.dll release asset."
+        display as error "Tried:"
+        display as error "  `url1'"
+        display as error "  `url2'"
+        exit 601
+    }
+
+    display as result "Installed dtparquet.dll to `target_dll'"
+end

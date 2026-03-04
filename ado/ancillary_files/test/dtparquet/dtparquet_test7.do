@@ -64,18 +64,7 @@ capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtki
 
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-local promote_rc = _rc
-if _rc != 0 {
-    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
-}
-
-if `promote_rc' == 0 {
-    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-}
-else {
-    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
-}
+assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
 
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")

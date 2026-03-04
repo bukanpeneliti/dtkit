@@ -166,18 +166,16 @@ program dtparquet
 end
 
 cap program drop dtparquet_plugin
-local __dtparquet_plugin_path "dtparquet.dll"
 capture quietly findfile dtparquet.dll
 if _rc == 0 {
-    local __dtparquet_plugin_path "`r(fn)'"
+    program dtparquet_plugin, plugin using("`r(fn)'")
 }
 else {
-    capture confirm file "ado/ancillary_files/dtparquet.dll"
+    capture confirm file "ado/dtparquet.dll"
     if _rc == 0 {
-        local __dtparquet_plugin_path "ado/ancillary_files/dtparquet.dll"
+        program dtparquet_plugin, plugin using("ado/dtparquet.dll")
     }
 }
-program dtparquet_plugin, plugin using("`__dtparquet_plugin_path'")
 
 capture program drop dtparquet_save
 program dtparquet_save
