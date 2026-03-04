@@ -63,18 +63,18 @@ capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/tes
 capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 
 * Load the plugin
-local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
-capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
+capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
 local promote_rc = _rc
 if _rc != 0 {
-    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
 }
 
 if `promote_rc' == 0 {
-    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
 }
 else {
-    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+    assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
 }
 
 cap program drop dtparquet_plugin

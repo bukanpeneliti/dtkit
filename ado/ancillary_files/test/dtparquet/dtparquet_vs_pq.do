@@ -15,8 +15,8 @@ if !fileexists("ado/dtparquet.ado") {
     exit 601
 }
 
-if !fileexists("ado/ancillary_files/dtparquet.dll") {
-    display as error "Missing ado/ancillary_files/dtparquet.dll"
+if !fileexists("ado/dtparquet.dll") {
+    display as error "Missing ado/dtparquet.dll"
     exit 601
 }
 

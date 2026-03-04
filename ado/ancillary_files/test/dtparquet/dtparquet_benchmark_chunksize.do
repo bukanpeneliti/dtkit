@@ -14,10 +14,10 @@ log using ado/ancillary_files/test/log/dtparquet_benchmark_chunksize.log, replac
 // Install local versions
 discard
 run "ado/dtparquet.ado"
-local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
-capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.dll"
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
+capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
 if _rc != 0 {
-    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/dtparquet.new.dll"
+    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
 }
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
