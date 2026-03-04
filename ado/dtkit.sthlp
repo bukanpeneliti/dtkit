@@ -32,6 +32,8 @@
 {synopt :{opt update}}update dtkit to latest version{p_end}
 {synopt :{opt upgrade}}same as update{p_end}
 {synopt :{opt branch(string)}}specify GitHub branch (default: main){p_end}
+{synopt :{opt tag(string)}}download dtparquet plugin from a specific GitHub release tag{p_end}
+{synopt :{opt pluginstatus}}show dtparquet plugin file and version status{p_end}
 
 {syntab:Information}
 {synopt :{opt licenses}}display license information{p_end}
@@ -63,7 +65,7 @@ It handles installation, updates, and testing across the suite:
 {bf:dtmeta} - Metadata analysis and variable exploration
 
 {phang2}
-{bf:dtparquet} - High-performance Parquet I/O using Python/Arrow
+{bf:dtparquet} - High-performance Parquet I/O using native plugin runtime
 
 {pstd}
 {cmd:dtkit} without options displays version information and availability status of all components.
@@ -93,6 +95,15 @@ It ensures the package matches the latest GitHub release.
 {phang}
 {opt branch(string)} specifies which GitHub branch to use for installation.  Default is {bf:main}. 
 The {bf:develop} branch contains experimental features.
+
+{phang}
+{opt tag(string)} selects a specific GitHub release tag for downloading the
+{cmd:dtparquet.dll} binary during {opt update}/{opt upgrade}.  If omitted,
+the latest release asset is used.
+
+{phang}
+{opt pluginstatus} prints the detected {cmd:dtparquet} plugin location,
+whether {cmd:dtparquet.dll} is present, and the loaded plugin version.
 
 {dlgtab:Information}
 
@@ -138,6 +149,12 @@ Available options are:
 
 {pstd}Upgrade dtkit to the latest version{p_end}
 {phang2}{cmd:. dtkit, upgrade}{p_end}
+
+{pstd}Upgrade and force a specific release-tagged plugin binary{p_end}
+{phang2}{cmd:. dtkit, update tag(v2.0.0)}{p_end}
+
+{pstd}Check dtparquet plugin install/version status{p_end}
+{phang2}{cmd:. dtkit, pluginstatus}{p_end}
 
 {pstd}Run demonstration examples for all dtkit commands{p_end}
 {phang2}{cmd:. dtkit, examples}{p_end}

@@ -183,70 +183,27 @@ else {
 }
 program dtparquet_plugin, plugin using(`"`__dtparquet_plugin_path'"')
 
-capture program drop dtparquet__ensure_plugin
-program dtparquet__ensure_plugin
-    local dll_path ""
-    local new_path ""
-
-    capture confirm file "ado/dtparquet.dll"
-    if _rc == 0 {
-        local dll_path "ado/dtparquet.dll"
-    }
-    else {
-        capture quietly findfile dtparquet.dll
-        if _rc == 0 {
-            local dll_path `"`r(fn)'"'
-        }
-    }
-
-    capture quietly findfile dtparquet.new.dll
-    if _rc == 0 {
-        local new_path `"`r(fn)'"'
-    }
-    else {
-        capture confirm file "ado/dtparquet.new.dll"
-        if _rc == 0 {
-            local new_path "ado/dtparquet.new.dll"
-        }
-    }
-
-    if `"`new_path'"' != "" {
-        local promote_target `"`dll_path'"'
-        if `"`promote_target'"' == "" {
-            local promote_target : subinstr local new_path "dtparquet.new.dll" "dtparquet.dll", all
-
-            capture copy `"`new_path'"' `"`promote_target'"', replace
-            if _rc == 0 {
-                local dll_path `"`promote_target'"'
-            }
-            else {
-                display as error "dtparquet plugin binary not found: dtparquet.dll"
-                display as error "Run {bf:dtkit, update} to install the binary component."
-                exit 601
-            }
-        }
-        else {
-            display as text "{bf:Note:} dtparquet plugin update pending; restart Stata to activate."
-        }
-    }
-
-    if `"`dll_path'"' == "" {
-        display as error "dtparquet plugin binary not found: dtparquet.dll"
-        display as error "Run {bf:dtkit, update} to install the binary component."
-        exit 601
-    }
-
-    exit 0
-
-end
-
 capture program drop dtparquet__verify_plugin_version
 program dtparquet__verify_plugin_version
     local expected_version "2.0.0"
+
+    capture confirm file "ado/dtparquet.dll"
+    if _rc != 0 {
+        capture quietly findfile dtparquet.dll
+    }
+    if _rc {
+        display as error "dtparquet plugin binary not found: dtparquet.dll"
+        display as error "Run {bf:dtkit, update} to install the matching plugin binary."
+        display as text "If download is blocked, manually install from:"
+        display as text "  https://github.com/bukanpeneliti/dtkit/releases"
+        exit 601
+    }
+
     capture plugin call dtparquet_plugin, "version"
     if _rc {
         display as error "Unable to query dtparquet plugin version."
         display as error "Run {bf:dtkit, update} to install the matching plugin binary."
+        display as text "You can inspect current state with {bf:dtkit, pluginstatus}."
         exit _rc
     }
 
@@ -260,6 +217,7 @@ program dtparquet__verify_plugin_version
     if `"`plugin_version'"' != `"`expected_version'"' {
         display as error "dtparquet version mismatch: ado `expected_version' vs plugin `plugin_version'"
         display as error "Run {bf:dtkit, update} to install matching components."
+        display as text "You can inspect current state with {bf:dtkit, pluginstatus}."
         exit 459
     }
 end

@@ -11,6 +11,7 @@
 {viewerjumpto "Links to PDF documentation" "dtparquet##linkspdf"}{...}
 {viewerjumpto "Options" "dtparquet##options"}{...}
 {viewerjumpto "Examples" "dtparquet##examples"}{...}
+{viewerjumpto "Troubleshooting" "dtparquet##troubleshooting"}{...}
 {viewerjumpto "Author" "dtparquet##author"}{...}
 {p2colset 1 21 23 2}{...}
 {p2col:{bf:[D] dtparquet} {hline 2}}High-performance Parquet I/O via native plugin paths{p_end}
@@ -173,6 +174,24 @@ Options are presented under the following headings:
 
 {pstd}Convert a Parquet file to Stata format on disk{p_end}
 {phang2}{cmd:. dtparquet import final.dta using results.parquet, replace allstring}
+
+
+{marker troubleshooting}{...}
+{title:Troubleshooting}
+
+{phang}
+If you see a plugin mismatch or missing-binary error, run:
+{break}{cmd:. dtkit, update}
+
+{phang}
+If your network blocks GitHub release assets, manually download
+{cmd:dtparquet.dll} from
+{break}{browse "https://github.com/bukanpeneliti/dtkit/releases":https://github.com/bukanpeneliti/dtkit/releases}
+and place it in your dtkit ado directory (typically {cmd:`c(sysdir_plus)'d/}).
+
+{phang}
+Use {cmd:dtkit, pluginstatus} to inspect plugin path, pending updates, and
+loaded plugin version.
 
 
 {marker author}{...}
