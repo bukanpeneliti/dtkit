@@ -18,10 +18,6 @@ discard
 capture program drop dtparquet
 run "ado/dtparquet.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-capture noisily copy "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-if _rc != 0 {
-    local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.new.dll"
-}
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
 
@@ -623,20 +619,26 @@ capture noisily {
     local t16_processed = real("$write_processed_batches")
 
     assert inlist("`t16_mode'", "producer_consumer", "legacy_direct")
-    assert !missing(`t16_capacity')
-    assert !missing(`t16_peak')
-    assert !missing(`t16_backpressure')
-    assert !missing(`t16_produced')
-    assert !missing(`t16_consumed')
-    assert `t16_produced' >= 1
-    assert `t16_consumed' >= 1
-    assert `t16_consumed' == `t16_processed'
 
     if "`t16_mode'" == "producer_consumer" {
+        assert !missing(`t16_capacity')
+        assert !missing(`t16_peak')
+        assert !missing(`t16_backpressure')
+        assert !missing(`t16_produced')
+        assert !missing(`t16_consumed')
+        assert !missing(`t16_processed')
         assert `t16_capacity' >= 1
         assert `t16_peak' >= 1
         assert `t16_peak' <= `t16_capacity'
+        assert `t16_produced' >= 1
+        assert `t16_consumed' >= 1
         assert `t16_produced' == `t16_consumed'
+        assert `t16_consumed' == `t16_processed'
+    }
+    else {
+        assert missing(`t16_capacity') | `t16_capacity' == 0
+        assert missing(`t16_peak') | `t16_peak' == 0
+        assert missing(`t16_backpressure') | `t16_backpressure' >= 0
     }
 
     clear

@@ -113,6 +113,7 @@ pub struct LoadMetaArgs {
 #[derive(Debug, Clone)]
 pub enum CommandArgs {
     SetupCheck,
+    Version,
     Read(ReadArgs),
     Save(SaveArgs),
     Describe(DescribeArgs),
@@ -142,6 +143,7 @@ fn validated_path(raw: &str) -> ParseResult<String> {
 pub fn parse_command(name: &str, args: &[&str]) -> ParseResult<CommandArgs> {
     match name {
         "setup_check" => Ok(CommandArgs::SetupCheck),
+        "version" => Ok(CommandArgs::Version),
         "read" => parse_read_args(args),
         "save" => parse_save_args(args),
         "describe" => parse_describe_args(args),
@@ -240,6 +242,10 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
     match cmd {
         CommandArgs::SetupCheck => {
             display("dtparquet Rust plugin loaded successfully");
+            Ok(0)
+        }
+        CommandArgs::Version => {
+            set_macro("dtparquet_plugin_version", env!("CARGO_PKG_VERSION"), false);
             Ok(0)
         }
         CommandArgs::Read(args) => import_parquet_request(&ReadRequest {
