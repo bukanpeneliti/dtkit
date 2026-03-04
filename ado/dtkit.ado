@@ -14,6 +14,7 @@ program dtkit
         test           ///
         tests(str)     ///
         branch(str)    ///
+        tag(str)       ///
     ]
 
     // Consolidate update/upgrade
@@ -45,6 +46,10 @@ program dtkit
     if (`do_update') {
         capture net uninstall dtkit
         net install dtkit, from(`github') replace
+        dtkit_sync_dtparquet_plugin, tag(`tag')
+        if _rc {
+            exit _rc
+        }
         if ( `"`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
@@ -260,3 +265,54 @@ program dtkit_test_basic
     
     display "Basic tests completed."
 end 
+
+capture program drop dtkit_sync_dtparquet_plugin
+program dtkit_sync_dtparquet_plugin
+    version 16
+    syntax [, tag(str)]
+
+    if lower("`c(os)'") != "windows" {
+        exit 0
+    }
+
+    capture quietly findfile dtparquet.ado
+    if _rc {
+        display as error "Could not locate dtparquet.ado after installation."
+        exit 601
+    }
+
+    local ado_path `"`r(fn)'"'
+    local target_dir : subinstr local ado_path "dtparquet.ado" "", all
+    local target_dll `"`target_dir'dtparquet.dll"'
+    local target_new `"`target_dir'dtparquet.new.dll"'
+
+    local release_base "https://github.com/bukanpeneliti/dtkit/releases"
+    local download_url `"`release_base'/latest/download/dtparquet.dll"'
+    if `"`tag'"' != "" {
+        local download_url `"`release_base'/download/`tag'/dtparquet.dll"'
+    }
+
+    capture copy `"`download_url'"' `"`target_new'"', replace
+    if _rc {
+        display as error "Could not install dtparquet plugin binary from GitHub Releases."
+        display as text ""
+        display as text "Try the following:"
+        display as text "  1) Check internet/proxy access to GitHub release assets."
+        display as text "  2) Retry: {stata dtkit, update}"
+        display as text "  3) Manual install: place dtparquet.dll in `target_dir'"
+        display as text ""
+        display as text "Attempted asset URL:"
+        display as text "  `download_url'"
+        display as text "Release page:"
+        display as text "  https://github.com/bukanpeneliti/dtkit/releases"
+        exit 601
+    }
+
+    capture copy `"`target_new'"' `"`target_dll'"', replace
+    if _rc {
+        display as text "{bf:Note:} dtparquet update pending; restart Stata to activate new plugin."
+        exit 0
+    }
+
+    display as result "Installed dtparquet plugin: `target_dll'"
+end
