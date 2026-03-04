@@ -940,7 +940,7 @@ fn run_lazy_pipeline(
     cols: &[Expr],
     n_rows: usize,
     src_off: usize,
-    _streaming: bool,
+    use_streaming: bool,
     trans_cols: &[TransferColumnSpec],
     strategy: BatchMode,
     stata_off: usize,
@@ -952,6 +952,12 @@ fn run_lazy_pipeline(
     let mut lf = lf.select(cols);
     if src_off > 0 {
         lf = lf.slice(src_off as i64, n_rows as u32);
+    }
+    if use_streaming {
+        lf = lf.with_new_streaming(true);
+        set_macro("read_streaming_enabled", "1", true);
+    } else {
+        set_macro("read_streaming_enabled", "0", true);
     }
 
     if batch_mode {
@@ -1256,6 +1262,7 @@ fn emit_init_macros(prefix: &str) {
     set_macro("if_filter_mode", "none", true);
     if prefix == "read" {
         set_macro("read_lazy_mode", "none", true);
+        set_macro("read_streaming_enabled", "0", true);
         set_macro("read_cast_mode", "none", true);
         set_macro("read_cast_defer_reason", "none", true);
     } else if prefix == "write" {

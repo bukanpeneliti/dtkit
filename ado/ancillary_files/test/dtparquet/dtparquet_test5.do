@@ -507,6 +507,7 @@ capture noisily {
     assert `t14_planned_batches' == `t14_processed_batches'
     assert `t14_planned_batches' > 1
     assert "$read_lazy_mode" == "single_pass"
+    assert "$read_streaming_enabled" == "0"
 }
 
 if _rc == 0 {
@@ -520,6 +521,66 @@ else {
 timer off 14
 timer list 14
 display as text "Test 14 finished in" as result %6.2f r(t14) "s"
+
+// Test Case 14b: T06b streaming activation diagnostics
+timer on 19
+local ++total_tests
+capture noisily {
+    clear
+    dtparquet use id grp value tag using "test_t06_lazy.parquet" in 1000001/1100000, clear chunksize(`t14_chunk_size')
+
+    count
+    assert r(N) == 0
+    assert "$read_streaming_enabled" == "0"
+}
+
+if _rc == 0 {
+    display as result "Test 14b completed successfully"
+    local passed_tests "`passed_tests' 14b"
+}
+else {
+    display as error "Test 14b failed: streaming diagnostics mismatch"
+    local failed_tests "`failed_tests' 14b"
+}
+timer off 19
+timer list 19
+display as text "Test 14b finished in" as result %6.2f r(t19) "s"
+
+// Test Case 14c: T06c streaming activation (>1M requested rows)
+display _newline "=== TEST CASE 14c: T06c Streaming Activation (>1M Requested Rows) ==="
+timer clear 20
+timer on 20
+local ++total_tests
+
+capture noisily {
+    local t14c_n_rows = 1001000
+
+    clear
+    set obs `t14c_n_rows'
+    gen long id = _n
+    gen byte grp = mod(_n, 5)
+
+    dtparquet save "test_t06_streaming_trigger.parquet", replace chunksize(20000)
+
+    clear
+    dtparquet use id grp using "test_t06_streaming_trigger.parquet" if id >= 1, clear chunksize(20000)
+
+    count
+    assert r(N) == `t14c_n_rows'
+    assert "$read_streaming_enabled" == "1"
+}
+
+if _rc == 0 {
+    display as result "Test 14c completed successfully"
+    local passed_tests "`passed_tests' 14c"
+}
+else {
+    display as error "Test 14c failed: streaming activation mismatch"
+    local failed_tests "`failed_tests' 14c"
+}
+timer off 20
+timer list 20
+display as text "Test 14c finished in" as result %6.2f r(t20) "s"
 
 // Test Case 15: T07 adaptive batch autotuning metrics
 display _newline "=== TEST CASE 15: T07 Adaptive Batch Autotuning Metrics ==="
