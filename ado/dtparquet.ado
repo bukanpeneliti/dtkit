@@ -185,7 +185,7 @@ program dtparquet_plugin, plugin using(`"`__dtparquet_plugin_path'"')
 
 capture program drop dtparquet__verify_plugin_version
 program dtparquet__verify_plugin_version
-    local expected_version "2.0.0"
+    local expected_api "2.0"
 
     capture confirm file "ado/dtparquet.dll"
     if _rc != 0 {
@@ -214,8 +214,24 @@ program dtparquet__verify_plugin_version
         exit 601
     }
 
-    if `"`plugin_version'"' != `"`expected_version'"' {
-        display as error "dtparquet version mismatch: ado `expected_version' vs plugin `plugin_version'"
+    local plugin_api ""
+    gettoken pv_major pv_rest : plugin_version, parse(".")
+    if `"`pv_rest'"' != "" {
+        local pv_rest = substr(`"`pv_rest'"', 2, .)
+        gettoken pv_minor pv_patch : pv_rest, parse(".")
+        if `"`pv_major'"' != "" & `"`pv_minor'"' != "" {
+            local plugin_api `"`pv_major'.`pv_minor'"'
+        }
+    }
+
+    if `"`plugin_api'"' == "" {
+        display as error "Unrecognized dtparquet plugin version format: `plugin_version'"
+        display as error "Run {bf:dtkit, update} to install matching components."
+        exit 459
+    }
+
+    if `"`plugin_api'"' != `"`expected_api'"' {
+        display as error "dtparquet API mismatch: ado `expected_api' vs plugin `plugin_api' (`plugin_version')"
         display as error "Run {bf:dtkit, update} to install matching components."
         display as text "You can inspect current state with {bf:dtkit, pluginstatus}."
         exit 459

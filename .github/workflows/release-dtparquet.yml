@@ -1,0 +1,60 @@
+name: Release dtparquet plugin
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build dtparquet plugin (release)
+        working-directory: plugin
+        run: cargo build --release
+
+      - name: Collect release artifacts
+        run: |
+          New-Item -ItemType Directory -Path dist -Force | Out-Null
+
+          $candidates = @(
+            "plugin/target/release/dtparquet.dll",
+            "D:/tmp/rust/dtparquet-target/release/dtparquet.dll"
+          )
+
+          $dllPath = $null
+          foreach ($candidate in $candidates) {
+            if (Test-Path $candidate) {
+              $dllPath = $candidate
+              break
+            }
+          }
+
+          if (-not $dllPath) {
+            throw "dtparquet.dll not found in expected build locations."
+          }
+
+          Copy-Item $dllPath dist/dtparquet.dll -Force
+
+          $hash = (Get-FileHash dist/dtparquet.dll -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist/dtparquet.sha256 -Value "${hash}  dtparquet.dll" -NoNewline
+
+      - name: Upload assets to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/dtparquet.dll
+            dist/dtparquet.sha256
