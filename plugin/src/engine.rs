@@ -658,47 +658,34 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         );
         let n_t = get_compute_thread_pool().current_num_threads().max(1);
         let columns: Vec<Expr> = col_list.iter().map(|s| col(*s)).collect();
-        let (l, b) = if lazy_execution_uses_legacy_batches() {
-            set_macro("read_lazy_mode", "legacy_batches", true);
-            let strategy = req.parallel_strategy.unwrap_or_else(|| {
-                determine_parallelization_strategy(columns.len(), req.n_rows, n_t)
-            });
-            set_engine_stage("read", EngineStage::StataSink);
-            run_lazy_pipeline(
-                lf_sorted,
-                &columns,
-                req.n_rows,
-                b_off,
-                req.n_rows > 1_000_000,
-                &plan.transfer_columns,
-                strategy,
-                req.stata_offset,
-                &mut t,
-                &mut processed,
-                &mut collects,
-                true,
-            )?
-        } else {
-            set_macro("read_lazy_mode", "single_pass", true);
-            let strategy = req.parallel_strategy.unwrap_or_else(|| {
-                determine_parallelization_strategy(columns.len(), req.n_rows, n_t)
-            });
-            set_engine_stage("read", EngineStage::StataSink);
-            run_lazy_pipeline(
-                lf_sorted,
-                &columns,
-                req.n_rows,
-                b_off,
-                req.n_rows > 1_000_000,
-                &plan.transfer_columns,
-                strategy,
-                req.stata_offset,
-                &mut t,
-                &mut processed,
-                &mut collects,
-                false,
-            )?
-        };
+        let use_legacy_batches = lazy_execution_uses_legacy_batches();
+        set_macro(
+            "read_lazy_mode",
+            if use_legacy_batches {
+                "legacy_batches"
+            } else {
+                "single_pass"
+            },
+            true,
+        );
+        let strategy = req
+            .parallel_strategy
+            .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), req.n_rows, n_t));
+        set_engine_stage("read", EngineStage::StataSink);
+        let (l, b) = run_lazy_pipeline(
+            lf_sorted,
+            &columns,
+            req.n_rows,
+            b_off,
+            req.n_rows > 1_000_000,
+            &plan.transfer_columns,
+            strategy,
+            req.stata_offset,
+            &mut t,
+            &mut processed,
+            &mut collects,
+            use_legacy_batches,
+        )?;
         (l, b, t)
     };
     finalize_runtime("read", batches, loaded, collects, processed, &tuner, start);
