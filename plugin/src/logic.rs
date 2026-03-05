@@ -56,6 +56,16 @@ static STRL_TRUNC_EVENTS: AtomicU64 = AtomicU64::new(0);
 static STRL_BINARY_EVENTS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_FALLBACK_CALLS: AtomicU64 = AtomicU64::new(0);
 static TRANSFER_CONVERSION_FAILURES: AtomicU64 = AtomicU64::new(0);
+const STATA_MISSING_DOT_BITS: u64 = 0x7fe0_0000_0000_0000;
+
+#[inline]
+fn is_stata_missing_fast(value: f64) -> bool {
+    let bits = value.to_bits();
+    if bits < STATA_MISSING_DOT_BITS {
+        return false;
+    }
+    unsafe { SF_is_missing(value) }
+}
 
 #[derive(Copy, Clone, Debug)]
 pub struct StataBounds {
@@ -209,7 +219,7 @@ pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
             ));
             return None;
         }
-        if SF_vdata(col as i32, row as i32, &mut val) != 0 || SF_is_missing(val) {
+        if SF_vdata(col as i32, row as i32, &mut val) != 0 || is_stata_missing_fast(val) {
             None
         } else {
             Some(val)
@@ -220,7 +230,7 @@ pub fn pull_numeric_cell(col: usize, row: usize) -> Option<f64> {
 pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     let mut val: f64 = 0.0;
     unsafe {
-        if SF_vdata(col as i32, row as i32, &mut val) != 0 || SF_is_missing(val) {
+        if SF_vdata(col as i32, row as i32, &mut val) != 0 || is_stata_missing_fast(val) {
             None
         } else {
             Some(val)

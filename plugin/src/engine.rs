@@ -1062,11 +1062,9 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
             &mut collects,
         )?
     } else {
-        collects += 1;
-        let mut df = lf.collect()?;
         write_partitioned_dataframe(
             req.path,
-            &mut df,
+            lf,
             req.compression,
             req.compression_level,
             &plan.partition_cols,
@@ -1104,18 +1102,21 @@ fn write_single_dataframe(
     meta: &str,
     collects: &mut usize,
 ) -> Result<(), DtparquetError> {
-    let collect_started = Instant::now();
     let out = Path::new(path);
     if let Some(p) = out.parent() {
         if !p.as_os_str().is_empty() {
             create_dir_all(p)?;
         }
     }
-    if out.exists() && overwrite {
+    if out.exists() {
+        if !overwrite {
+            return Err(format!("Path exists: {path}").into());
+        }
         let _ = std::fs::remove_file(out);
     }
     let tmp = format!("{path}.tmp");
     let opts = build_parquet_write_opts(comp, level, meta)?;
+    let collect_started = Instant::now();
     *collects += 1;
     let mut df = lf.collect()?;
     set_macro(
@@ -1123,7 +1124,6 @@ fn write_single_dataframe(
         &collect_started.elapsed().as_millis().to_string(),
         true,
     );
-
     let parquet_started = Instant::now();
     let f = File::create(&tmp)?;
     ParquetWriter::new(f)
@@ -1147,7 +1147,7 @@ fn write_single_dataframe(
 
 fn write_partitioned_dataframe(
     path: &str,
-    df: &mut DataFrame,
+    lf: LazyFrame,
     comp: &str,
     level: Option<usize>,
     part: &[PlSmallStr],
@@ -1168,7 +1168,14 @@ fn write_partitioned_dataframe(
     }
     create_dir_all(out)?;
     let opts = build_parquet_write_opts(comp, level, meta)?;
-    write_partitioned_dataset_local(df, out, part, &opts)?;
+    let collect_started = Instant::now();
+    let mut df = lf.collect()?;
+    set_macro(
+        "write_collect_elapsed_ms",
+        &collect_started.elapsed().as_millis().to_string(),
+        true,
+    );
+    write_partitioned_dataset_local(&mut df, out, part, &opts)?;
     set_macro(
         "write_parquet_elapsed_ms",
         &parquet_started.elapsed().as_millis().to_string(),

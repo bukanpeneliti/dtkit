@@ -35,11 +35,13 @@ pub struct TransferContext<'a> {
 // --- Numeric Converters (Macro-Generated) ---
 
 macro_rules! pull_numeric_col {
-    ($T:ty, $col:expr, $off:expr, $n:expr, $name:expr, $cast:expr) => {{
-        let values: Vec<Option<$T>> = (0..$n)
+    ($Chunked:ty, $col:expr, $off:expr, $n:expr, $name:expr, $cast:expr) => {{
+        let ca: $Chunked = (0..$n)
             .map(|r| pull_numeric_cell_unchecked($col, $off + r + 1).map($cast))
             .collect();
-        Ok(Series::new($name, values))
+        let mut s = ca.into_series();
+        s.rename($name);
+        Ok(s)
     }};
 }
 
@@ -347,21 +349,25 @@ fn validate_read_transfer_range(
 }
 
 pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
-    let converter = match ctx.col.dtype() {
-        DataType::Boolean => convert_boolean_to_f64,
-        DataType::Int8 => convert_i8_to_f64,
-        DataType::Int16 => convert_i16_to_f64,
-        DataType::Int32 => convert_i32_to_f64,
-        DataType::Int64 => convert_i64_to_f64,
-        DataType::UInt8 => convert_u8_to_f64,
-        DataType::UInt16 => convert_u16_to_f64,
-        DataType::UInt32 => convert_u32_to_f64,
-        DataType::UInt64 => convert_u64_to_f64,
-        DataType::Float32 => convert_f32_to_f64,
-        DataType::Float64 => convert_f64_to_f64,
-        DataType::Date => convert_date_to_stata_days,
-        DataType::Time => convert_time_to_stata_millis,
-        DataType::Datetime(_, _) => convert_datetime_to_stata_clock,
+    match ctx.col.dtype() {
+        DataType::Boolean => {
+            write_numeric_iter(ctx, ctx.col.bool()?.iter(), |v| if v { 1.0 } else { 0.0 })
+        }
+        DataType::Int8 => write_numeric_iter(ctx, ctx.col.i8()?.iter(), |v| v as f64),
+        DataType::Int16 => write_numeric_iter(ctx, ctx.col.i16()?.iter(), |v| v as f64),
+        DataType::Int32 => write_numeric_iter(ctx, ctx.col.i32()?.iter(), |v| v as f64),
+        DataType::Int64 => write_numeric_iter(ctx, ctx.col.i64()?.iter(), |v| v as f64),
+        DataType::UInt8 => write_numeric_iter(ctx, ctx.col.u8()?.iter(), |v| v as f64),
+        DataType::UInt16 => write_numeric_iter(ctx, ctx.col.u16()?.iter(), |v| v as f64),
+        DataType::UInt32 => write_numeric_iter(ctx, ctx.col.u32()?.iter(), |v| v as f64),
+        DataType::UInt64 => write_numeric_iter(ctx, ctx.col.u64()?.iter(), |v| v as f64),
+        DataType::Float32 => write_numeric_iter(ctx, ctx.col.f32()?.iter(), |v| v as f64),
+        DataType::Float64 => write_numeric_iter(ctx, ctx.col.f64()?.iter(), |v| v),
+        DataType::Date => write_numeric_with_converter(ctx, convert_date_to_stata_days),
+        DataType::Time => write_numeric_with_converter(ctx, convert_time_to_stata_millis),
+        DataType::Datetime(_, _) => {
+            write_numeric_with_converter(ctx, convert_datetime_to_stata_clock)
+        }
         DataType::Null => {
             let n_calls = (ctx.end_row - ctx.start_row) as u64;
             write_all_missing_range(
@@ -375,19 +381,17 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
                 },
             );
             add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
-            return Ok(());
+            Ok(())
         }
         _ => {
             record_transfer_conversion_failure();
-            return Err(dtype_mismatch_error(
+            Err(dtype_mismatch_error(
                 ctx.col,
                 ctx.transfer_column,
                 "numeric/date/time/datetime",
-            ));
+            ))
         }
-    };
-
-    write_numeric_with_converter(ctx, converter)
+    }
 }
 
 pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
@@ -476,6 +480,29 @@ fn write_numeric_with_converter(
     )
 }
 
+fn write_numeric_iter<T, I, F>(ctx: &TransferContext, iter: I, mapper: F) -> PolarsResult<()>
+where
+    I: Iterator<Item = Option<T>>,
+    F: Fn(T) -> f64 + Copy,
+{
+    let mut write_calls = 0u64;
+    for (local_idx, value) in iter
+        .skip(ctx.start_row)
+        .take(ctx.end_row.saturating_sub(ctx.start_row))
+        .enumerate()
+    {
+        let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
+        replace_number_unchecked(
+            value.map(mapper),
+            global_row_idx + 1 + ctx.stata_offset,
+            ctx.transfer_column.stata_col_index + 1,
+        );
+        write_calls += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
 fn write_all_missing_range(
     transfer_column: &TransferColumnSpec,
     start_index: usize,
@@ -495,29 +522,18 @@ fn write_all_missing_range(
 
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
-    for row_idx in ctx.start_row..ctx.end_row {
-        let global_row_idx = row_idx + ctx.start_index;
+    let str_col = ctx.col.str()?;
+    for (local_idx, value) in str_col
+        .iter()
+        .skip(ctx.start_row)
+        .take(ctx.end_row.saturating_sub(ctx.start_row))
+        .enumerate()
+    {
+        let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
         let row = global_row_idx + 1 + ctx.stata_offset;
         let col = ctx.transfer_column.stata_col_index + 1;
-        match ctx.col.get(row_idx)? {
-            AnyValue::String(v) => {
-                replace_string_ref_unchecked(Some(v), row, col);
-                write_calls += 1;
-            }
-            AnyValue::StringOwned(v) => {
-                replace_string_ref_unchecked(Some(v.as_str()), row, col);
-                write_calls += 1;
-            }
-            AnyValue::Null => {
-                replace_string_ref_unchecked(None, row, col);
-                write_calls += 1;
-            }
-            _ => {
-                add_transfer_metric_counts(0, write_calls, 0, 0, 0);
-                record_transfer_conversion_failure();
-                return Err(dtype_mismatch_error(ctx.col, ctx.transfer_column, "string"));
-            }
-        }
+        replace_string_ref_unchecked(value, row, col);
+        write_calls += 1;
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
     Ok(())
@@ -723,31 +739,34 @@ pub fn series_from_stata_column(
     }
 
     if is_stata_date_format(&info.format) {
-        let values: Vec<Option<i32>> = (0..n_rows)
+        let values: Int32Chunked = (0..n_rows)
             .map(|row_idx| {
                 pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i32 - STATA_DATE_ORIGIN)
             })
             .collect();
         add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
-        return Series::new((&info.name).into(), values).cast(&DataType::Date);
+        let mut s = values.into_series();
+        s.rename((&info.name).into());
+        return s.cast(&DataType::Date);
     }
 
     if is_stata_datetime_format(&info.format) {
-        let values: Vec<Option<i64>> = (0..n_rows)
+        let values: Int64Chunked = (0..n_rows)
             .map(|row_idx| {
                 pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i64 - ((STATA_EPOCH_MS as f64) * (TIME_MS as f64)) as i64)
             })
             .collect();
         add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
-        return Series::new((&info.name).into(), values)
-            .cast(&DataType::Datetime(TimeUnit::Milliseconds, None));
+        let mut s = values.into_series();
+        s.rename((&info.name).into());
+        return s.cast(&DataType::Datetime(TimeUnit::Milliseconds, None));
     }
 
     let s = match info.dtype.as_str() {
         "byte" => pull_numeric_col!(
-            i8,
+            Int8Chunked,
             stata_col_index,
             offset,
             n_rows,
@@ -755,7 +774,7 @@ pub fn series_from_stata_column(
             |v| v as i8
         ),
         "int" => pull_numeric_col!(
-            i16,
+            Int16Chunked,
             stata_col_index,
             offset,
             n_rows,
@@ -763,7 +782,7 @@ pub fn series_from_stata_column(
             |v| v as i16
         ),
         "long" => pull_numeric_col!(
-            i32,
+            Int32Chunked,
             stata_col_index,
             offset,
             n_rows,
@@ -771,7 +790,7 @@ pub fn series_from_stata_column(
             |v| v as i32
         ),
         "float" => pull_numeric_col!(
-            f32,
+            Float32Chunked,
             stata_col_index,
             offset,
             n_rows,
@@ -779,7 +798,7 @@ pub fn series_from_stata_column(
             |v| v as f32
         ),
         _ => pull_numeric_col!(
-            f64,
+            Float64Chunked,
             stata_col_index,
             offset,
             n_rows,
