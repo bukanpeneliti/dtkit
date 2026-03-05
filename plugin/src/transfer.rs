@@ -228,22 +228,23 @@ fn process_batch_with_strategy(
     pool.install(|| match strategy {
         BatchMode::ByRow => {
             let n_workers = rayon::current_num_threads().max(1);
-            let chunk_size = std::cmp::max(512, row_count.div_ceil(n_workers * 8));
-            (0..row_count)
-                .into_par_iter()
-                .chunks(chunk_size)
-                .try_for_each(|chunk| {
-                    let start_row = chunk[0];
-                    let end_row = chunk[chunk.len() - 1] + 1;
-                    process_row_range(
-                        &prepared_columns,
-                        start_index,
-                        start_row,
-                        end_row,
-                        transfer_columns,
-                        stata_offset,
-                    )
-                })
+            let chunk_size = std::cmp::max(8_192, row_count.div_ceil(n_workers * 2));
+            let n_chunks = row_count.div_ceil(chunk_size);
+            (0..n_chunks).into_par_iter().try_for_each(|chunk_idx| {
+                let start_row = chunk_idx * chunk_size;
+                let end_row = (start_row + chunk_size).min(row_count);
+                if start_row >= end_row {
+                    return Ok(());
+                }
+                process_row_range(
+                    &prepared_columns,
+                    start_index,
+                    start_row,
+                    end_row,
+                    transfer_columns,
+                    stata_offset,
+                )
+            })
         }
         BatchMode::ByColumn => transfer_columns
             .par_iter()

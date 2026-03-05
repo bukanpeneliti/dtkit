@@ -506,7 +506,7 @@ pub fn write_pipeline_mode() -> WritePipelineMode {
 }
 
 pub fn determine_parallelization_strategy(n_cols: usize, n_rows: usize, cores: usize) -> BatchMode {
-    if n_cols > cores * 2 && n_rows < 50_000 {
+    if n_cols > cores * 2 && n_rows <= 150_000 {
         BatchMode::ByColumn
     } else {
         BatchMode::ByRow
