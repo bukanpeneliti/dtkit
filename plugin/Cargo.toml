@@ -13,6 +13,9 @@ description = "Fast Stata plugin for Parquet I/O with metadata preservation"
 license = "MIT"
 build = "build.rs"
 
+[package.metadata.dtparquet]
+api = "2.0"
+
 [lib]
 name = "dtparquet"
 crate-type = ["cdylib", "rlib"]
@@ -53,3 +56,6 @@ panic = "abort"
 [profile.test]
 debug = 1
 panic = "abort"
+
+[build-dependencies]
+toml = "0.8"

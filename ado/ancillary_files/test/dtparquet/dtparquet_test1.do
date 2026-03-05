@@ -46,6 +46,73 @@ timer off 1
 timer list 1
 display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
+// Test Case 1b: Plugin version and API guard checks
+display _newline "=== TEST CASE 1b: Plugin Version/API Guard ==="
+timer clear 11
+timer on 11
+local ++total_tests
+
+local t1b_err 0
+capture plugin call dtparquet_plugin, "version"
+if _rc {
+    display as error "Test 1b failed: plugin version call failed, rc=" _rc
+    local ++t1b_err
+}
+else if `"`dtparquet_plugin_version'"' == "" {
+    display as error "Test 1b failed: plugin version macro is empty"
+    local ++t1b_err
+}
+
+capture noisily dtparquet__verify_plugin_version
+if _rc {
+    display as error "Test 1b failed: expected compatible API, rc=" _rc
+    local ++t1b_err
+}
+
+capture program drop dtparquet__verify_plugin_version
+program dtparquet__verify_plugin_version
+    local expected_api "999.0"
+    capture plugin call dtparquet_plugin, "version"
+    if _rc exit _rc
+
+    local plugin_version `"`dtparquet_plugin_version'"'
+    local plugin_api ""
+    gettoken pv_major pv_rest : plugin_version, parse(".")
+    if `"`pv_rest'"' != "" {
+        local pv_rest = substr(`"`pv_rest'"', 2, .)
+        gettoken pv_minor pv_patch : pv_rest, parse(".")
+        if `"`pv_major'"' != "" & `"`pv_minor'"' != "" {
+            local plugin_api `"`pv_major'.`pv_minor'"'
+        }
+    }
+
+    if `"`plugin_api'"' != `"`expected_api'"' {
+        exit 459
+    }
+end
+
+capture noisily dtparquet__verify_plugin_version
+if _rc != 459 {
+    display as error "Test 1b failed: expected mismatch rc=459, got rc=" _rc
+    local ++t1b_err
+}
+
+capture program drop dtparquet
+run "ado/dtparquet.ado"
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
+
+if `t1b_err' == 0 {
+    display as result "Test 1b completed successfully"
+    local passed_tests "`passed_tests' 1b"
+}
+else {
+    local failed_tests "`failed_tests' 1b"
+}
+timer off 11
+timer list 11
+display as text "Test 1b finished in" as result %6.2f r(t11) "s"
+
 // Test Case 2: Basic Save and Use roundtrip with all types
 display _newline "=== TEST CASE 2: Basic Save and Use (All Data Types) ==="
 timer clear 1
