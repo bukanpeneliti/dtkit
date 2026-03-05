@@ -1230,63 +1230,83 @@ fn write_single_dataframe_direct_batches(
     let mut loaded_rows = 0usize;
     let mut offset = 0usize;
     let mut writer: Option<polars::io::parquet::write::BatchedWriter<File>> = None;
+    let mut batch_schema: Option<Schema> = None;
 
-    while offset < req.n_rows {
-        let request_rows =
-            (req.n_rows - offset).min(tuner.selected_batch_size().max(write_batch_floor).max(1));
-        let batch_started = Instant::now();
-        let df = if req.all_numeric {
-            read_batch_numeric_from_columns(req.column_info, req.start_row + offset, request_rows)?
-        } else {
-            read_batch_from_columns(req.column_info, req.start_row + offset, request_rows)?
-        };
-        let rows = df.height();
-        if rows == 0 {
-            break;
+    let write_result = (|| -> Result<(), DtparquetError> {
+        while offset < req.n_rows {
+            let request_rows = (req.n_rows - offset)
+                .min(tuner.selected_batch_size().max(write_batch_floor).max(1));
+            let batch_started = Instant::now();
+            let df = if req.all_numeric {
+                read_batch_numeric_from_columns(
+                    req.column_info,
+                    req.start_row + offset,
+                    request_rows,
+                )?
+            } else {
+                read_batch_from_columns(req.column_info, req.start_row + offset, request_rows)?
+            };
+            let rows = df.height();
+            if rows == 0 {
+                offset += request_rows;
+                continue;
+            }
+
+            if let Some(schema) = &batch_schema {
+                validate_batch_schema(schema, df.schema())?;
+            } else {
+                batch_schema = Some(df.schema().as_ref().clone());
+            }
+
+            if writer.is_none() {
+                let file = File::create(&tmp)?;
+                writer = Some(
+                    ParquetWriter::new(file)
+                        .with_compression(opts.compression)
+                        .with_key_value_metadata(opts.key_value_metadata.clone())
+                        .with_row_group_size(Some(tuner.selected_batch_size().max(1)))
+                        .batched(df.schema())?,
+                );
+            }
+
+            if let Some(ref mut batched) = writer {
+                batched.write_batch(&df)?;
+            }
+
+            processed_batches += 1;
+            loaded_rows += rows;
+            offset += rows;
+            tuner.observe_batch(rows, batch_started.elapsed().as_millis());
         }
 
-        if writer.is_none() {
+        if let Some(batched) = writer {
+            batched.finish()?;
+        } else {
+            let mut empty_df = if req.all_numeric {
+                read_batch_numeric_from_columns(req.column_info, req.start_row, 0)?
+            } else {
+                read_batch_from_columns(req.column_info, req.start_row, 0)?
+            };
             let file = File::create(&tmp)?;
-            writer = Some(
-                ParquetWriter::new(file)
-                    .with_compression(opts.compression)
-                    .with_key_value_metadata(opts.key_value_metadata.clone())
-                    .with_row_group_size(Some(tuner.selected_batch_size().max(1)))
-                    .batched(df.schema())?,
-            );
+            ParquetWriter::new(file)
+                .with_compression(opts.compression)
+                .with_key_value_metadata(opts.key_value_metadata)
+                .finish(&mut empty_df)?;
         }
 
-        if let Some(ref mut batched) = writer {
-            batched.write_batch(&df)?;
-        }
+        std::fs::rename(&tmp, req.path).or_else(|_| {
+            if out.exists() {
+                let _ = std::fs::remove_file(out);
+            }
+            std::fs::copy(&tmp, req.path).and_then(|_| std::fs::remove_file(&tmp))
+        })?;
+        Ok(())
+    })();
 
-        processed_batches += 1;
-        loaded_rows += rows;
-        offset += rows;
-        tuner.observe_batch(rows, batch_started.elapsed().as_millis());
+    if let Err(err) = write_result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(err);
     }
-
-    if let Some(batched) = writer {
-        batched.finish()?;
-    } else {
-        let mut empty_df = if req.all_numeric {
-            read_batch_numeric_from_columns(req.column_info, req.start_row, 0)?
-        } else {
-            read_batch_from_columns(req.column_info, req.start_row, 0)?
-        };
-        let file = File::create(&tmp)?;
-        ParquetWriter::new(file)
-            .with_compression(opts.compression)
-            .with_key_value_metadata(opts.key_value_metadata)
-            .finish(&mut empty_df)?;
-    }
-
-    std::fs::rename(&tmp, req.path).or_else(|_| {
-        if out.exists() {
-            let _ = std::fs::remove_file(out);
-        }
-        std::fs::copy(&tmp, req.path).and_then(|_| std::fs::remove_file(&tmp))
-    })?;
 
     set_macro("write_collect_elapsed_ms", "0", true);
     set_macro(
@@ -1301,6 +1321,15 @@ fn write_single_dataframe_direct_batches(
         loaded_rows,
         tuner,
     })
+}
+
+fn validate_batch_schema(expected: &Schema, actual: &Schema) -> Result<(), DtparquetError> {
+    if expected == actual {
+        return Ok(());
+    }
+    Err(DtparquetError::Custom(
+        "Schema changed between direct write batches".to_string(),
+    ))
 }
 
 fn is_direct_numeric_export_field(info: &ExportField) -> bool {

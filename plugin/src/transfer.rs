@@ -363,11 +363,9 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::UInt64 => write_numeric_iter(ctx, ctx.col.u64()?.iter(), |v| v as f64),
         DataType::Float32 => write_numeric_iter(ctx, ctx.col.f32()?.iter(), |v| v as f64),
         DataType::Float64 => write_numeric_iter(ctx, ctx.col.f64()?.iter(), |v| v),
-        DataType::Date => write_numeric_with_converter(ctx, convert_date_to_stata_days),
-        DataType::Time => write_numeric_with_converter(ctx, convert_time_to_stata_millis),
-        DataType::Datetime(_, _) => {
-            write_numeric_with_converter(ctx, convert_datetime_to_stata_clock)
-        }
+        DataType::Date => write_date_values(ctx),
+        DataType::Time => write_time_values(ctx),
+        DataType::Datetime(_, _) => write_datetime_values(ctx),
         DataType::Null => {
             let n_calls = (ctx.end_row - ctx.start_row) as u64;
             write_all_missing_range(
@@ -430,54 +428,31 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     }
 }
 
-fn write_with_converter<T>(
-    ctx: &TransferContext,
-    converter: fn(AnyValue<'_>) -> CellConversion<T>,
-    replacer: impl Fn(Option<T>, usize, usize),
-    on_batch_done: impl Fn(u64),
-    type_name: &str,
-) -> PolarsResult<()> {
-    let mut write_calls = 0u64;
-    for row_idx in ctx.start_row..ctx.end_row {
-        let global_row_idx = row_idx + ctx.start_index;
-        let value = ctx.col.get(row_idx)?;
-        match converter(value) {
-            CellConversion::Value(v) => {
-                replacer(
-                    v,
-                    global_row_idx + 1 + ctx.stata_offset,
-                    ctx.transfer_column.stata_col_index + 1,
-                );
-                write_calls += 1;
-            }
-            CellConversion::Mismatch => {
-                on_batch_done(write_calls);
-                record_transfer_conversion_failure();
-                return Err(dtype_mismatch_error(
-                    ctx.col,
-                    ctx.transfer_column,
-                    type_name,
-                ));
-            }
-        }
-    }
-    on_batch_done(write_calls);
-    Ok(())
+fn write_date_values(ctx: &TransferContext) -> PolarsResult<()> {
+    let ca = ctx.col.date()?;
+    write_numeric_iter(ctx, ca.physical().iter(), |v| {
+        (v + STATA_DATE_ORIGIN) as f64
+    })
 }
 
-fn write_numeric_with_converter(
-    ctx: &TransferContext,
-    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
-) -> PolarsResult<()> {
-    write_with_converter(
-        ctx,
-        converter,
-        |v, row, col| {
-            replace_number_unchecked(v, row, col);
-        },
-        |calls| add_transfer_metric_counts(calls, 0, 0, 0, 0),
-        "numeric/date/time/datetime",
-    )
+fn write_time_values(ctx: &TransferContext) -> PolarsResult<()> {
+    let physical = ctx.col.to_physical_repr();
+    let ca = physical.i64()?;
+    write_numeric_iter(ctx, ca.iter(), |v| (v / TIME_US) as f64)
+}
+
+fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
+    let ca = ctx.col.datetime()?;
+    let unit = ca.time_unit();
+    let factor = match unit {
+        TimeUnit::Nanoseconds => (TIME_NS / TIME_MS) as f64,
+        TimeUnit::Microseconds => (TIME_US / TIME_MS) as f64,
+        TimeUnit::Milliseconds => 1.0,
+    };
+    let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
+    write_numeric_iter(ctx, ca.physical().iter(), |v| {
+        v as f64 / factor + sec_shift_scaled
+    })
 }
 
 fn write_numeric_iter<T, I, F>(ctx: &TransferContext, iter: I, mapper: F) -> PolarsResult<()>
@@ -543,10 +518,10 @@ fn write_strict_typed_numeric_column_range(
     ctx: &TransferContext,
     expected_name: &'static str,
     expected_dtype: fn(&DataType) -> bool,
-    converter: fn(AnyValue<'_>) -> CellConversion<f64>,
+    writer: fn(&TransferContext) -> PolarsResult<()>,
 ) -> PolarsResult<()> {
     if expected_dtype(ctx.col.dtype()) {
-        return write_numeric_with_converter(ctx, converter);
+        return writer(ctx);
     }
 
     if matches!(ctx.col.dtype(), DataType::Null) {
@@ -613,7 +588,7 @@ pub(crate) fn write_transfer_column_range(
                 &ctx,
                 "date",
                 |dt| matches!(dt, DataType::Date),
-                convert_date_to_stata_days,
+                write_date_values,
             )
         }
         TransferWriterKind::Time => {
@@ -629,7 +604,7 @@ pub(crate) fn write_transfer_column_range(
                 &ctx,
                 "time",
                 |dt| matches!(dt, DataType::Time),
-                convert_time_to_stata_millis,
+                write_time_values,
             )
         }
         TransferWriterKind::Datetime => {
@@ -645,7 +620,7 @@ pub(crate) fn write_transfer_column_range(
                 &ctx,
                 "datetime",
                 |dt| matches!(dt, DataType::Datetime(_, _)),
-                convert_datetime_to_stata_clock,
+                write_datetime_values,
             )
         }
         TransferWriterKind::String | TransferWriterKind::Strl => {
