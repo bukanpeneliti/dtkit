@@ -911,25 +911,29 @@ pub fn expose_dtmeta_to_macros(m: &DtMeta) {
 
 // --- Schema ---
 
-fn polars_to_transfer_str(dt: &DataType) -> &'static str {
+fn polars_schema_types(dt: &DataType, det: bool, sl: usize) -> (&'static str, &'static str) {
     match dt {
-        DataType::Boolean | DataType::Int8 => "int8",
-        DataType::Int16 => "int16",
-        DataType::Int32 => "int32",
-        DataType::Int64 => "int64",
-        DataType::UInt8 => "uint8",
-        DataType::UInt16 => "uint16",
-        DataType::UInt32 => "uint32",
-        DataType::UInt64 => "uint64",
-        DataType::Float32 => "float32",
-        DataType::Float64 => "float64",
-        DataType::Date => "int32",
-        DataType::Time | DataType::Datetime(_, _) => "int64",
-        DataType::String => "string",
-        DataType::Categorical(_, _) => "categorical",
-        DataType::Enum(_, _) => "enum",
-        DataType::Binary => "binary",
-        _ => "string",
+        DataType::Boolean | DataType::Int8 => ("int8", "byte"),
+        DataType::Int16 => ("int16", "int"),
+        DataType::Int32 => ("int32", "long"),
+        DataType::Int64 => ("int64", "double"),
+        DataType::UInt8 => ("uint8", "int"),
+        DataType::UInt16 => ("uint16", "long"),
+        DataType::UInt32 => ("uint32", "double"),
+        DataType::UInt64 => ("uint64", "double"),
+        DataType::Float32 => ("float32", "float"),
+        DataType::Float64 => ("float64", "double"),
+        DataType::Date => ("int32", "date"),
+        DataType::Time => ("int64", "time"),
+        DataType::Datetime(_, _) => ("int64", "datetime"),
+        DataType::String => ("string", if det && sl > 2045 { "strl" } else { "string" }),
+        DataType::Categorical(_, _) => (
+            "categorical",
+            if det && sl > 2045 { "strl" } else { "string" },
+        ),
+        DataType::Enum(_, _) => ("enum", if det && sl > 2045 { "strl" } else { "string" }),
+        DataType::Binary => ("binary", "strl"),
+        _ => ("string", "strl"),
     }
 }
 
@@ -965,7 +969,6 @@ pub fn set_schema_macros(
     );
     let mut fields = Vec::with_capacity(s.len());
     for (i, (n, dt)) in s.iter().enumerate() {
-        let pt = polars_to_transfer_str(dt);
         let sl = if det {
             *lens.get(n.as_str()).unwrap_or(&0)
         } else if dt.is_string() || matches!(dt, DataType::Categorical(_, _) | DataType::Enum(_, _))
@@ -974,25 +977,7 @@ pub fn set_schema_macros(
         } else {
             0
         };
-        let st = match dt {
-            DataType::Boolean | DataType::Int8 => "byte",
-            DataType::Int16 => "int",
-            DataType::Int32 => "long",
-            DataType::Int64 | DataType::UInt32 | DataType::UInt64 | DataType::Float64 => "double",
-            DataType::UInt8 => "int",
-            DataType::UInt16 => "long",
-            DataType::Float32 => "float",
-            DataType::Date => "date",
-            DataType::Time => "time",
-            DataType::Datetime(_, _) => "datetime",
-            DataType::String | DataType::Categorical(_, _) | DataType::Enum(_, _)
-                if det && sl > 2045 =>
-            {
-                "strl"
-            }
-            DataType::String | DataType::Categorical(_, _) | DataType::Enum(_, _) => "string",
-            _ => "strl",
-        };
+        let (pt, st) = polars_schema_types(dt, det, sl);
         if !q {
             display(&format!("{n:<32} | {dt:<32?} | {st}"));
         }
