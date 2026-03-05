@@ -291,21 +291,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Date => write_date_values(ctx),
         DataType::Time => write_time_values(ctx),
         DataType::Datetime(_, _) => write_datetime_values(ctx),
-        DataType::Null => {
-            let n_calls = (ctx.end_row - ctx.start_row) as u64;
-            write_all_missing_range(
-                ctx.transfer_column,
-                ctx.start_index,
-                ctx.start_row,
-                ctx.end_row,
-                ctx.stata_offset,
-                |row, col| {
-                    replace_number_unchecked(None, row, col);
-                },
-            );
-            add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
-            Ok(())
-        }
+        DataType::Null => write_missing_numeric_range(ctx),
         _ => {
             record_transfer_conversion_failure();
             Err(dtype_mismatch_error(
@@ -320,21 +306,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
 pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
         DataType::String => write_string_values(ctx),
-        DataType::Null => {
-            let n_calls = (ctx.end_row - ctx.start_row) as u64;
-            write_all_missing_range(
-                ctx.transfer_column,
-                ctx.start_index,
-                ctx.start_row,
-                ctx.end_row,
-                ctx.stata_offset,
-                |row, col| {
-                    replace_string_unchecked(None, row, col);
-                },
-            );
-            add_transfer_metric_counts(0, n_calls, 0, 0, 0);
-            Ok(())
-        }
+        DataType::Null => write_missing_string_range(ctx),
         _ => {
             let casted = ctx.col.cast(&DataType::String).map_err(|_| {
                 record_transfer_conversion_failure();
@@ -450,19 +422,7 @@ fn write_strict_typed_numeric_column_range(
     }
 
     if matches!(ctx.col.dtype(), DataType::Null) {
-        let n_calls = (ctx.end_row - ctx.start_row) as u64;
-        write_all_missing_range(
-            ctx.transfer_column,
-            ctx.start_index,
-            ctx.start_row,
-            ctx.end_row,
-            ctx.stata_offset,
-            |row, col| {
-                replace_number_unchecked(None, row, col);
-            },
-        );
-        add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
-        return Ok(());
+        return write_missing_numeric_range(ctx);
     }
 
     record_transfer_conversion_failure();
@@ -471,6 +431,38 @@ fn write_strict_typed_numeric_column_range(
         ctx.transfer_column,
         expected_name,
     ))
+}
+
+fn write_missing_numeric_range(ctx: &TransferContext) -> PolarsResult<()> {
+    let n_calls = (ctx.end_row - ctx.start_row) as u64;
+    write_all_missing_range(
+        ctx.transfer_column,
+        ctx.start_index,
+        ctx.start_row,
+        ctx.end_row,
+        ctx.stata_offset,
+        |row, col| {
+            replace_number_unchecked(None, row, col);
+        },
+    );
+    add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+fn write_missing_string_range(ctx: &TransferContext) -> PolarsResult<()> {
+    let n_calls = (ctx.end_row - ctx.start_row) as u64;
+    write_all_missing_range(
+        ctx.transfer_column,
+        ctx.start_index,
+        ctx.start_row,
+        ctx.end_row,
+        ctx.stata_offset,
+        |row, col| {
+            replace_string_unchecked(None, row, col);
+        },
+    );
+    add_transfer_metric_counts(0, n_calls, 0, 0, 0);
+    Ok(())
 }
 
 pub(crate) fn write_transfer_column_range(
@@ -739,15 +731,7 @@ fn series_from_stata_numeric_dtype_unchecked(
             (&info.name).into(),
             |v| v as f32
         ),
-        "double" => pull_numeric_col!(
-            Float64Chunked,
-            stata_col_index,
-            offset,
-            n_rows,
-            (&info.name).into(),
-            |v| v
-        ),
-        _ if !strict_numeric => pull_numeric_col!(
+        dtype if dtype == "double" || !strict_numeric => pull_numeric_col!(
             Float64Chunked,
             stata_col_index,
             offset,
