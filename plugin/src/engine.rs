@@ -1133,19 +1133,7 @@ fn write_single_dataframe(
     meta: &str,
     collects: &mut usize,
 ) -> Result<(), DtparquetError> {
-    let out = Path::new(path);
-    if let Some(p) = out.parent() {
-        if !p.as_os_str().is_empty() {
-            create_dir_all(p)?;
-        }
-    }
-    if out.exists() {
-        if !overwrite {
-            return Err(format!("Path exists: {path}").into());
-        }
-        let _ = std::fs::remove_file(out);
-    }
-    let tmp = format!("{path}.tmp");
+    let (out, tmp) = prepare_single_output_path(path, overwrite)?;
     let opts = build_parquet_write_opts(comp, level, meta)?;
     let collect_started = Instant::now();
     *collects += 1;
@@ -1162,12 +1150,7 @@ fn write_single_dataframe(
         .with_key_value_metadata(opts.key_value_metadata)
         .finish(&mut df)?;
 
-    std::fs::rename(&tmp, path).or_else(|_| {
-        if out.exists() {
-            let _ = std::fs::remove_file(out);
-        }
-        std::fs::copy(&tmp, path).and_then(|_| std::fs::remove_file(&tmp))
-    })?;
+    commit_tmp_output(&tmp, &out, path)?;
     set_macro(
         "write_parquet_elapsed_ms",
         &parquet_started.elapsed().as_millis().to_string(),
@@ -1200,20 +1183,7 @@ struct DirectWriteRequest<'a> {
 fn write_single_dataframe_direct_batches(
     req: &DirectWriteRequest<'_>,
 ) -> Result<DirectWriteStats, DtparquetError> {
-    let out = Path::new(req.path);
-    if let Some(parent) = out.parent() {
-        if !parent.as_os_str().is_empty() {
-            create_dir_all(parent)?;
-        }
-    }
-    if out.exists() {
-        if !req.overwrite {
-            return Err(format!("Path exists: {}", req.path).into());
-        }
-        let _ = std::fs::remove_file(out);
-    }
-
-    let tmp = format!("{}.tmp", req.path);
+    let (out, tmp) = prepare_single_output_path(req.path, req.overwrite)?;
     let opts = build_parquet_write_opts(req.comp, req.level, req.meta)?;
     let parquet_started = Instant::now();
 
@@ -1294,12 +1264,7 @@ fn write_single_dataframe_direct_batches(
                 .finish(&mut empty_df)?;
         }
 
-        std::fs::rename(&tmp, req.path).or_else(|_| {
-            if out.exists() {
-                let _ = std::fs::remove_file(out);
-            }
-            std::fs::copy(&tmp, req.path).and_then(|_| std::fs::remove_file(&tmp))
-        })?;
+        commit_tmp_output(&tmp, &out, req.path)?;
         Ok(())
     })();
 
@@ -1320,6 +1285,34 @@ fn write_single_dataframe_direct_batches(
         processed_batches,
         loaded_rows,
         tuner,
+    })
+}
+
+fn prepare_single_output_path(
+    path: &str,
+    overwrite: bool,
+) -> Result<(PathBuf, PathBuf), DtparquetError> {
+    let out = PathBuf::from(path);
+    if let Some(parent) = out.parent() {
+        if !parent.as_os_str().is_empty() {
+            create_dir_all(parent)?;
+        }
+    }
+    if out.exists() {
+        if !overwrite {
+            return Err(format!("Path exists: {path}").into());
+        }
+        let _ = std::fs::remove_file(&out);
+    }
+    Ok((out, PathBuf::from(format!("{path}.tmp"))))
+}
+
+fn commit_tmp_output(tmp: &Path, out: &Path, path: &str) -> std::io::Result<()> {
+    std::fs::rename(tmp, path).or_else(|_| {
+        if out.exists() {
+            let _ = std::fs::remove_file(out);
+        }
+        std::fs::copy(tmp, path).and_then(|_| std::fs::remove_file(tmp))
     })
 }
 
