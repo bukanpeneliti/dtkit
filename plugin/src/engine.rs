@@ -1433,19 +1433,28 @@ fn encode_partition_value(input: &str) -> String {
 }
 
 fn parquet_compression(c: &str, l: Option<usize>) -> Result<ParquetCompression, DtparquetError> {
-    if l.is_some() {
-        return Err(DtparquetError::Custom(
-            "compression levels not supported".to_string(),
-        ));
+    let codec = c.trim().to_ascii_lowercase();
+    let with_no_level = |out: ParquetCompression| -> Result<ParquetCompression, DtparquetError> {
+        if l.is_some() {
+            return Err(DtparquetError::Custom(
+                "compression levels are not supported in current build; use codec presets fast|balanced|archive"
+                    .to_string(),
+            ));
+        }
+        Ok(out)
+    };
+
+    match codec.as_str() {
+        "fast" => with_no_level(ParquetCompression::Lz4Raw),
+        "balanced" => with_no_level(ParquetCompression::Zstd(None)),
+        "archive" => with_no_level(ParquetCompression::Brotli(None)),
+        "lz4" => with_no_level(ParquetCompression::Lz4Raw),
+        "uncompressed" => with_no_level(ParquetCompression::Uncompressed),
+        "snappy" => with_no_level(ParquetCompression::Snappy),
+        "gzip" => with_no_level(ParquetCompression::Gzip(None)),
+        "brotli" => with_no_level(ParquetCompression::Brotli(None)),
+        _ => with_no_level(ParquetCompression::Zstd(None)),
     }
-    Ok(match c {
-        "lz4" => ParquetCompression::Lz4Raw,
-        "uncompressed" => ParquetCompression::Uncompressed,
-        "snappy" => ParquetCompression::Snappy,
-        "gzip" => ParquetCompression::Gzip(None),
-        "brotli" => ParquetCompression::Brotli(None),
-        _ => ParquetCompression::Zstd(None),
-    })
 }
 
 // --- Internal Helpers ---

@@ -244,8 +244,9 @@ program dtparquet_save
     syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTitionby(string)]
     local is_nolabel = ("`nolabel'" != "")
     local compression = lower(trim("`compress'"))
-    if "`compression'" == "" local compression zstd
-    if !inlist("`compression'", "lz4", "uncompressed", "snappy", "gzip", "lzo", "brotli", "zstd") {
+    if "`compression'" == "" local compression fast
+    if !inlist("`compression'", "fast", "balanced", "archive") & ///
+        !inlist("`compression'", "lz4", "uncompressed", "snappy", "gzip", "lzo", "brotli", "zstd") {
         display as error "invalid compress() value: `compress'"
         exit 198
     }

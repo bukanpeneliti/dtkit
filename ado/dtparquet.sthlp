@@ -114,7 +114,7 @@ Options are presented under the following headings:
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
 {synopt :{opt ch:unksize(#)}}batch size for processing; default {cmd:0} uses adaptive sizing{p_end}
-{synopt :{opt com:press(codec)}}compression codec; default {cmd:zstd}. Allowed: {cmd:lz4}, {cmd:uncompressed}, {cmd:snappy}, {cmd:gzip}, {cmd:lzo}, {cmd:brotli}, {cmd:zstd}{p_end}
+{synopt :{opt com:press(codec)}}compression codec; default {cmd:fast}. Presets: {cmd:fast} (lz4), {cmd:balanced} (zstd), {cmd:archive} (brotli). Also allowed: {cmd:lz4}, {cmd:uncompressed}, {cmd:snappy}, {cmd:gzip}, {cmd:lzo}, {cmd:brotli}, {cmd:zstd}{p_end}
 {synopt :{opt part:itionby(varlist)}}write partitioned Parquet output by variables{p_end}
 {synoptline}
 
