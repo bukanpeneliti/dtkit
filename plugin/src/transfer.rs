@@ -669,6 +669,19 @@ pub fn read_batch_from_columns(
     offset: usize,
     n_rows: usize,
 ) -> PolarsResult<DataFrame> {
+    if !column_info.is_empty() {
+        let row_start = offset + 1;
+        let row_end_exclusive = offset + n_rows + 1;
+        validate_stata_range(
+            row_start,
+            row_end_exclusive,
+            1,
+            column_info.len() + 1,
+            "read_batch_from_columns",
+        )
+        .map_err(|_| to_range_error("read_batch_from_columns"))?;
+    }
+
     let pool = get_compute_thread_pool();
     let use_parallel = pool.current_num_threads() > 1 && column_info.len() >= 6 && n_rows >= 20_000;
 
@@ -678,7 +691,7 @@ pub fn read_batch_from_columns(
                 .par_iter()
                 .enumerate()
                 .map(|(idx, info)| {
-                    series_from_stata_column(idx + 1, info, offset, n_rows)
+                    series_from_stata_column_unchecked(idx + 1, info, offset, n_rows)
                         .map(|s| (idx, s.into_column()))
                 })
                 .collect::<PolarsResult<Vec<(usize, Column)>>>()
@@ -688,7 +701,9 @@ pub fn read_batch_from_columns(
     } else {
         let mut cols = Vec::with_capacity(column_info.len());
         for (idx, info) in column_info.iter().enumerate() {
-            cols.push(series_from_stata_column(idx + 1, info, offset, n_rows)?.into_column());
+            cols.push(
+                series_from_stata_column_unchecked(idx + 1, info, offset, n_rows)?.into_column(),
+            );
         }
         cols
     };
@@ -701,6 +716,54 @@ pub fn read_batch_from_columns(
     DataFrame::new_infer_height(columns)
 }
 
+pub fn read_batch_numeric_from_columns(
+    column_info: &[ExportField],
+    offset: usize,
+    n_rows: usize,
+) -> PolarsResult<DataFrame> {
+    if !column_info.is_empty() {
+        let row_start = offset + 1;
+        let row_end_exclusive = offset + n_rows + 1;
+        validate_stata_range(
+            row_start,
+            row_end_exclusive,
+            1,
+            column_info.len() + 1,
+            "read_batch_numeric_from_columns",
+        )
+        .map_err(|_| to_range_error("read_batch_numeric_from_columns"))?;
+    }
+
+    let pool = get_compute_thread_pool();
+    let use_parallel = pool.current_num_threads() > 1 && column_info.len() >= 6 && n_rows >= 20_000;
+
+    let columns = if use_parallel {
+        let mut indexed: Vec<(usize, Column)> = pool.install(|| {
+            column_info
+                .par_iter()
+                .enumerate()
+                .map(|(idx, info)| {
+                    series_from_stata_numeric_column_unchecked(idx + 1, info, offset, n_rows)
+                        .map(|s| (idx, s.into_column()))
+                })
+                .collect::<PolarsResult<Vec<(usize, Column)>>>()
+        })?;
+        indexed.sort_by_key(|(idx, _)| *idx);
+        indexed.into_iter().map(|(_, c)| c).collect()
+    } else {
+        let mut cols = Vec::with_capacity(column_info.len());
+        for (idx, info) in column_info.iter().enumerate() {
+            cols.push(
+                series_from_stata_numeric_column_unchecked(idx + 1, info, offset, n_rows)?
+                    .into_column(),
+            );
+        }
+        cols
+    };
+
+    DataFrame::new_infer_height(columns)
+}
+
 pub fn series_from_stata_column(
     stata_col_index: usize,
     info: &ExportField,
@@ -708,7 +771,15 @@ pub fn series_from_stata_column(
     n_rows: usize,
 ) -> Result<Series, PolarsError> {
     validate_read_transfer_range(stata_col_index, offset, n_rows, "series_from_stata_column")?;
+    series_from_stata_column_unchecked(stata_col_index, info, offset, n_rows)
+}
 
+fn series_from_stata_column_unchecked(
+    stata_col_index: usize,
+    info: &ExportField,
+    offset: usize,
+    n_rows: usize,
+) -> Result<Series, PolarsError> {
     if info.dtype == "strl" {
         let mut strl_arena = StrlArena::new();
         let mut values = Vec::with_capacity(n_rows);
@@ -805,6 +876,63 @@ pub fn series_from_stata_column(
             (&info.name).into(),
             |v| v
         ),
+    };
+    if s.is_ok() {
+        add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
+    }
+    s
+}
+
+fn series_from_stata_numeric_column_unchecked(
+    stata_col_index: usize,
+    info: &ExportField,
+    offset: usize,
+    n_rows: usize,
+) -> Result<Series, PolarsError> {
+    let s = match info.dtype.as_str() {
+        "byte" => pull_numeric_col!(
+            Int8Chunked,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i8
+        ),
+        "int" => pull_numeric_col!(
+            Int16Chunked,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i16
+        ),
+        "long" => pull_numeric_col!(
+            Int32Chunked,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as i32
+        ),
+        "float" => pull_numeric_col!(
+            Float32Chunked,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v as f32
+        ),
+        "double" => pull_numeric_col!(
+            Float64Chunked,
+            stata_col_index,
+            offset,
+            n_rows,
+            (&info.name).into(),
+            |v| v
+        ),
+        _ => Err(PolarsError::ComputeError(
+            format!("Non-numeric field '{}' in numeric fast path", info.name).into(),
+        )),
     };
     if s.is_ok() {
         add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
