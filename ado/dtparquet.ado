@@ -194,6 +194,7 @@ program dtparquet__verify_plugin_version
     if _rc {
         display as error "dtparquet plugin binary not found: dtparquet.dll"
         display as error "Run {bf:dtkit, update} to install the matching plugin binary."
+        display as text "After first {bf:net install dtkit}, run {bf:dtkit, update} once."
         display as text "If download is blocked, manually install from:"
         display as text "  https://github.com/bukanpeneliti/dtkit/releases"
         exit 601

@@ -1,8 +1,8 @@
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-fn read_api_version(manifest_dir: &PathBuf) -> String {
+fn read_api_version(manifest_dir: &Path) -> String {
     let cargo_toml_path = manifest_dir.join("Cargo.toml");
     let cargo_toml = fs::read_to_string(&cargo_toml_path)
         .expect("failed to read plugin/Cargo.toml for dtparquet API metadata");
@@ -19,22 +19,40 @@ fn read_api_version(manifest_dir: &PathBuf) -> String {
         .expect("missing [package.metadata.dtparquet] api in plugin/Cargo.toml")
 }
 
-fn patch_ado_api_marker(manifest_dir: &PathBuf, api_version: &str) {
+fn patch_ado_api_marker(manifest_dir: &Path, api_version: &str) {
     let ado_path = manifest_dir
         .parent()
         .expect("missing parent directory for plugin/")
         .join("ado")
         .join("dtparquet.ado");
 
-    let marker = "__DTPARQUET_API__";
     let current = fs::read_to_string(&ado_path)
         .expect("failed to read ado/dtparquet.ado for API marker patching");
 
-    if !current.contains(marker) {
-        panic!("missing {} marker in ado/dtparquet.ado", marker);
-    }
+    let marker = "__DTPARQUET_API__";
+    let updated = if current.contains(marker) {
+        current.replace(marker, api_version)
+    } else {
+        let mut replaced = false;
+        let mut out = Vec::new();
+        for line in current.lines() {
+            if line.contains("local expected_api \"") {
+                out.push(format!("    local expected_api \"{}\"", api_version));
+                replaced = true;
+            } else {
+                out.push(line.to_string());
+            }
+        }
+        if !replaced {
+            panic!("missing expected_api assignment in ado/dtparquet.ado for API patching");
+        }
+        let mut rebuilt = out.join("\n");
+        if current.ends_with('\n') {
+            rebuilt.push('\n');
+        }
+        rebuilt
+    };
 
-    let updated = current.replace(marker, api_version);
     if updated != current {
         fs::write(&ado_path, updated).expect("failed to patch API marker in ado/dtparquet.ado");
     }

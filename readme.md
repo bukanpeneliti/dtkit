@@ -26,6 +26,18 @@ Install `dtkit` directly from GitHub using Stata's `net install` command:
 net install dtkit, from("https://raw.githubusercontent.com/bukanpeneliti/dtkit/main/")
 ```
 
+Then run plugin sync (required for first-time `dtparquet` use):
+
+```stata
+dtkit, update
+```
+
+Verify plugin readiness:
+
+```stata
+dtkit, pluginstatus
+```
+
 ## Updating to Latest Version
 
 To ensure you have the most recent features and bug fixes, use the built-in update command:
@@ -42,7 +54,7 @@ dtkit, upgrade
 
 *Note: For versions older than v1.1.0, use `net install dtkit, replace from(...)` one last time to enable the new update system.*
 
-`dtkit, update` now also syncs the `dtparquet.dll` plugin binary from GitHub Releases.
+`dtkit, update` syncs the `dtparquet.dll` plugin binary from GitHub Releases.
 If you want to pin a specific release asset, use:
 
 ```stata

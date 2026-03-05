@@ -18,8 +18,6 @@ f ado/dtkit.ado
 f ado/dtkit.sthlp
 f ado/dtparquet.ado
 f ado/dtparquet.sthlp
-f ado/dtparquet.dll
-f ado/dtparquet.new.dll
 f ado/ancillary_files/examples/dtfreq_examples.do
 f ado/ancillary_files/examples/dtmeta_examples.do
 f ado/ancillary_files/examples/dtstat_examples.do
