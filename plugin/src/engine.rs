@@ -543,10 +543,7 @@ pub struct ReadRequest<'a> {
 pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetError> {
     let start = Instant::now();
     let (mut collects, mut processed) = (0usize, 0usize);
-    warm_thread_pools();
-    reset_transfer_metrics();
-    emit_runtime_metrics("read", &CommonRuntimeMetrics::zero());
-    emit_init_macros("read");
+    init_runtime("read");
 
     let boundary = resolve_read_boundary_inputs(req.variables_as_str, req.mapping)?;
     let plan = build_read_scan_plan(
@@ -565,6 +562,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         .iter()
         .map(|s| s.as_str())
         .collect();
+    let row_width_bytes = estimate_transfer_row_width_bytes(&plan.transfer_columns);
     let (loaded, batches, tuner) = if plan.can_use_eager {
         if !col_list.is_empty() {
             if let Err(e) = validate_parquet_schema(req.path, &col_list) {
@@ -585,11 +583,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         set_macro("read_cast_mode", "eager", true);
         set_macro("read_cast_defer_reason", "eager_path", true);
-        let mut t = AdaptiveBatchTuner::new(
-            estimate_transfer_row_width_bytes(&plan.transfer_columns),
-            req.batch_size,
-            0,
-        );
+        let mut t = AdaptiveBatchTuner::new(row_width_bytes, req.batch_size, 0);
         set_engine_stage("read", EngineStage::StataSink);
         let strategy = req.parallel_strategy.unwrap_or_else(|| {
             determine_parallelization_strategy(
@@ -639,11 +633,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             lf_sorted = apply_cast(lf_sorted, &boundary.cast_json)?;
             set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         }
-        let mut t = AdaptiveBatchTuner::new(
-            estimate_transfer_row_width_bytes(&plan.transfer_columns),
-            req.batch_size,
-            0,
-        );
+        let mut t = AdaptiveBatchTuner::new(row_width_bytes, req.batch_size, 0);
         let n_t = get_compute_thread_pool().current_num_threads().max(1);
         let columns: Vec<Expr> = col_list.iter().map(|s| col(*s)).collect();
         let use_legacy_batches = lazy_execution_uses_legacy_batches();
@@ -988,10 +978,7 @@ pub struct WriteRequest<'a> {
 pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetError> {
     let start = Instant::now();
     let mut collects = 0usize;
-    warm_thread_pools();
-    reset_transfer_metrics();
-    emit_runtime_metrics("write", &CommonRuntimeMetrics::zero());
-    emit_init_macros("write");
+    init_runtime("write");
     set_macro("write_pipeline_mode", "legacy_direct", true);
     if write_pipeline_mode() == WritePipelineMode::ProducerConsumer {
         display("dtparquet: queue write mode is deprecated; using direct mode");
@@ -1436,6 +1423,13 @@ fn emit_plan_macros(prefix: &str, mode: &str) {
 }
 fn emit_runtime_metrics(prefix: &str, m: &CommonRuntimeMetrics) {
     m.emit_to_macros(prefix);
+}
+
+fn init_runtime(prefix: &str) {
+    warm_thread_pools();
+    reset_transfer_metrics();
+    emit_runtime_metrics(prefix, &CommonRuntimeMetrics::zero());
+    emit_init_macros(prefix);
 }
 
 fn set_elapsed_ms_macro(name: &str, started: Instant) {
