@@ -532,7 +532,13 @@ pub fn read_batch_numeric_from_columns(
         offset,
         n_rows,
         "read_batch_numeric_from_columns",
-        series_from_stata_numeric_column_unchecked,
+        |coli, info, off, nr| {
+            let s = series_from_stata_numeric_dtype_unchecked(coli, info, off, nr, true);
+            if s.is_ok() {
+                add_transfer_metric_counts(0, 0, nr as u64, 0, 0);
+            }
+            s
+        },
         false,
     )
 }
@@ -664,19 +670,6 @@ fn series_from_stata_column_unchecked(
     }
 
     let s = series_from_stata_numeric_dtype_unchecked(stata_col_index, info, offset, n_rows, false);
-    if s.is_ok() {
-        add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
-    }
-    s
-}
-
-fn series_from_stata_numeric_column_unchecked(
-    stata_col_index: usize,
-    info: &ExportField,
-    offset: usize,
-    n_rows: usize,
-) -> Result<Series, PolarsError> {
-    let s = series_from_stata_numeric_dtype_unchecked(stata_col_index, info, offset, n_rows, true);
     if s.is_ok() {
         add_transfer_metric_counts(0, 0, n_rows as u64, 0, 0);
     }

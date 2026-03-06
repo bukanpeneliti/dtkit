@@ -129,14 +129,6 @@ fn parse_arg<T: FromStr>(field: &'static str, value: &str) -> ParseResult<T> {
         .parse::<T>()
         .map_err(|_| DtparquetError::InvalidArg(field, value.to_string()))
 }
-fn opt_str(s: &str) -> Option<String> {
-    (!s.is_empty()).then(|| s.to_string())
-}
-fn validated_path(raw: &str) -> ParseResult<String> {
-    verify_parquet_path(raw)
-        .then(|| raw.to_string())
-        .ok_or_else(|| DtparquetError::FileNotFound(raw.to_string()))
-}
 
 // --- Command Parsers & Handlers ---
 
@@ -159,12 +151,15 @@ fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
     }
     let _ = parse_arg::<usize>("order_by_type", args[10])?;
     let _ = parse_arg::<f64>("order_descending", args[11])?;
+    let file_path = verify_parquet_path(args[0])
+        .then(|| args[0].to_string())
+        .ok_or_else(|| DtparquetError::FileNotFound(args[0].to_string()))?;
     Ok(CommandArgs::Read(ReadArgs {
-        file_path: validated_path(args[0])?,
+        file_path,
         varlist: args[1].to_string(),
         start_row: parse_arg("start_row", args[2])?,
         max_rows: parse_arg("max_rows", args[3])?,
-        sql_if: opt_str(args[4]),
+        sql_if: (!args[4].is_empty()).then(|| args[4].to_string()),
         sort_by: args[5].to_string(),
         parallel_strategy: match args[6] {
             "columns" => Some(BatchMode::ByColumn),
@@ -172,7 +167,7 @@ fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
             _ => None,
         },
         safe_relaxed: args[7] == "1",
-        asterisk_to_variable_name: opt_str(args[8]),
+        asterisk_to_variable_name: (!args[8].is_empty()).then(|| args[8].to_string()),
         order_by: args[9].to_string(),
         stata_offset: parse_arg("stata_offset", args[12])?,
         random_share: parse_arg("random_share", args[13])?,
@@ -191,7 +186,7 @@ fn parse_save_args(args: &[&str]) -> ParseResult<CommandArgs> {
         varlist: args[1].to_string(),
         start_row: parse_arg("start_row", args[2])?,
         max_rows: parse_arg("max_rows", args[3])?,
-        sql_if: opt_str(args[4]),
+        sql_if: (!args[4].is_empty()).then(|| args[4].to_string()),
         sort_by: args[5].to_string(),
         partition_by: args[6].to_string(),
         compression_codec: args[7].to_string(),
@@ -211,8 +206,11 @@ fn parse_describe_args(args: &[&str]) -> ParseResult<CommandArgs> {
     if args.len() < 7 {
         return Err(DtparquetError::SubcommandArgCount("describe", 7));
     }
+    let file_path = verify_parquet_path(args[0])
+        .then(|| args[0].to_string())
+        .ok_or_else(|| DtparquetError::FileNotFound(args[0].to_string()))?;
     Ok(CommandArgs::Describe(DescribeArgs {
-        file_path: validated_path(args[0])?,
+        file_path,
         detailed: args[1] == "1",
         memory_savvy: args[2] == "1",
     }))
@@ -222,8 +220,11 @@ fn parse_has_metadata_key_args(args: &[&str]) -> ParseResult<CommandArgs> {
     if args.len() < 2 {
         return Err(DtparquetError::SubcommandArgCount("has_metadata_key", 2));
     }
+    let file_path = verify_parquet_path(args[0])
+        .then(|| args[0].to_string())
+        .ok_or_else(|| DtparquetError::FileNotFound(args[0].to_string()))?;
     Ok(CommandArgs::HasMetadataKey(HasMetadataKeyArgs {
-        file_path: validated_path(args[0])?,
+        file_path,
         key: args[1].to_string(),
     }))
 }
