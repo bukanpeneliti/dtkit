@@ -189,20 +189,17 @@ pub fn add_transfer_metric_counts(
     pull_string_calls: u64,
     pull_strl_calls: u64,
 ) {
-    if replace_number_calls > 0 {
-        REPLACE_NUMBER_CALLS.fetch_add(replace_number_calls, Ordering::Relaxed);
-    }
-    if replace_string_calls > 0 {
-        REPLACE_STRING_CALLS.fetch_add(replace_string_calls, Ordering::Relaxed);
-    }
-    if pull_numeric_calls > 0 {
-        PULL_NUMERIC_CALLS.fetch_add(pull_numeric_calls, Ordering::Relaxed);
-    }
-    if pull_string_calls > 0 {
-        PULL_STRING_CALLS.fetch_add(pull_string_calls, Ordering::Relaxed);
-    }
-    if pull_strl_calls > 0 {
-        PULL_STRL_CALLS.fetch_add(pull_strl_calls, Ordering::Relaxed);
+    let counts = [
+        (replace_number_calls, &REPLACE_NUMBER_CALLS),
+        (replace_string_calls, &REPLACE_STRING_CALLS),
+        (pull_numeric_calls, &PULL_NUMERIC_CALLS),
+        (pull_string_calls, &PULL_STRING_CALLS),
+        (pull_strl_calls, &PULL_STRL_CALLS),
+    ];
+    for (n, m) in counts {
+        if n > 0 {
+            m.fetch_add(n, Ordering::Relaxed);
+        }
     }
 }
 
