@@ -582,11 +582,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         )?;
         let read_cast_started = Instant::now();
         apply_df_casts(&mut df, &boundary.cast_json)?;
-        set_macro(
-            "read_apply_cast_elapsed_ms",
-            &read_cast_started.elapsed().as_millis().to_string(),
-            true,
-        );
+        set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         set_macro("read_cast_mode", "eager", true);
         set_macro("read_cast_defer_reason", "eager_path", true);
         let mut t = AdaptiveBatchTuner::new(
@@ -621,11 +617,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         if cast_early {
             let read_cast_started = Instant::now();
             lf = apply_cast(lf, &boundary.cast_json)?;
-            set_macro(
-                "read_apply_cast_elapsed_ms",
-                &read_cast_started.elapsed().as_millis().to_string(),
-                true,
-            );
+            set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         } else {
             set_macro("read_apply_cast_elapsed_ms", "0", true);
         }
@@ -645,11 +637,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         if !cast_early && !boundary.cast_json.is_empty() {
             let read_cast_started = Instant::now();
             lf_sorted = apply_cast(lf_sorted, &boundary.cast_json)?;
-            set_macro(
-                "read_apply_cast_elapsed_ms",
-                &read_cast_started.elapsed().as_millis().to_string(),
-                true,
-            );
+            set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         }
         let mut t = AdaptiveBatchTuner::new(
             estimate_transfer_row_width_bytes(&plan.transfer_columns),
@@ -1125,11 +1113,7 @@ fn write_single_dataframe(
     let collect_started = Instant::now();
     *collects += 1;
     let mut df = lf.collect()?;
-    set_macro(
-        "write_collect_elapsed_ms",
-        &collect_started.elapsed().as_millis().to_string(),
-        true,
-    );
+    set_elapsed_ms_macro("write_collect_elapsed_ms", collect_started);
     let parquet_started = Instant::now();
     let f = File::create(&tmp)?;
     ParquetWriter::new(f)
@@ -1138,11 +1122,7 @@ fn write_single_dataframe(
         .finish(&mut df)?;
 
     commit_tmp_output(&tmp, &out, path)?;
-    set_macro(
-        "write_parquet_elapsed_ms",
-        &parquet_started.elapsed().as_millis().to_string(),
-        true,
-    );
+    set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);
     Ok(())
 }
 
@@ -1261,11 +1241,7 @@ fn write_single_dataframe_direct_batches(
     }
 
     set_macro("write_collect_elapsed_ms", "0", true);
-    set_macro(
-        "write_parquet_elapsed_ms",
-        &parquet_started.elapsed().as_millis().to_string(),
-        true,
-    );
+    set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);
 
     Ok(DirectWriteStats {
         planned_batches,
@@ -1345,17 +1321,9 @@ fn write_partitioned_dataframe(
     let opts = build_parquet_write_opts(comp, level, meta)?;
     let collect_started = Instant::now();
     let mut df = lf.collect()?;
-    set_macro(
-        "write_collect_elapsed_ms",
-        &collect_started.elapsed().as_millis().to_string(),
-        true,
-    );
+    set_elapsed_ms_macro("write_collect_elapsed_ms", collect_started);
     write_partitioned_dataset_local(&mut df, out, part, &opts)?;
-    set_macro(
-        "write_parquet_elapsed_ms",
-        &parquet_started.elapsed().as_millis().to_string(),
-        true,
-    );
+    set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);
     Ok(())
 }
 
@@ -1469,6 +1437,26 @@ fn emit_plan_macros(prefix: &str, mode: &str) {
 fn emit_runtime_metrics(prefix: &str, m: &CommonRuntimeMetrics) {
     m.emit_to_macros(prefix);
 }
+
+fn set_elapsed_ms_macro(name: &str, started: Instant) {
+    set_macro(name, &started.elapsed().as_millis().to_string(), true);
+}
+
+fn emit_runtime_common(
+    prefix: &str,
+    collects: usize,
+    planned: usize,
+    processed: usize,
+    start: Instant,
+) {
+    let mut m = CommonRuntimeMetrics::zero();
+    m.collect_calls = collects;
+    m.planned_batches = planned;
+    m.processed_batches = processed;
+    m.collect(start);
+    m.emit_to_macros(prefix);
+}
+
 fn finalize_runtime(
     prefix: &str,
     batches: usize,
@@ -1480,12 +1468,7 @@ fn finalize_runtime(
 ) {
     set_engine_stage(prefix, EngineStage::StataSink);
     CommonBatchTunerMetrics::from_tuner(tuner).emit_to_macros(prefix);
-    let mut m = CommonRuntimeMetrics::zero();
-    m.collect_calls = collects;
-    m.planned_batches = batches;
-    m.processed_batches = proc;
-    m.collect(start);
-    m.emit_to_macros(prefix);
+    emit_runtime_common(prefix, collects, batches, proc, start);
     for (m, v) in [
         ("n_batches", batches.to_string()),
         ("loaded_rows", loaded.to_string()),
@@ -1497,12 +1480,13 @@ fn finalize_runtime(
 fn finalize_runtime_write(scan: &StataRowSource, collects: usize, start: Instant) {
     set_engine_stage("write", EngineStage::StataSink);
     CommonBatchTunerMetrics::from_tuner(&scan.batch_tuner_snapshot()).emit_to_macros("write");
-    let mut m = CommonRuntimeMetrics::zero();
-    m.collect_calls = collects;
-    m.planned_batches = scan.planned_batches();
-    m.processed_batches = scan.processed_batches();
-    m.collect(start);
-    m.emit_to_macros("write");
+    emit_runtime_common(
+        "write",
+        collects,
+        scan.planned_batches(),
+        scan.processed_batches(),
+        start,
+    );
 }
 fn lazy_execution_uses_legacy_batches() -> bool {
     env::var(ENV_LAZY_EXECUTION_MODE)
