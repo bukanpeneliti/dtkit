@@ -198,8 +198,10 @@ foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
 
 dtparquet export "test_nolabel_target.parquet" using "test_nolabel_source.dta", replace nolabel
 
-// COMPLETELY fresh Stata session simulation
-discard
+// Fresh-session simulation without discard (plugin unload can be unstable)
+foreach fr in _dtvars _dtlabel _dtnotes _dtinfo {
+    capture frame drop `fr'
+}
 clear
 set obs 0
 
