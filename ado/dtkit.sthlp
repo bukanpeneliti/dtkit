@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.2.1  02Feb2026}{...}
+{* *! version 2.0.0  06mar2026}{...}
 {vieweralsosee "dtfreq" "help dtfreq"}{...}
 {vieweralsosee "dtstat" "help dtstat"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
@@ -41,7 +41,6 @@
 
 {syntab:Examples and Testing}
 {synopt :{opt examples}}run example files for all dtkit commands{p_end}
-{synopt :{opt showcase}}same as examples{p_end}
 {synopt :{opt test}}run basic functionality tests{p_end}
 {synopt :{opt tests(string)}}run specific tests (basic, dtfreq, dtstat, dtmeta, dtparquet){p_end}
 {synoptline}
@@ -118,13 +117,9 @@ It provides the full legal terms for each component.
 {dlgtab:Examples and Testing}
 
 {phang}
-{opt examples} runs the example files for all dtkit commands ({cmd:dtfreq_examples.do}, {cmd:dtstat_examples.do}, 
+{opt examples} runs the example files for all dtkit commands ({cmd:dtfreq_examples.do}, {cmd:dtstat_examples.do},
 {cmd:dtmeta_examples.do}, {cmd:dtparquet_examples.do}).
 These files demonstrate package functionality for {cmd:dtfreq}, {cmd:dtstat}, {cmd:dtmeta}, and {cmd:dtparquet}.
-
-{phang}
-{opt showcase} performs the same action as {opt examples}.
-It executes all demonstration files in the suite.
 
 {phang}
 {opt test} runs basic functionality tests.
