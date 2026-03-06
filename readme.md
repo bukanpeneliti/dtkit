@@ -1,7 +1,7 @@
 # dtkit: Data Toolkit for Stata
 
 [![Stata Package](https://img.shields.io/badge/Stata-ado-blue)](https://github.com/bukanpeneliti/dtkit)
-![Version](https://img.shields.io/badge/Version-1.1.1-green)
+![Version](https://img.shields.io/badge/Version-2.0.0-green)
 ![Stata 16+](https://img.shields.io/badge/Stata-16%2B-purple)
 ![GitHub Downloads](https://img.shields.io/github/downloads/bukanpeneliti/dtkit/total)
 ![GitHub Stars](https://img.shields.io/github/stars/bukanpeneliti/dtkit?style=social)
@@ -182,7 +182,7 @@ If you use `dtkit` in your research, please cite:
 **Plain Text:**
 
 ```text
-Hafiz Arfyanto (2026). dtkit: Data Toolkit for Stata. Version 1.1.1.
+Hafiz Arfyanto (2026). dtkit: Data Toolkit for Stata. Version 2.0.0.
 Retrieved from https://github.com/bukanpeneliti/dtkit
 ```
 
@@ -192,7 +192,7 @@ Retrieved from https://github.com/bukanpeneliti/dtkit
 @misc{arfyanto2026dtkit,
   author = {Hafiz Arfyanto},
   title = {dtkit: Data Toolkit for Stata},
-  version = {1.1.1},
+  version = {2.0.0},
   year = {2026},
   url = {https://github.com/bukanpeneliti/dtkit},
   note = {Stata package for data exploration and analysis}
