@@ -500,7 +500,7 @@ pub fn build_write_scan_plan(
             .cloned()
             .collect()
     };
-    let total = count_stata_rows() as usize;
+    let total = unsafe { SF_nobs() as usize };
     let start = off.min(total);
     let to_read = if n_rows == 0 {
         total - start

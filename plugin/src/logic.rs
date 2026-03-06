@@ -131,23 +131,8 @@ pub fn read_macro(name: &str, global: bool, buffer_size: Option<usize>) -> Strin
     stata_sys::get_macro(name, global, buffer_size).unwrap_or_default()
 }
 
-pub fn replace_number_unchecked(value: Option<f64>, row: usize, col: usize) -> i32 {
-    stata_sys::replace_number(value, row, col)
-}
-
-pub fn replace_string_unchecked(value: Option<String>, row: usize, col: usize) -> i32 {
-    stata_sys::replace_string(value, row, col)
-}
-
-pub fn replace_string_ref_unchecked(value: Option<&str>, row: usize, col: usize) -> i32 {
-    stata_sys::replace_string_ref(value, row, col)
-}
-
 pub fn record_transfer_conversion_failure() {
     TRANSFER_CONVERSION_FAILURES.fetch_add(1, Ordering::Relaxed);
-}
-pub fn count_stata_rows() -> i32 {
-    unsafe { SF_nobs() }
 }
 
 pub fn load_stata_bounds() -> StataBounds {
@@ -1088,7 +1073,7 @@ pub fn verify_parquet_path(path: &str) -> bool {
 }
 
 pub fn validate_stata_schema(infos: &[ExportField]) -> Result<(), Box<dyn Error>> {
-    if count_stata_rows() == 0 {
+    if unsafe { SF_nobs() } == 0 {
         return Err("No rows".into());
     }
     for (i, info) in infos.iter().enumerate() {

@@ -364,7 +364,7 @@ where
         .enumerate()
     {
         let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
-        replace_number_unchecked(
+        stata_sys::replace_number(
             value.map(mapper),
             global_row_idx + 1 + ctx.stata_offset,
             ctx.transfer_column.stata_col_index + 1,
@@ -404,7 +404,7 @@ fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
         let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
         let row = global_row_idx + 1 + ctx.stata_offset;
         let col = ctx.transfer_column.stata_col_index + 1;
-        replace_string_ref_unchecked(value, row, col);
+        stata_sys::replace_string_ref(value, row, col);
         write_calls += 1;
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
@@ -443,9 +443,9 @@ fn write_missing_range(ctx: &TransferContext, as_string: bool) -> PolarsResult<(
         ctx.stata_offset,
         |row, col| {
             if as_string {
-                replace_string_unchecked(None, row, col);
+                stata_sys::replace_string(None, row, col);
             } else {
-                replace_number_unchecked(None, row, col);
+                stata_sys::replace_number(None, row, col);
             }
         },
     );
