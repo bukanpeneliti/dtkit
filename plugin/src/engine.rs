@@ -1421,14 +1421,10 @@ fn emit_plan_macros(prefix: &str, mode: &str) {
     set_macro(&format!("{prefix}_schema_handoff"), mode, true);
     set_engine_stage(prefix, EngineStage::Execute);
 }
-fn emit_runtime_metrics(prefix: &str, m: &CommonRuntimeMetrics) {
-    m.emit_to_macros(prefix);
-}
-
 fn init_runtime(prefix: &str) {
     warm_thread_pools();
     reset_transfer_metrics();
-    emit_runtime_metrics(prefix, &CommonRuntimeMetrics::zero());
+    CommonRuntimeMetrics::zero().emit_to_macros(prefix);
     emit_init_macros(prefix);
 }
 
