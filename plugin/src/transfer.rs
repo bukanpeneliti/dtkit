@@ -291,7 +291,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Date => write_date_values(ctx),
         DataType::Time => write_time_values(ctx),
         DataType::Datetime(_, _) => write_datetime_values(ctx),
-        DataType::Null => write_missing_numeric_range(ctx),
+        DataType::Null => write_missing_range(ctx, false),
         _ => {
             record_transfer_conversion_failure();
             Err(dtype_mismatch_error(
@@ -306,7 +306,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
 pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
         DataType::String => write_string_values(ctx),
-        DataType::Null => write_missing_string_range(ctx),
+        DataType::Null => write_missing_range(ctx, true),
         _ => {
             let casted = ctx.col.cast(&DataType::String).map_err(|_| {
                 record_transfer_conversion_failure();
@@ -422,7 +422,7 @@ fn write_strict_typed_numeric_column_range(
     }
 
     if matches!(ctx.col.dtype(), DataType::Null) {
-        return write_missing_numeric_range(ctx);
+        return write_missing_range(ctx, false);
     }
 
     record_transfer_conversion_failure();
@@ -433,7 +433,7 @@ fn write_strict_typed_numeric_column_range(
     ))
 }
 
-fn write_missing_numeric_range(ctx: &TransferContext) -> PolarsResult<()> {
+fn write_missing_range(ctx: &TransferContext, as_string: bool) -> PolarsResult<()> {
     let n_calls = (ctx.end_row - ctx.start_row) as u64;
     write_all_missing_range(
         ctx.transfer_column,
@@ -442,26 +442,18 @@ fn write_missing_numeric_range(ctx: &TransferContext) -> PolarsResult<()> {
         ctx.end_row,
         ctx.stata_offset,
         |row, col| {
-            replace_number_unchecked(None, row, col);
+            if as_string {
+                replace_string_unchecked(None, row, col);
+            } else {
+                replace_number_unchecked(None, row, col);
+            }
         },
     );
-    add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
-    Ok(())
-}
-
-fn write_missing_string_range(ctx: &TransferContext) -> PolarsResult<()> {
-    let n_calls = (ctx.end_row - ctx.start_row) as u64;
-    write_all_missing_range(
-        ctx.transfer_column,
-        ctx.start_index,
-        ctx.start_row,
-        ctx.end_row,
-        ctx.stata_offset,
-        |row, col| {
-            replace_string_unchecked(None, row, col);
-        },
-    );
-    add_transfer_metric_counts(0, n_calls, 0, 0, 0);
+    if as_string {
+        add_transfer_metric_counts(0, n_calls, 0, 0, 0);
+    } else {
+        add_transfer_metric_counts(n_calls, 0, 0, 0, 0);
+    }
     Ok(())
 }
 
