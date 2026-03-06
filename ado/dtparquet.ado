@@ -1,11 +1,11 @@
-*! Version 2.0.0 02Mar2026
+*! version 2.0.0 06mar2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
 *! and portions of code from the 'pq' command by Jon Rothbaum 
 *! (U.S. Census Bureau). Specifically, parts of the Stata ADO 
 *! command syntax and Rust plugin architecture were adapted 
-*! from 'stata_parquet_io' (https://github.com/jrothbaum/stata_parquet_io).
+*! from 'pq' (https://github.com/jrothbaum/stata_parquet_io).
 *! 
 *! LICENSE: MIT
 
