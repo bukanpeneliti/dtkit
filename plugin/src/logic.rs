@@ -468,12 +468,6 @@ pub fn warm_thread_pools() {
     let _ = get_compute_thread_pool();
     let _ = get_io_thread_pool();
 }
-pub fn io_pool_init_count() -> usize {
-    IO_POOL_INIT_COUNT.load(Ordering::Relaxed)
-}
-pub fn compute_pool_init_count() -> usize {
-    COMPUTE_POOL_INIT_COUNT.load(Ordering::Relaxed)
-}
 
 #[derive(Copy, Clone, Debug)]
 pub enum BatchMode {
@@ -539,9 +533,9 @@ impl CommonRuntimeMetrics {
     pub fn collect(&mut self, start: Instant) {
         self.elapsed_ms = start.elapsed().as_millis();
         self.compute_pool_threads = get_compute_thread_pool().current_num_threads();
-        self.compute_pool_inits = compute_pool_init_count();
+        self.compute_pool_inits = COMPUTE_POOL_INIT_COUNT.load(Ordering::Relaxed);
         self.io_pool_threads = get_io_thread_pool().current_num_threads();
-        self.io_pool_inits = io_pool_init_count();
+        self.io_pool_inits = IO_POOL_INIT_COUNT.load(Ordering::Relaxed);
     }
     pub fn emit_to_macros(&self, prefix: &str) {
         let m = [
@@ -1122,7 +1116,7 @@ mod tests {
     #[test]
     fn thread_pools_init() {
         warm_thread_pools();
-        assert!(compute_pool_init_count() >= 1);
-        assert!(io_pool_init_count() >= 1);
+        assert!(COMPUTE_POOL_INIT_COUNT.load(Ordering::Relaxed) >= 1);
+        assert!(IO_POOL_INIT_COUNT.load(Ordering::Relaxed) >= 1);
     }
 }
