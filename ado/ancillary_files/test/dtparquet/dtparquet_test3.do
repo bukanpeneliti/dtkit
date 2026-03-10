@@ -1,6 +1,6 @@
 * dtparquet_test3.do
 * Verification suite for Phase 3: Compression and Version Gates
-* Date: Feb 11, 2026
+* Date: 11feb2026
 
 version 16
 clear all

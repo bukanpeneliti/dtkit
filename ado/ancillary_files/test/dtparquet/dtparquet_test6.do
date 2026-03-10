@@ -1,6 +1,6 @@
 * dtparquet_test6.do
 * Test suite for command and option abbreviations
-* Date: Jan 14, 2026
+* Date: 14jan2026
 
 version 16
 clear frames

@@ -1,6 +1,6 @@
 * dtparquet_test1.do
 * Comprehensive test suite for dtparquet Phase 1
-* Date: Jan 12, 2026
+* Date: 12jan2026
 
 version 16
 clear frames

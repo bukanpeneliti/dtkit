@@ -1,6 +1,6 @@
 * dtparquet_test2.do
 * Comprehensive test suite for dtparquet Phase 2 (export/import with atomic writes)
-* Date: Jan 13, 2026
+* Date: 13jan2026
 
 version 16
 clear frames

@@ -1,6 +1,6 @@
 * dtparquet_benchmark_chunksize.do
 * Benchmark dtparquet save chunksize choices (display-only output)
-* Date: Feb 11, 2026
+* Date: 11feb2026
 
 version 16
 clear all

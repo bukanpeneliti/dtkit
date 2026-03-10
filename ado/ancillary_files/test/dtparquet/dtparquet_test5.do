@@ -1,6 +1,6 @@
 * dtparquet_test5.do
 * Verification for Phase 5: Optimized SFI Streaming (Row-Major) and Phase 6: Advanced Type Mapping
-* Date: Feb 11, 2026
+* Date: 11feb2026
 
 version 16
 clear all

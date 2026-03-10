@@ -1,5 +1,5 @@
 *! dtparquet_test4.do - Phase 4 Streaming & Data Signature Verification
-* Date: Jan 13, 2026
+* Date: 13jan2026
 
 version 16
 clear all

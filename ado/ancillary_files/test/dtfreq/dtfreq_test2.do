@@ -2,7 +2,7 @@
 * dtfreq_test.do
 * Comprehensive testing of dtfreq.ado
 * Author: Hafiz
-* Date: 01Jun2025
+* Date: 01jun2025
 * Location: test/dtfreq/
 *******************************************************
 

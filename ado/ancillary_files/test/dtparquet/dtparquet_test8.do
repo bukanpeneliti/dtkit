@@ -1,6 +1,6 @@
 * dtparquet_test8.do
 * Stress test suite for crash reproduction and regression
-* Date: Feb 24, 2026
+* Date: 24feb2026
 
 version 16
 clear all
