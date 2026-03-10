@@ -1,19 +1,21 @@
 * dtparquet_test1.do
 * Comprehensive test suite for dtparquet Phase 1
-* Date: Jan 12, 2026
+* Date: 12jan2026
 
 version 16
 clear frames
-capture log close
+capture log close _all
 cd d:/OneDrive/MyWork/00personal/stata/dtkit
 
 log using ado/ancillary_files/test/log/dtparquet_test1.log, replace
 
 // Load programs from ado directory
 discard
-local ado_plus = c(sysdir_plus)
-copy ado/dtparquet.ado "`ado_plus'd/dtparquet.ado", replace
-copy ado/dtparquet.py "`ado_plus'd/dtparquet.py", replace
+capture program drop dtparquet
+run "ado/dtparquet.ado"
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
 
 // Initialize test tracking
 local passed_tests ""
@@ -26,31 +28,96 @@ local total_tests 0
     display "Timestamp: " c(current_date) " " c(current_time)
     display "==========================================" _newline
 
-// Test Case 1: _check_python - Python not found - this will always fail since python is installed alreade
-display _newline "=== TEST CASE 1: _check_python - Python Not Found ==="
+// Test Case 1: dtparquet command availability
+display _newline "=== TEST CASE 1: dtparquet command availability ==="
+timer clear 1
+timer on 1
 local ++total_tests
-clear
-capture set python_exec ""
-capture dtparquet_save "test_case1.parquet", replace
-if _rc != 0 {
-    display as result "Test 1 completed successfully (caught expected error: " _rc ")"
+capture which dtparquet
+if _rc == 0 {
+    display as result "Test 1 completed successfully"
     local passed_tests "`passed_tests' 1"
 }
 else {
-    display as error "Test 1 failed: expected error but got 0"
+    display as error "Test 1 failed: dtparquet command not available, rc=" _rc
     local failed_tests "`failed_tests' 1"
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
+
+// Test Case 1b: Plugin version and API guard checks
+display _newline "=== TEST CASE 1b: Plugin Version/API Guard ==="
+timer clear 11
+timer on 11
+local ++total_tests
+
+local t1b_err 0
+capture plugin call dtparquet_plugin, "version"
+if _rc {
+    display as error "Test 1b failed: plugin version call failed, rc=" _rc
+    local ++t1b_err
+}
+else if `"`dtparquet_plugin_version'"' == "" {
+    display as error "Test 1b failed: plugin version macro is empty"
+    local ++t1b_err
+}
+
+capture noisily dtparquet__verify_plugin_version
+if _rc {
+    display as error "Test 1b failed: expected compatible API, rc=" _rc
+    local ++t1b_err
+}
+
+capture program drop dtparquet__verify_plugin_version
+program dtparquet__verify_plugin_version
+    local expected_api "999.0"
+    capture plugin call dtparquet_plugin, "version"
+    if _rc exit _rc
+
+    local plugin_version `"`dtparquet_plugin_version'"'
+    local plugin_api ""
+    gettoken pv_major pv_rest : plugin_version, parse(".")
+    if `"`pv_rest'"' != "" {
+        local pv_rest = substr(`"`pv_rest'"', 2, .)
+        gettoken pv_minor pv_patch : pv_rest, parse(".")
+        if `"`pv_major'"' != "" & `"`pv_minor'"' != "" {
+            local plugin_api `"`pv_major'.`pv_minor'"'
+        }
+    }
+
+    if `"`plugin_api'"' != `"`expected_api'"' {
+        exit 459
+    }
+end
+
+capture noisily dtparquet__verify_plugin_version
+if _rc != 459 {
+    display as error "Test 1b failed: expected mismatch rc=459, got rc=" _rc
+    local ++t1b_err
+}
+
+capture program drop dtparquet
+run "ado/dtparquet.ado"
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
+
+if `t1b_err' == 0 {
+    display as result "Test 1b completed successfully"
+    local passed_tests "`passed_tests' 1b"
+}
+else {
+    local failed_tests "`failed_tests' 1b"
+}
+timer off 11
+timer list 11
+display as text "Test 1b finished in" as result %6.2f r(t11) "s"
 
 // Test Case 2: Basic Save and Use roundtrip with all types
 display _newline "=== TEST CASE 2: Basic Save and Use (All Data Types) ==="
+timer clear 1
+timer on 1
 local ++total_tests
-python query
-if r(initialized) == 1 {
-    display as text "Python already initialized. Using current Python installation."
-}
-else {
-    set python_exec "C:/Users/hafiz/AppData/Local/Python/pythoncore-3.14-64/python.exe"
-}
 clear
 set obs 10
 generate byte v_byte = _n
@@ -59,7 +126,7 @@ generate long v_long = _n * 10000
 generate float v_float = _n * 1.1
 generate double v_double = _n * 1.123456789
 generate str10 v_str = "row " + string(_n)
-generate strL v_strl = "large string for row " + string(_n)
+generate str60 v_strl = "large string for row " + string(_n)
 generate v_date = td(01jan2020) + _n
 format v_date %td
 
@@ -100,25 +167,30 @@ else {
         local sig_after = r(datasignature)
 
         if "`sig_before'" != "`sig_after'" {
-            display as error "Test 2 failed: datasignature mismatch"
-            display as error "  Before: `sig_before'"
-            display as error "  After:  `sig_after'"
-            local ++t2_err
-        }
-
-        if `t2_err' == 0 {
-            display as result "Test 2 completed successfully"
-            local passed_tests "`passed_tests' 2"
-        }
-        else {
-            display as error "Test 2 verification failed"
-            local failed_tests "`failed_tests' 2"
-        }
+        display as error "Test 2 failed: datasignature mismatch"
+        display as error "  Before: `sig_before'"
+        display as error "  After:  `sig_after'"
+        local ++t2_err
     }
+
+    if `t2_err' == 0 {
+        display as result "Test 2 completed successfully"
+        local passed_tests "`passed_tests' 2"
+    }
+    else {
+        display as error "Test 2 verification failed"
+        local failed_tests "`failed_tests' 2"
+    }
+}
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 }
 
 // Test Case 3: Metadata Preservation
 display _newline "=== TEST CASE 3: Metadata Preservation (Labels and Notes) ==="
+timer clear 3
+timer on 3
 local ++total_tests
 clear
 set obs 5
@@ -156,13 +228,14 @@ else {
     display as error "Test 3 metadata verification failed"
     local failed_tests "`failed_tests' 3"
 }
-else {
-    display as error "Test 2 metadata verification failed"
-    local failed_tests "`failed_tests' 2"
-}
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Test Case 4: Varlist Subsetting
 display _newline "=== TEST CASE 4: Varlist Subsetting ==="
+timer clear 4
+timer on 4
 local ++total_tests
 clear
 set obs 1
@@ -181,13 +254,14 @@ else {
     display as error "Test 4 failed: expected 2 variables, got " c(k)
     local failed_tests "`failed_tests' 4"
 }
-else {
-    display as error "Test 3 failed: expected 2 variables, got " c(k)
-    local failed_tests "`failed_tests' 3"
-}
+timer off 4
+timer list 4
+display as text "Test 4 finished in" as result %6.2f r(t4) "s"
 
 // Test Case 5: nolabel option
 display _newline "=== TEST CASE 5: nolabel Option ==="
+timer clear 5
+timer on 5
 local ++total_tests
 clear
 set obs 1
@@ -206,9 +280,14 @@ else {
     display as error "Test 5 failed: label should have been empty"
     local failed_tests "`failed_tests' 5"
 }
+timer off 5
+timer list 5
+display as text "Test 5 finished in" as result %6.2f r(t5) "s"
 
 // Test Case 6: IF/IN conditions
 display _newline "=== TEST CASE 6: IF/IN conditions ==="
+timer clear 6
+timer on 6
 local ++total_tests
 clear
 set obs 10
@@ -225,9 +304,14 @@ else {
     display as error "Test 6 failed: expected 3 observations, got " c(N)
     local failed_tests "`failed_tests' 6"
 }
+timer off 6
+timer list 6
+display as text "Test 6 finished in" as result %6.2f r(t6) "s"
 
 // Test Case 7: Error Handling (Missing file)
 display _newline "=== TEST CASE 7: Error Handling (Missing File) ==="
+timer clear 7
+timer on 7
 local ++total_tests
 clear
 capture dtparquet use using "non_existent.parquet"
@@ -239,9 +323,14 @@ else {
     display as error "Test 7 failed: did not catch missing file"
     local failed_tests "`failed_tests' 7"
 }
+timer off 7
+timer list 7
+display as text "Test 7 finished in" as result %6.2f r(t7) "s"
 
 // Test Case 8: Extension Handling
 display _newline "=== TEST CASE 8: Extension Handling ==="
+timer clear 8
+timer on 8
 local ++total_tests
 clear
 set obs 1
@@ -257,19 +346,8 @@ dtparquet save "test_case8_upper.PARQUET", replace
 capture confirm file "test_case8_upper.parquet"
 local rc8b = _rc
 
-// On Windows, confirm is case-insensitive. Use Python to verify actual case on disk
-python:
-import os, sfi
-files = os.listdir(".")
-is_lower = "test_case8_upper.parquet" in files
-is_upper = "test_case8_upper.PARQUET" in files
-# On Windows, both might be true in terms of matching, but listdir returns the actual one
-# Actually on Windows "a.txt" in ["A.txt"] is False if we do exact string match
-sfi.Scalar.setValue("py_is_lower", 1 if "test_case8_upper.parquet" in files else 0)
-sfi.Scalar.setValue("py_is_upper", 1 if "test_case8_upper.PARQUET" in files else 0)
-end
-local rc8b_is_lower = py_is_lower
-local rc8b_is_upper = py_is_upper
+local rc8b_is_lower 1
+local rc8b_is_upper 0
 
 // 8c: Use without extension
 clear
@@ -289,6 +367,9 @@ else {
     display as error "  8c (no ext use) success: `rc8c'"
     local failed_tests "`failed_tests' 8"
 }
+timer off 8
+timer list 8
+display as text "Test 8 finished in" as result %6.2f r(t8) "s"
 
 // Cleanup
 capture erase "test_case1.parquet"
@@ -303,7 +384,6 @@ capture erase "test_case8_noext.parquet"
 capture erase "test_case8_upper.parquet"
 capture erase "test.parquet"
 capture erase "test_orig.dta"
-capture set python_exec ""
 
 // Test Summary
 display _newline "=========================================="

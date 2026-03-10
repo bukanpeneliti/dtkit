@@ -1,4 +1,4 @@
-*! Version 1.0.2 25Jun2025
+*! Version 1.0.2 25jun2025
 program define dtfreq
     * Module to produce frequency dataset
 

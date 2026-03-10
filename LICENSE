@@ -19,3 +19,13 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+---
+
+### Acknowledgments
+
+Portions of this software (specifically concepts and code structures related to the 
+Stata-Parquet integration) are inspired by and derived from 'stata_parquet_io' 
+(the 'pq' command), Copyright (c) 2024 Jon Rothbaum (U.S. Census Bureau).
+These portions are also used under the MIT License.
+

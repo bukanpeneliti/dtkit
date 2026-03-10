@@ -1,6 +1,6 @@
 * dtparquet_test6.do
 * Test suite for command and option abbreviations
-* Date: Jan 14, 2026
+* Date: 14jan2026
 
 version 16
 clear frames
@@ -9,12 +9,16 @@ cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
 
 log using "ado/ancillary_files/test/log/dtparquet_test6.log", replace
 
+timer clear 99
+timer on 99
+
 // Load programs from ado directory
 discard
-local ado_plus = c(sysdir_plus)
-capture mkdir "`ado_plus'd"
-copy "ado/dtparquet.ado" "`ado_plus'd/dtparquet.ado", replace
-copy "ado/dtparquet.py" "`ado_plus'd/dtparquet.py", replace
+capture program drop dtparquet
+run "ado/dtparquet.ado"
+local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
+cap program drop dtparquet_plugin
+program dtparquet_plugin, plugin using("`plugin_dll'")
 
 // Initialize test tracking
 local passed_tests ""
@@ -27,12 +31,6 @@ display "Starting dtparquet Abbreviation Test Suite"
 display "Timestamp: " c(current_date) " " c(current_time)
 display "==========================================" _newline
 
-// Ensure Python is configured
-python query
-if r(initialized) != 1 {
-    set python_exec "C:/Users/hafiz/AppData/Local/Python/pythoncore-3.14-64/python.exe"
-}
-
 // Setup common data
 set obs 10
 generate id = _n
@@ -41,6 +39,8 @@ save "test_base.dta", replace
 
 // Test Case 1: 'dtparquet sa' (save) and 're' (replace)
 display _newline "=== TEST CASE 1: Subcommand 'sa' and option 're' ==="
+timer clear 1
+timer on 1
 local ++total_tests
 dtparquet sa "test_abbr.parquet", replace
 if _rc == 0 {
@@ -58,9 +58,14 @@ else {
     display as error "Test 1 failed: 'sa' abbreviation or 'replace' failed"
     local failed_tests "`failed_tests' 1"
 }
+timer off 1
+timer list 1
+display as text "Test 1 finished in" as result %6.2f r(t1) "s"
 
 // Test Case 2: 'dtparquet u' (use) and 'cle' (clear)
 display _newline "=== TEST CASE 2: Subcommand 'u' and option 'cle' ==="
+timer clear 2
+timer on 2
 local ++total_tests
 dtparquet u "test_abbr.parquet", cle
 if _rc == 0 & c(N) == 10 {
@@ -71,9 +76,14 @@ else {
     display as error "Test 2 failed: rc=" _rc " N=" c(N)
     local failed_tests "`failed_tests' 2"
 }
+timer off 2
+timer list 2
+display as text "Test 2 finished in" as result %6.2f r(t2) "s"
 
 // Test Case 3: 'dtparquet exp' (export)
 display _newline "=== TEST CASE 3: Subcommand 'exp' (export) ==="
+timer clear 3
+timer on 3
 local ++total_tests
 dtparquet exp "test_exp.parquet" using "test_base.dta", re
 if _rc == 0 {
@@ -84,9 +94,14 @@ else {
     display as error "Test 3 failed: rc=" _rc
     local failed_tests "`failed_tests' 3"
 }
+timer off 3
+timer list 3
+display as text "Test 3 finished in" as result %6.2f r(t3) "s"
 
 // Test Case 4: 'dtparquet imp' (import)
 display _newline "=== TEST CASE 4: Subcommand 'imp' (import) ==="
+timer clear 4
+timer on 4
 local ++total_tests
 dtparquet imp "test_imp.dta" using "test_exp.parquet", re
 if _rc == 0 {
@@ -104,9 +119,14 @@ else {
     display as error "Test 4 failed: rc=" _rc
     local failed_tests "`failed_tests' 4"
 }
+timer off 4
+timer list 4
+display as text "Test 4 finished in" as result %6.2f r(t4) "s"
 
 // Test Case 5: 'nol' (nolabel) and 'ch' (chunksize)
 display _newline "=== TEST CASE 5: Options 'nol' and 'ch' ==="
+timer clear 5
+timer on 5
 local ++total_tests
 dtparquet sa "test_opts.parquet", re nol ch(1000)
 if _rc == 0 {
@@ -125,9 +145,14 @@ else {
     display as error "Test 5 failed: rc=" _rc
     local failed_tests "`failed_tests' 5"
 }
+timer off 5
+timer list 5
+display as text "Test 5 finished in" as result %6.2f r(t5) "s"
 
 // Test Case 6: 'dtparquet u [varlist] using [file]'
 display _newline "=== TEST CASE 6: Use with Varlist and Using Keyword ==="
+timer clear 6
+timer on 6
 local ++total_tests
 dtparquet u id using "test_abbr.parquet", cle
 if _rc == 0 & c(k) == 1 {
@@ -138,9 +163,14 @@ else {
     display as error "Test 6 failed: rc=" _rc " k=" c(k)
     local failed_tests "`failed_tests' 6"
 }
+timer off 6
+timer list 6
+display as text "Test 6 finished in" as result %6.2f r(t6) "s"
 
 // Test Case 7: 'all' (allstring)
 display _newline "=== TEST CASE 7: Option 'all' (allstring) ==="
+timer clear 7
+timer on 7
 local ++total_tests
 dtparquet u "test_abbr.parquet", cle all
 if _rc == 0 {
@@ -151,6 +181,76 @@ else {
     display as error "Test 7 failed: rc=" _rc
     local failed_tests "`failed_tests' 7"
 }
+timer off 7
+timer list 7
+display as text "Test 7 finished in" as result %6.2f r(t7) "s"
+
+// Test Case 8: String columns with empty/long strings
+display _newline "=== TEST CASE 8: String columns with null values ==="
+timer clear 8
+timer on 8
+local ++total_tests
+clear
+set obs 3
+gen long id = _n
+gen str20 str_col = ""
+replace str_col = "a" in 1
+replace str_col = "" in 2
+replace str_col = "c" in 3
+gen str200 long_str = ""
+replace long_str = "Short" in 1
+replace long_str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" in 2
+replace long_str = "" in 3
+dtparquet save "test_complex.parquet", replace
+
+dtparquet u "test_complex.parquet", cle
+display _rc
+if _rc == 0 {
+    describe
+    list
+    if substr(long_str[2],1,1) == "A" & length(long_str[2]) > 90 & str_col[2] == "" {
+        display as result "Test 8/9 complex completed successfully"
+        local passed_tests "`passed_tests' 8"
+    }
+    else {
+        display as error "Test 8/9 failed: data mismatch"
+        local failed_tests "`failed_tests' 8"
+    }
+}
+else {
+    display as error "Test 8/9 failed: rc=" _rc
+    local failed_tests "`failed_tests' 8"
+}
+timer off 8
+timer list 8
+display as text "Test 8 finished in" as result %6.2f r(t8) "s"
+
+// Test Case 9: Real-world complex file (BPOM)
+display _newline "=== TEST CASE 9: BPOM real-world file ==="
+timer clear 9
+timer on 9
+local ++total_tests
+dtparquet u "ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", cle
+display _rc
+
+if _rc == 0 {
+    count
+    if r(N) > 0 {
+        display as result "Test 9 completed successfully: Loaded " r(N) " observations"
+        local passed_tests "`passed_tests' 9"
+    }
+    else {
+        display as error "Test 9 failed: No observations loaded"
+        local failed_tests "`failed_tests' 9"
+    }
+}
+else {
+    display as error "Test 9 failed: rc=" _rc
+    local failed_tests "`failed_tests' 9"
+}
+timer off 9
+timer list 9
+display as text "Test 9 finished in" as result %6.2f r(t9) "s"
 
 // Cleanup
 capture erase "test_base.dta"
@@ -158,6 +258,21 @@ capture erase "test_abbr.parquet"
 capture erase "test_exp.parquet"
 capture erase "test_imp.dta"
 capture erase "test_opts.parquet"
+capture erase "test_null_str.parquet"
+capture erase "test_complex.parquet"
+
+timer off 99
+capture timer list 99
+local elapsed = r(t99)
+if `elapsed' < 60 {
+    display as result "Total elapsed time: " %9.2f `elapsed' " seconds"
+}
+else if `elapsed' < 3600 {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/60) " minutes (" %9.2f `elapsed' " seconds)"
+}
+else {
+    display as result "Total elapsed time: " %9.2f (`elapsed'/3600) " hours (" %9.2f (`elapsed'/60) " minutes)"
+}
 
 // Summary
 display _newline "=========================================="

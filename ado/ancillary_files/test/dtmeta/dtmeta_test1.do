@@ -1,6 +1,6 @@
 * dtmeta_test.do
 * Comprehensive test suite for dtmeta.ado
-* Date: 30 May 2025
+* Date: 30may2025
 
 version 16
 clear frames

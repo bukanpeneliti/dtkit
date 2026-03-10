@@ -5,6 +5,37 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.0] - 2026-03-02
+
+- **Major architectural update** with Rust plugin migration to Polars 0.53, extensive performance optimizations, and stability hardening.
+- Component versions:
+  - **dtkit: v2.0.0 (Updated)**
+  - **dtparquet: v2.0.0 (Updated)**
+  - dtfreq: v1.0.2 (Unchanged)
+  - dtstat: v1.0.2 (Unchanged)
+  - dtmeta: v1.0.1 (Unchanged)
+
+### Changed
+
+- **dtparquet v2.0.0**: Major Rust plugin overhaul
+  - **Polars 0.53 Migration**: Upgraded from Polars 0.52 → 0.53 with full backward compatibility
+  - **Performance Optimization (Phase 12)**: 
+    - Bounds validation hoisting for reduced overhead
+    - Batched counter publication replacing per-cell atomic increments
+    - Reusable string buffers for reduced CString allocations
+    - Conditional parallelization based on workload justification
+    - Write-stage timing instrumentation (separates collect time from parquet serialization)
+  - **Crash Hardening**:
+    - Changed `panic="unwind"` → `panic="abort"` for FFI safety
+    - Added `AssertUnwindSafe` wrapper for segfault prevention
+    - FFI entrypoint argument validation
+    - Thread-pool graceful degradation
+  - **Code Quality**: ~1,000 lines reduced through aggressive refactoring
+  - **Enhanced Testing**:
+    - New stress test: `dtparquet_test8.do` (1,000 setup_check iterations, 200 save/use roundtrips)
+    - Comprehensive benchmark suite: `dtparquet_vs_pq.do` (compares vs Stata's `pq` command)
+    - Timer instrumentation across all test cases
+
 ## Package Release [v1.1.0] - 2026-01-14
 
 - **Major feature update** introducing Parquet support and centralized package management.
