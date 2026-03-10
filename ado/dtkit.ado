@@ -1,4 +1,4 @@
-*! version 1.2.1 02Feb2026
+*! version 2.0.0 06mar2026
 *! Program for managing the dtkit package installation
 
 capture program drop dtkit
@@ -14,6 +14,8 @@ program dtkit
         test           ///
         tests(str)     ///
         branch(str)    ///
+        tag(str)       ///
+        pluginstatus   ///
     ]
 
     // Consolidate update/upgrade
@@ -45,6 +47,17 @@ program dtkit
     if (`do_update') {
         capture net uninstall dtkit
         net install dtkit, from(`github') replace
+        dtkit_sync_dtparquet_plugin, tag(`tag')
+        if _rc {
+            exit _rc
+        }
+        if ( `"`examples'`test'`tests'"' == `""' ) {
+            exit 0
+        }
+    }
+
+    if ("`pluginstatus'" != "") {
+        dtkit_plugin_status
         if ( `"`examples'`test'`tests'"' == `""' ) {
             exit 0
         }
@@ -105,6 +118,48 @@ program dtkit
     capture which dtparquet
     if !_rc display "  dtparquet: available"
     else display "  dtparquet: not found"
+end
+
+capture program drop dtkit_plugin_status
+program dtkit_plugin_status
+    version 16
+
+    capture quietly findfile dtparquet.ado
+    if _rc {
+        display as error "dtparquet.ado not found on adopath."
+        exit 601
+    }
+
+    local ado_path `"`r(fn)'"'
+    local target_dir : subinstr local ado_path "dtparquet.ado" "", all
+    local target_dll `"`target_dir'dtparquet.dll"'
+
+    display "dtparquet plugin status"
+    display "  ado path: `ado_path'"
+    display "  dll path: `target_dll'"
+
+    capture confirm file `"`target_dll'"'
+    if _rc {
+        display as error "  dll: missing"
+    }
+    else {
+        display as result "  dll: present"
+    }
+
+    capture program drop dtparquet_plugin
+    capture noisily program dtparquet_plugin, plugin using(`"`target_dll'"')
+    if _rc {
+        display as error "  plugin load: failed"
+        exit 601
+    }
+
+    capture plugin call dtparquet_plugin, "version"
+    if _rc {
+        display as error "  plugin version: unavailable"
+        exit _rc
+    }
+
+    display as result "  plugin version: `dtparquet_plugin_version'"
 end
 
 capture program drop dtkit_licenses
@@ -260,3 +315,47 @@ program dtkit_test_basic
     
     display "Basic tests completed."
 end 
+
+capture program drop dtkit_sync_dtparquet_plugin
+program dtkit_sync_dtparquet_plugin
+    version 16
+    syntax [, tag(str)]
+
+    if lower("`c(os)'") != "windows" {
+        exit 0
+    }
+
+    capture quietly findfile dtparquet.ado
+    if _rc {
+        display as error "Could not locate dtparquet.ado after installation."
+        exit 601
+    }
+
+    local ado_path `"`r(fn)'"'
+    local target_dir : subinstr local ado_path "dtparquet.ado" "", all
+    local target_dll `"`target_dir'dtparquet.dll"'
+
+    local release_base "https://github.com/bukanpeneliti/dtkit/releases"
+    local download_url `"`release_base'/latest/download/dtparquet.dll"'
+    if `"`tag'"' != "" {
+        local download_url `"`release_base'/download/`tag'/dtparquet.dll"'
+    }
+
+    capture copy `"`download_url'"' `"`target_dll'"', replace
+    if _rc {
+        display as error "Could not install dtparquet plugin binary from GitHub Releases."
+        display as text ""
+        display as text "Try the following:"
+        display as text "  1) Check internet/proxy access to GitHub release assets."
+        display as text "  2) Close Stata sessions using dtparquet and retry: {stata dtkit, update}"
+        display as text "  3) Manual install: place dtparquet.dll in `target_dir'"
+        display as text ""
+        display as text "Attempted asset URL:"
+        display as text "  `download_url'"
+        display as text "Release page:"
+        display as text "  https://github.com/bukanpeneliti/dtkit/releases"
+        exit 601
+    }
+
+    display as result "Installed dtparquet plugin: `target_dll'"
+end

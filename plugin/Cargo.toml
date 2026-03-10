@@ -1,0 +1,61 @@
+[workspace]
+members = [
+    "crates/stata-sys",
+    "."
+]
+
+[package]
+name = "dtparquet"
+version = "2.0.0"
+authors = ["Hafiz <your.email@example.com>"]
+edition = "2021"
+description = "Fast Stata plugin for Parquet I/O with metadata preservation"
+license = "MIT"
+build = "build.rs"
+
+[package.metadata.dtparquet]
+api = "2.0"
+
+[lib]
+name = "dtparquet"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+polars = { version = "0.53.0", default-features = false, features=[
+    "lazy",
+    "parquet",
+    "dtype-categorical",
+    "dtype-i8",
+    "dtype-i16",
+    "dtype-u8",
+    "dtype-u16",
+    "fmt",
+] }
+polars-io = { version = "0.53.0", default-features = false, features = ["parquet"] }
+polars-core = { version = "0.53.0", default-features = false }
+
+stata-sys = { path = "./crates/stata-sys" }
+rayon = "1.8"
+serde = "1.0"
+serde_json = "1.0"
+glob = "0.3"
+regex = "1.0"
+walkdir = "2.4"
+thiserror = "2.0"
+
+[profile.release]
+strip = "symbols"
+panic = "abort"
+lto = "fat"
+codegen-units = 1
+
+[profile.dev]
+debug = 1
+panic = "abort"
+
+[profile.test]
+debug = 1
+panic = "abort"
+
+[build-dependencies]
+toml = "0.8"

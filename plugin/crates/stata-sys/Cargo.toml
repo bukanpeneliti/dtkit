@@ -1,0 +1,19 @@
+[package]
+name = "stata-sys"
+version = "1.0.0"
+authors = ["Jonathan Rothbaum <jon.rothbaum@gmail.com>"]
+edition = "2021"
+description = "Raw bindings to stata stplugin 3.0 cpp"
+license = "MIT"
+links = "stplugin_support"
+build = "build.rs"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+libc = "0.2"
+
+[build-dependencies]
+cc = "1.0"
+bindgen = "0.71.1"
