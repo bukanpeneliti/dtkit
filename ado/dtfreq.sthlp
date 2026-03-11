@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  25jun2025}{...}
+{* *! version 1.0.2  11mar2026}{...}
 {vieweralsosee "[R] contract" "help contract"}{...}
 {vieweralsosee "[R] table" "help table"}{...}
 {vieweralsosee "[R] tabstat" "help tabstat"}{...}
@@ -10,15 +10,13 @@
 {vieweralsosee "dtparquet" "help dtparquet"}{...}
 {viewerjumpto "Syntax" "dtfreq##syntax"}{...}
 {viewerjumpto "Description" "dtfreq##description"}{...}
-{viewerjumpto "Links to PDF documentation" "dtfreq##linkspdf"}{...}
 {viewerjumpto "Options" "dtfreq##options"}{...}
 {viewerjumpto "Examples" "dtfreq##examples"}{...}
 {viewerjumpto "Stored results" "dtfreq##results"}{...}
 {viewerjumpto "Author" "dtfreq##author"}{...}
 {viewerjumpto "Also see" "dtfreq##also_see"}{...}
 {p2colset 1 16 18 2}{...}
-{p2col:{bf:[D] dtfreq} {hline 2}}Produce comprehensive frequency datasets{p_end}
-{p2col:}({mansection D dtfreq:View complete PDF manual entry}){p_end}
+{p2col:{bf:dtfreq} {hline 2}}Produce comprehensive frequency datasets{p_end}
 {p2colreset}{...}
 
 
@@ -26,12 +24,7 @@
 {title:Syntax}
 
 {p 8 16 2}
-{cmd:dtfreq}
-{varlist}
-[{ifin}]
-[{weight}]
-[{cmd:using} {it:{help filename}}]
-[{cmd:,} {it:options}]
+{cmd:dtfreq} {varlist} [{ifin}] [{weight}] [{cmd:using} {it:{help filename}}] [{cmd:,} {it:options}]
 
 {synoptset 24 tabbed}{...}
 {synopthdr}
@@ -89,13 +82,6 @@ The following list describes the resulting variable names:
 {phang2}o {opt stats(cell)} creates {cmd:cellprop*} and/or {cmd:cellpct*} variables{p_end}
 {phang2}o {opt type(prop)} includes proportion variables{p_end}
 {phang2}o {opt type(pct)} includes percentage variables{p_end}
-
-
-{marker linkspdf}{...}
-{title:Links to PDF documentation}
-
-{pstd}
-No PDF documentation is available for this user-written command.
 
 
 {marker options}{...}
@@ -265,9 +251,10 @@ The active frame remains unchanged throughout execution.
 {marker author}{...}
 {title:Author}
 
-{pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
+{pstd}
+Hafiz Arfyanto{break}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{break}
+GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
 The GitHub repository hosts the latest updates and documentation.

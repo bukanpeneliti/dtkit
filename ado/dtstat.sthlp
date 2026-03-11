@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  25jun2025}{...}
+{* *! version 1.0.2  11mar2026}{...}
 {vieweralsosee "[R] summarize" "help summarize"}{...}
 {vieweralsosee "[R] collapse" "help collapse"}{...}
 {vieweralsosee "[R] tabstat" "help tabstat"}{...}
@@ -10,15 +10,13 @@
 {vieweralsosee "dtparquet" "help dtparquet"}{...}
 {viewerjumpto "Syntax" "dtstat##syntax"}{...}
 {viewerjumpto "Description" "dtstat##description"}{...}
-{viewerjumpto "Links to PDF documentation" "dtstat##linkspdf"}{...}
 {viewerjumpto "Options" "dtstat##options"}{...}
 {viewerjumpto "Examples" "dtstat##examples"}{...}
 {viewerjumpto "Stored results" "dtstat##results"}{...}
 {viewerjumpto "Author" "dtstat##author"}{...}
 {viewerjumpto "Also see" "dtstat##also_see"}{...}
 {p2colset 1 16 18 2}{...}
-{p2col:{bf:[D] dtstat} {hline 2}}Produce descriptive statistics dataset{p_end}
-{p2col:}({mansection D dtstat:View complete PDF manual entry}){p_end}
+{p2col:{bf:dtstat} {hline 2}}Produce descriptive statistics dataset{p_end}
 {p2colreset}{...}
 
 
@@ -26,12 +24,7 @@
 {title:Syntax}
 
 {p 8 16 2}
-{cmd:dtstat}
-{varlist}
-[{ifin}]
-[{weight}]
-[{cmd:using} {it:{help filename}}]
-[{cmd:,} {it:options}]
+{cmd:dtstat} {varlist} [{ifin}] [{weight}] [{cmd:using} {it:{help filename}}] [{cmd:,} {it:options}]
 
 {synoptset 24 tabbed}{...}
 {synopthdr}
@@ -73,13 +66,6 @@ The output dataset includes rows for each group and additional rows for overall 
 {opt fast} utilizes {cmd:gcollapse} from the {cmd:gtools} package for improved performance with large datasets.
 
 
-{marker linkspdf}{...}
-{title:Links to PDF documentation}
-
-{pstd}
-No PDF documentation is available for this user-written command.
-
-
 {marker options}{...}
 {title:Options}
 
@@ -102,19 +88,43 @@ The default list includes {cmd:count mean median min max}.
 {cmd:dtstat} supports any statistic from {help collapse}.
 Common statistics include:
 
-{pmore2}
-{cmd:count} - number of nonmissing observations{break}
-{cmd:mean} - arithmetic mean{break}
-{cmd:median} - median (50th percentile){break}
-{cmd:min} - minimum value{break}
-{cmd:max} - maximum value{break}
-{cmd:sd} - standard deviation{break}
-{cmd:sum} - sum of values{break}
-{cmd:p}{it:##} - ##th percentile (e.g., {cmd:p25} for the 25th percentile, {cmd:p75} for the 75th percentile){break}
-{cmd:iqr} - interquartile range (difference between the 75th and 25th percentiles){break}
-{cmd:first} - first observation in group{break}
-{cmd:last} - last observation in group{break}
-{cmd:firstnm} - first nonmissing observation in group{break}
+{phang2}
+{cmd:count} - number of nonmissing observations
+
+{phang2}
+{cmd:mean} - arithmetic mean
+
+{phang2}
+{cmd:median} - median (50th percentile)
+
+{phang2}
+{cmd:min} - minimum value
+
+{phang2}
+{cmd:max} - maximum value
+
+{phang2}
+{cmd:sd} - standard deviation
+
+{phang2}
+{cmd:sum} - sum of values
+
+{phang2}
+{cmd:p}{it:##} - ##th percentile (e.g., {cmd:p25} for the 25th percentile, {cmd:p75} for the 75th percentile)
+
+{phang2}
+{cmd:iqr} - interquartile range (difference between the 75th and 25th percentiles)
+
+{phang2}
+{cmd:first} - first observation in group
+
+{phang2}
+{cmd:last} - last observation in group
+
+{phang2}
+{cmd:firstnm} - first nonmissing observation in group
+
+{phang2}
 {cmd:lastnm} - last nonmissing observation in group
 
 {phang}
@@ -205,9 +215,10 @@ The dataset includes additional rows for overall totals.{p_end}
 {marker author}{...}
 {title:Author}
 
-{pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
+{pstd}
+Hafiz Arfyanto{break}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{break}
+GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
 For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues}.
