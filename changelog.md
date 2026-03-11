@@ -5,6 +5,20 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.1] - 2026-03-11
+
+- **Critical performance optimization** for the Rust plugin.
+- Component versions:
+  - **dtkit: v2.0.1 (Updated)**
+  - **dtparquet: v2.0.1 (Updated)**
+
+### Fixed
+- **dtparquet v2.0.1**: 
+  - Eliminated O(N²) iterator scaling in parallel save operations (Replaced .skip().take() with O(1) slices).
+  - Optimized Stata-to-Rust missingness check using pure Rust bitwise comparisons (Removed 1M+ FFI calls per column).
+  - Improved string transfer performance using `StringChunkedBuilder` to reduce individual allocations.
+  - Performance: ~2.3x faster saves and ~2.1x faster reads compared to v2.0.0 baseline.
+
 ## Package Release [v2.0.0] - 2026-03-02
 
 - **Major architectural update** with Rust plugin migration to Polars 0.53, extensive performance optimizations, and stability hardening.

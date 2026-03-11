@@ -218,13 +218,19 @@ fn process_row_range(
     transfer_columns: &[TransferColumnSpec],
     stata_offset: usize,
 ) -> PolarsResult<()> {
+    let range_len = end_row.saturating_sub(start_row);
+    if range_len == 0 {
+        return Ok(());
+    }
+
     for (transfer_column, col) in transfer_columns.iter().zip(prepared_columns.iter()) {
+        let sliced_col = col.slice(start_row as i64, range_len);
         write_transfer_column_range(
-            col,
+            &sliced_col,
             transfer_column,
-            start_index,
-            start_row,
-            end_row,
+            start_index + start_row,
+            0,
+            range_len,
             stata_offset,
         )?;
     }
@@ -358,12 +364,8 @@ where
     F: Fn(T) -> f64 + Copy,
 {
     let mut write_calls = 0u64;
-    for (local_idx, value) in iter
-        .skip(ctx.start_row)
-        .take(ctx.end_row.saturating_sub(ctx.start_row))
-        .enumerate()
-    {
-        let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
+    for (local_idx, value) in iter.enumerate() {
+        let global_row_idx = local_idx + ctx.start_index;
         stata_sys::replace_number(
             value.map(mapper),
             global_row_idx + 1 + ctx.stata_offset,
@@ -395,13 +397,8 @@ fn write_all_missing_range(
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
     let str_col = ctx.col.str()?;
-    for (local_idx, value) in str_col
-        .iter()
-        .skip(ctx.start_row)
-        .take(ctx.end_row.saturating_sub(ctx.start_row))
-        .enumerate()
-    {
-        let global_row_idx = ctx.start_row + local_idx + ctx.start_index;
+    for (local_idx, value) in str_col.iter().enumerate() {
+        let global_row_idx = local_idx + ctx.start_index;
         let row = global_row_idx + 1 + ctx.stata_offset;
         let col = ctx.transfer_column.stata_col_index + 1;
         stata_sys::replace_string_ref(value, row, col);
@@ -631,16 +628,18 @@ fn series_from_stata_column_unchecked(
     if is_stata_string_dtype(&info.dtype) {
         let width = info.str_length.max(1);
         let mut str_buffer: Vec<i8> = vec![0; width.saturating_add(1)];
-        let mut values = Vec::with_capacity(n_rows);
+        let mut builder = StringChunkedBuilder::new(PlSmallStr::from(&info.name), n_rows);
+
         for row_idx in 0..n_rows {
-            values.push(pull_string_cell_with_buffer_unchecked(
+            let s = pull_string_cell_as_str_unchecked(
                 stata_col_index,
                 offset + row_idx + 1,
                 &mut str_buffer,
-            ));
+            );
+            builder.append_option(s);
         }
         add_transfer_metric_counts(0, 0, 0, n_rows as u64, 0);
-        return Ok(Series::new((&info.name).into(), values));
+        return Ok(builder.finish().into_series());
     }
 
     if is_stata_date_format(&info.format) {
