@@ -76,6 +76,10 @@ program dtparquet
                 gettoken tok scan_rest : scan_rest, bind
             }
         }
+        if "`dtparquet__file'" == "" {
+            gettoken fname : new_rest, parse(" ,")
+            local dtparquet__file "`fname'"
+        }
         dtparquet_use `new_rest'
         local rc = _rc
     }
@@ -147,6 +151,9 @@ program dtparquet
         local display_file = subinstr("`dtparquet__file'", `""', "", .)
         local display_file = subinstr("`display_file'", "'", "", .)
         local display_file = trim("`display_file'")
+        if substr("`display_file'", -1, 1) == "," {
+            local display_file = substr("`display_file'", 1, length("`display_file'") - 1)
+        }
 
         // Display message based on subcommand
         if "`dtparquet__sub'" == "save" {
