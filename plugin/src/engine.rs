@@ -593,6 +593,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 get_compute_thread_pool().current_num_threads().max(1),
             )
         });
+        let sink_started = Instant::now();
         let (l, b) = sink_dataframe_in_batches(
             &df,
             0,
@@ -602,6 +603,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             &mut t,
             &mut processed,
         )?;
+        set_elapsed_ms_macro("read_sink_to_stata_elapsed_ms", sink_started);
         (l, b, t)
     } else {
         let mut lf = open_parquet_scan(req.path, req.asterisk_var)?;
@@ -952,9 +954,14 @@ fn run_lazy_pipeline(
         }
         Ok((loaded, batches))
     } else {
+        let collect_started = Instant::now();
         *collects += 1;
         let df = lf.collect()?;
-        sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc)
+        set_elapsed_ms_macro("read_collect_elapsed_ms", collect_started);
+        let sink_started = Instant::now();
+        let res = sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc);
+        set_elapsed_ms_macro("read_sink_to_stata_elapsed_ms", sink_started);
+        res
     }
 }
 

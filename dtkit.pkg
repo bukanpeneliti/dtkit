@@ -1,10 +1,10 @@
-v 2.0.0
+v 2.0.1
 d dtkit: Data Toolkit for Stata
 d
 d Author: Hafiz Arfyanto
 d Support: email bukanpeneliti@gmail.com
 d
-d Distribution-Date: 06mar2026
+d Distribution-Date: 11mar2026
 d
 d This package provides utilities for data analysis in Stata
 d

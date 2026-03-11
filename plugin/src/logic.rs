@@ -60,11 +60,7 @@ const STATA_MISSING_DOT_BITS: u64 = 0x7fe0_0000_0000_0000;
 
 #[inline]
 fn is_stata_missing_fast(value: f64) -> bool {
-    let bits = value.to_bits();
-    if bits < STATA_MISSING_DOT_BITS {
-        return false;
-    }
-    unsafe { SF_is_missing(value) }
+    value.to_bits() >= STATA_MISSING_DOT_BITS
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -220,25 +216,24 @@ pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     }
 }
 
-pub fn pull_string_cell_with_buffer_unchecked(
+pub fn pull_string_cell_as_str_unchecked<'a>(
     col: usize,
     row: usize,
-    buffer: &mut Vec<i8>,
-) -> String {
+    buffer: &'a mut Vec<i8>,
+) -> Option<&'a str> {
     use std::ffi::{c_char, CStr};
     unsafe {
         if buffer.is_empty() {
-            display("dtparquet: pull_string buffer was empty; resizing to 2 bytes");
             buffer.resize(2, 0);
         } else {
             buffer[0] = 0;
         }
         if SF_sdata(col as i32, row as i32, buffer.as_mut_ptr() as *mut c_char) != 0 {
-            return String::new();
+            return None;
         }
         CStr::from_ptr(buffer.as_ptr() as *const c_char)
-            .to_string_lossy()
-            .into_owned()
+            .to_str()
+            .ok()
     }
 }
 
