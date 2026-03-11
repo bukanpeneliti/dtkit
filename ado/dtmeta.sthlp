@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.1  25jun2025}{...}
+{* *! version 1.0.1  11mar2026}{...}
 {vieweralsosee "[R] describe" "help describe"}{...}
 {vieweralsosee "[R] label" "help label"}{...}
 {vieweralsosee "[R] notes" "help notes"}{...}
@@ -10,7 +10,6 @@
 {vieweralsosee "dtparquet" "help dtparquet"}{...}
 {viewerjumpto "Syntax" "dtmeta##syntax"}{...}
 {viewerjumpto "Description" "dtmeta##description"}{...}
-{viewerjumpto "Links to PDF documentation" "dtmeta##linkspdf"}{...}
 {viewerjumpto "Options" "dtmeta##options"}{...}
 {viewerjumpto "Remarks" "dtmeta##remarks"}{...}
 {viewerjumpto "Examples" "dtmeta##examples"}{...}
@@ -18,8 +17,7 @@
 {viewerjumpto "Author" "dtmeta##author"}{...}
 {viewerjumpto "Also see" "dtmeta##also_see"}{...}
 {p2colset 1 16 18 2}{...}
-{p2col:{bf:[D] dtmeta} {hline 2}}Extract dataset metadata into multiple frames{p_end}
-{p2col:}({mansection D dtmeta:View complete PDF manual entry}){p_end}
+{p2col:{bf:dtmeta} {hline 2}}Extract dataset metadata into multiple frames{p_end}
 {p2colreset}{...}
 
 
@@ -27,9 +25,7 @@
 {title:Syntax}
 
 {p 8 16 2}
-{cmd:dtmeta}
-[{cmd:using} {it:{help filename}}]
-[{cmd:,} {it:options}]
+{cmd:dtmeta} [{cmd:using} {it:{help filename}}] [{cmd:,} {it:options}]
 
 {synoptset 20 tabbed}{...}
 {synopthdr}
@@ -58,13 +54,6 @@ The command creates up to four frames, each containing different aspects of the 
 {pstd}
 {cmd:dtmeta} processes the dataset in memory or reads metadata from an external {cmd:.dta} file via {cmd:using}.
 Without {opt clear}, {cmd:dtmeta} leaves the data in memory unchanged when processing an external file.
-
-
-{marker linkspdf}{...}
-{title:Links to PDF documentation}
-
-{pstd}
-No PDF documentation is available for this user-written command.
 
 
 {marker options}{...}
@@ -258,9 +247,10 @@ Without {opt clear}, {cmd:dtmeta} also preserves the current dataset when readin
 {marker author}{...}
 {title:Author}
 
-{pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
+{pstd}
+Hafiz Arfyanto{break}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{break}
+GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
 For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues}.

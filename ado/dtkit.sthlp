@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 2.0.0  06mar2026}{...}
+{* *! version 2.0.1  11mar2026}{...}
 {vieweralsosee "dtfreq" "help dtfreq"}{...}
 {vieweralsosee "dtstat" "help dtstat"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
@@ -7,14 +7,12 @@
 {vieweralsosee "" "--"}{...}
 {viewerjumpto "Syntax" "dtkit##syntax"}{...}
 {viewerjumpto "Description" "dtkit##description"}{...}
-{viewerjumpto "Links to PDF documentation" "dtkit##linkspdf"}{...}
 {viewerjumpto "Options" "dtkit##options"}{...}
 {viewerjumpto "Examples" "dtkit##examples"}{...}
 {viewerjumpto "Author" "dtkit##author"}{...}
 {viewerjumpto "Also see" "dtkit##also_see"}{...}
 {p2colset 1 12 14 2}{...}
-{p2col:{bf:[D] dtkit} {hline 2}}Data Toolkit package management{p_end}
-{p2col:}({mansection D dtkit:View complete PDF manual entry}){p_end}
+{p2col:{bf:dtkit} {hline 2}}Data Toolkit package management{p_end}
 {p2colreset}{...}
 
 
@@ -22,8 +20,7 @@
 {title:Syntax}
 
 {p 8 16 2}
-{cmd:dtkit}
-[{cmd:,} {it:options}]
+{cmd:dtkit} [{cmd:,} {it:options}]
 
 {synoptset 20 tabbed}{...}
 {synopthdr}
@@ -69,13 +66,6 @@ It handles installation, updates, and testing across the suite:
 {pstd}
 {cmd:dtkit} without options displays version information and availability status of all components.
 It reports the current installation status and checks for package updates.
-
-
-{marker linkspdf}{...}
-{title:Links to PDF documentation}
-
-{pstd}
-No PDF documentation is available for this user-written command.
 
 
 {marker options}{...}
@@ -129,11 +119,21 @@ It verifies the installation and accessibility of all dtkit commands.
 {opt tests(string)} runs specific test suites.
 Keyword arguments restrict tests to individual commands or functional areas.
 Available options are:
-{break}    {bf:basic} - basic functionality tests
-{break}    {bf:dtfreq} - dtfreq-specific tests  
-{break}    {bf:dtstat} - dtstat-specific tests
-{break}    {bf:dtmeta} - dtmeta-specific tests
-{break}    {bf:dtparquet} - dtparquet-specific tests
+
+{phang2}
+{bf:basic} - basic functionality tests
+
+{phang2}
+{bf:dtfreq} - dtfreq-specific tests
+
+{phang2}
+{bf:dtstat} - dtstat-specific tests
+
+{phang2}
+{bf:dtmeta} - dtmeta-specific tests
+
+{phang2}
+{bf:dtparquet} - dtparquet-specific tests
 
 
 {marker examples}{...}
@@ -167,13 +167,13 @@ Available options are:
 {marker author}{...}
 {title:Author}
 
-{pstd}Hafiz Arfyanto{p_end}
-{pstd}Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{p_end}
-{pstd}GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}{p_end}
+{pstd}
+Hafiz Arfyanto{break}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{break}
+GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
 Visit {browse "https://github.com/bukanpeneliti/dtkit/issues":GitHub Issues} for questions and suggestions.
-The issue tracker hosts bug reports and feature requests.
 
 
 {marker also_see}{...}

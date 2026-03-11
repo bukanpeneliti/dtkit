@@ -1,21 +1,21 @@
 {smcl}
-{* *! version 2.0.0  06mar2026}{...}
+{* *! version 2.0.1  11mar2026}{...}
+{vieweralsosee "dtmeta" "help dtmeta"}{...}
+{vieweralsosee "dtkit" "help dtkit"}{...}
 {vieweralsosee "[D] use" "help use"}{...}
 {vieweralsosee "[D] save" "help save"}{...}
 {vieweralsosee "[D] import" "help import"}{...}
 {vieweralsosee "[D] export" "help export"}{...}
-{vieweralsosee "dtmeta" "help dtmeta"}{...}
 {vieweralsosee "frames" "help frames"}{...}
 {viewerjumpto "Syntax" "dtparquet##syntax"}{...}
 {viewerjumpto "Description" "dtparquet##description"}{...}
-{viewerjumpto "Links to PDF documentation" "dtparquet##linkspdf"}{...}
 {viewerjumpto "Options" "dtparquet##options"}{...}
+{viewerjumpto "Remarks" "dtparquet##remarks"}{...}
 {viewerjumpto "Examples" "dtparquet##examples"}{...}
 {viewerjumpto "Troubleshooting" "dtparquet##troubleshooting"}{...}
 {viewerjumpto "Author" "dtparquet##author"}{...}
 {p2colset 1 21 23 2}{...}
-{p2col:{bf:[D] dtparquet} {hline 2}}High-performance Parquet I/O via native plugin paths{p_end}
-{p2col:}({mansection D dtparquet:View complete PDF manual entry}){p_end}
+{p2col:{bf:dtparquet} {hline 2}}High-performance Parquet I/O via native plugin{p_end}
 {p2colreset}{...}
 
 
@@ -26,32 +26,19 @@
 Memory operations
 
 {p 8 16 2}
-{cmd:dtparquet} {opt sa:ve}
-{it:{help filename}}
-[{cmd:,} {it:save_options}]
+{cmd:dtparquet} {opt sa:ve} {it:{help filename}} [{cmd:,} {it:save_options}]
 
 {p 8 16 2}
-{cmd:dtparquet} {opt u:se}
-[{varlist}]
-[{it:if}]
-[{it:in}]
-{cmd:using} {it:{help filename}}
-[{cmd:,} {it:use_options}]
+{cmd:dtparquet} {opt u:se} [{varlist}] [{it:if}] [{it:in}] {cmd:using} {it:{help filename}} [{cmd:,} {it:use_options}]
 
 {pstd}
 Disk operations (no data loaded into active memory)
 
 {p 8 16 2}
-{cmd:dtparquet} {opt exp:ort}
-{it:{help filename:parquetfile}}
-{cmd:using} {it:{help filename:dtafile}}
-[{cmd:,} {it:export_options}]
+{cmd:dtparquet} {opt exp:ort} {it:{help filename:parquetfile}} {cmd:using} {it:{help filename:dtafile}} [{cmd:,} {it:export_options}]
 
 {p 8 16 2}
-{cmd:dtparquet} {opt imp:ort}
-{it:{help filename:dtafile}}
-{cmd:using} {it:{help filename:parquetfile}}
-[{cmd:,} {it:import_options}]
+{cmd:dtparquet} {opt imp:ort} {it:{help filename:dtafile}} {cmd:using} {it:{help filename:parquetfile}} [{cmd:,} {it:import_options}]
 
 
 {marker description}{...}
@@ -59,35 +46,27 @@ Disk operations (no data loaded into active memory)
 
 {pstd}
 {cmd:dtparquet} provides high-performance reading and writing of Apache Parquet
-files.  It serves as a bridge between Stata and the Parquet ecosystem through
-native plugin execution and Stata's {help sfi:Stata Function Interface (SFI)}.
+files, offering a fast and efficient alternative to standard Stata I/O for
+large-scale datasets.
 
 {pstd}
-Key features include:
+Key features:
 
 {phang2}
-o {bf:Metadata Preservation}: Automatically integrates with {help dtmeta} to
-store and restore value labels, variable labels, and notes within the Parquet
-file footer.
+o {bf:Performance}: Leverages a native Rust engine with adaptive batching 
+and pushdown filtering for maximum throughput.
 
 {phang2}
-o {bf:Frame Isolation}: Disk operations ({cmd:import} and {cmd:export}) run in
-temporary frames so the active dataset is preserved.
+o {bf:Metadata Preservation}: Automatically stores and restores value labels, 
+variable labels, and notes using {help dtmeta}.
 
 {phang2}
-o {bf:Safer Writes}: Non-partitioned Parquet writes use temporary files
-({it:.tmp}) before final placement, reducing partial-write risk.
+o {bf:Frame Isolation}: Disk-to-disk operations ({cmd:import} and {cmd:export}) 
+preserve the active dataset by running in background frames.
 
 {phang2}
-o {bf:Type Safety}: Handles complex Stata types including {it:strL} and provides
-options to handle precision limits of 64-bit integers.
-
-
-{marker linkspdf}{...}
-{title:Links to PDF documentation}
-
-{pstd}
-No PDF documentation is available for this user-written command.
+o {bf:Type Safety}: Full support for complex Stata types, including {it:strL} 
+and precision-sensitive 64-bit integers.
 
 
 {marker options}{...}
@@ -112,9 +91,11 @@ Options are presented under the following headings:
 {synopthdr :save_options}
 {synoptline}
 {synopt :{opt re:place}}overwrite existing file{p_end}
-{synopt :{opt nol:abel}}suppress writing custom Stata metadata (value labels, etc.){p_end}
-{synopt :{opt ch:unksize(#)}}batch size for processing; default {cmd:0} uses adaptive sizing{p_end}
-{synopt :{opt com:press(codec)}}compression codec; default {cmd:fast}. Presets: {cmd:fast} (lz4), {cmd:balanced} (zstd), {cmd:archive} (brotli). Also allowed: {cmd:lz4}, {cmd:uncompressed}, {cmd:snappy}, {cmd:gzip}, {cmd:lzo}, {cmd:brotli}, {cmd:zstd}{p_end}
+{synopt :{opt nol:abel}}suppress writing custom Stata metadata (labels, notes){p_end}
+{synopt :{opt ch:unksize(#)}}batch size for processing; {cmd:0} uses adaptive sizing{p_end}
+{synopt :{opt com:press(codec)}}compression codec; default {cmd:fast} (lz4). 
+Presets: {cmd:fast}, {cmd:balanced} (zstd), {cmd:archive} (brotli). 
+Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cmd:lzo}, {cmd:uncompressed}.{p_end}
 {synopt :{opt part:itionby(varlist)}}write partitioned Parquet output by variables{p_end}
 {synoptline}
 
@@ -128,7 +109,8 @@ Options are presented under the following headings:
 {synopt :{opt nol:abel}}suppress reading custom Stata metadata{p_end}
 {synopt :{opt ch:unksize(#)}}batch size for processing; default is 50,000{p_end}
 {synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
-{synopt :{opt cat:mode(encode|raw|both)}}handling for foreign categorical/enum columns; default {cmd:encode}{p_end}
+{synopt :{opt cat:mode(mode)}}handling for foreign categorical/enum columns:
+{cmd:encode} (default), {cmd:raw}, or {cmd:both}.{p_end}
 {synoptline}
 
 {marker export_options}{...}
@@ -139,7 +121,6 @@ Options are presented under the following headings:
 {synoptline}
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress writing custom Stata metadata{p_end}
-{synopt :{opt ch:unksize(#)}}accepted for compatibility; currently not applied by {cmd:dtparquet export}{p_end}
 {synoptline}
 
 {marker import_options}{...}
@@ -150,7 +131,6 @@ Options are presented under the following headings:
 {synoptline}
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress reading custom Stata metadata{p_end}
-{synopt :{opt ch:unksize(#)}}accepted for compatibility; currently not applied by {cmd:dtparquet import}{p_end}
 {synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
 {synoptline}
 
@@ -158,34 +138,69 @@ Options are presented under the following headings:
 Global option: {cmd:notimer} suppresses the elapsed-time message.
 
 
+{marker remarks}{...}
+{title:Remarks}
+
+{pstd}
+{bf:Precision of 64-bit Integers}
+{break}Stata's {cmd:double} type has 53 bits of mantissa, meaning it can only 
+represent integers exactly up to 9,007,199,254,740,992 (2^53). Parquet files 
+from other systems (like Spark or Python) often contain 64-bit integers that 
+exceed this limit. By default, {cmd:dtparquet} will cast these to {cmd:double}, 
+potentially losing precision. Use the {opt allstring} option to import these 
+columns as Stata {it:strL} variables to preserve the exact values.
+
+{pstd}
+{bf:Performance and Pushdown Filtering}
+{break}{cmd:dtparquet} is optimized for speed. When using {cmd:dtparquet use}, 
+Stata's {help if} and {help in} qualifiers are "pushed down" to the native 
+plugin. This allows the plugin to filter rows during the scan phase, 
+transferring only the required data into Stata memory. This is significantly 
+faster than loading the entire file and filtering in Stata.
+
+{pstd}
+{bf:Categorical Data}
+{break}Foreign Parquet files often contain "Categorical" or "Enum" types. 
+{cmd:dtparquet} can handle these in three ways via {opt catmode()}:
+{break}{cmd:encode}: Converts categories to Stata value labels (default).
+{break}{cmd:raw}: Imports the underlying string categories as string variables.
+{break}{cmd:both}: Keeps the encoded numeric variable and creates a companion 
+string variable.
+
+{pstd}
+{bf:Resource Control}
+{break}By default, the plugin uses all available CPU threads for parallel I/O. 
+You can limit this by setting the {cmd:DTPARQUET_THREADS} environment variable 
+before running the command.
+
+
 {marker examples}{...}
 {title:Examples}
 
 {pstd}Save the current dataset to Parquet (abbreviated){p_end}
-{phang2}{cmd:. dtparquet sa mydata.parquet, re}
+{phang2}{cmd:. dtparquet sa mydata.parquet, re}{p_end}
 
 {pstd}Save partitioned output by selected variables{p_end}
-{phang2}{cmd:. dtparquet sa sales, partitionby(year region)}
+{phang2}{cmd:. dtparquet sa sales, partitionby(year region)}{p_end}
 
 {pstd}Load specific variables from a Parquet file (abbreviated){p_end}
-{phang2}{cmd:. dtparquet u id price mpg using mydata.parquet, c}
+{phang2}{cmd:. dtparquet u id price mpg using mydata.parquet, c}{p_end}
 
 {pstd}Import large IDs from a foreign Parquet file as strings{p_end}
-{phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}
+{phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}{p_end}
 
 {pstd}Export a .dta file to Parquet while preserving the active frame{p_end}
-{phang2}{cmd:. dtparquet export results.parquet using raw_data.dta, replace}
+{phang2}{cmd:. dtparquet export results.parquet using raw_data.dta, replace}{p_end}
 
 {pstd}Convert a Parquet file to Stata format on disk{p_end}
-{phang2}{cmd:. dtparquet import final.dta using results.parquet, replace allstring}
+{phang2}{cmd:. dtparquet import final.dta using results.parquet, replace allstring}{p_end}
 
 
 {marker troubleshooting}{...}
 {title:Troubleshooting}
 
 {phang}
-If you see a plugin mismatch or missing-binary error, run:
-{break}{cmd:. dtkit, update}
+If you see a plugin mismatch or missing-binary error, run {cmd:dtkit, update}.
 
 {phang}
 After a fresh {cmd:net install dtkit}, run {cmd:dtkit, update} once to fetch
@@ -194,7 +209,7 @@ the plugin binary.
 {phang}
 If your network blocks GitHub release assets, manually download
 {cmd:dtparquet.dll} from
-{break}{browse "https://github.com/bukanpeneliti/dtkit/releases":https://github.com/bukanpeneliti/dtkit/releases}
+{browse "https://github.com/bukanpeneliti/dtkit/releases":GitHub Releases}
 and place it in your dtkit ado directory (typically {cmd:`c(sysdir_plus)'d/}).
 
 {phang}
@@ -206,12 +221,8 @@ loaded plugin version.
 {title:Author}
 
 {pstd}
-Hafiz Arfyanto
-{p_end}
-{pstd}
-Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}
-{p_end}
-{pstd}
+Hafiz Arfyanto{break}
+Email: {browse "mailto:bukanpeneliti@gmail.com":bukanpeneliti@gmail.com}{break}
 GitHub: {browse "https://github.com/bukanpeneliti/dtkit":https://github.com/bukanpeneliti/dtkit}
 
 {pstd}
