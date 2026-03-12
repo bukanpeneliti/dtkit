@@ -599,8 +599,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 get_compute_thread_pool().current_num_threads().max(1),
             )
         });
-        let sink_started = Instant::now();
-        let (l, b) = sink_dataframe_in_batches(
+        let (l, b, sink_prepare_us, sink_write_us) = sink_dataframe_in_batches(
             &df,
             0,
             &plan.transfer_columns,
@@ -609,7 +608,14 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             &mut t,
             &mut processed,
         )?;
-        set_elapsed_ms_macro("read_sink_to_stata_elapsed_ms", sink_started);
+        set_elapsed_us_value_macro("read_sink_prepare_elapsed_us", sink_prepare_us);
+        set_elapsed_us_value_macro("read_sink_write_elapsed_us", sink_write_us);
+        set_elapsed_ms_value_macro("read_sink_prepare_elapsed_ms", sink_prepare_us / 1000);
+        set_elapsed_ms_value_macro("read_sink_write_elapsed_ms", sink_write_us / 1000);
+        set_elapsed_ms_value_macro(
+            "read_sink_to_stata_elapsed_ms",
+            (sink_prepare_us + sink_write_us) / 1000,
+        );
         (l, b, t)
     } else {
         let open_scan_started = Instant::now();
@@ -939,6 +945,8 @@ fn run_lazy_pipeline(
 
     let mut collect_elapsed_ms = 0u128;
     let mut sink_elapsed_ms = 0u128;
+    let mut sink_prepare_elapsed_us = 0u128;
+    let mut sink_write_elapsed_us = 0u128;
 
     if batch_mode {
         let (mut off, mut loaded, mut batches) = (0, 0, 0);
@@ -953,8 +961,7 @@ fn run_lazy_pipeline(
             if b_df.height() == 0 {
                 break;
             }
-            let sink_started = Instant::now();
-            sink_dataframe_in_batches(
+            let (_, _, prep_us, write_us) = sink_dataframe_in_batches(
                 &b_df,
                 b_off - src_off,
                 trans_cols,
@@ -963,12 +970,21 @@ fn run_lazy_pipeline(
                 tuner,
                 proc,
             )?;
-            sink_elapsed_ms += sink_started.elapsed().as_millis();
+            sink_prepare_elapsed_us += prep_us;
+            sink_write_elapsed_us += write_us;
+            sink_elapsed_ms += (prep_us + write_us) / 1000;
             loaded += b_df.height();
             batches += 1;
             off += b_len;
         }
         set_elapsed_ms_value_macro("read_collect_elapsed_ms", collect_elapsed_ms);
+        set_elapsed_us_value_macro("read_sink_prepare_elapsed_us", sink_prepare_elapsed_us);
+        set_elapsed_us_value_macro("read_sink_write_elapsed_us", sink_write_elapsed_us);
+        set_elapsed_ms_value_macro(
+            "read_sink_prepare_elapsed_ms",
+            sink_prepare_elapsed_us / 1000,
+        );
+        set_elapsed_ms_value_macro("read_sink_write_elapsed_ms", sink_write_elapsed_us / 1000);
         set_elapsed_ms_value_macro("read_sink_to_stata_elapsed_ms", sink_elapsed_ms);
         Ok((loaded, batches))
     } else {
@@ -976,12 +992,22 @@ fn run_lazy_pipeline(
         *collects += 1;
         let df = lf.collect()?;
         collect_elapsed_ms = collect_started.elapsed().as_millis();
-        let sink_started = Instant::now();
         let res = sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc);
-        sink_elapsed_ms = sink_started.elapsed().as_millis();
+        if let Ok((_, _, prep_us, write_us)) = &res {
+            sink_prepare_elapsed_us = *prep_us;
+            sink_write_elapsed_us = *write_us;
+            sink_elapsed_ms = (sink_prepare_elapsed_us + sink_write_elapsed_us) / 1000;
+        }
         set_elapsed_ms_value_macro("read_collect_elapsed_ms", collect_elapsed_ms);
+        set_elapsed_us_value_macro("read_sink_prepare_elapsed_us", sink_prepare_elapsed_us);
+        set_elapsed_us_value_macro("read_sink_write_elapsed_us", sink_write_elapsed_us);
+        set_elapsed_ms_value_macro(
+            "read_sink_prepare_elapsed_ms",
+            sink_prepare_elapsed_us / 1000,
+        );
+        set_elapsed_ms_value_macro("read_sink_write_elapsed_ms", sink_write_elapsed_us / 1000);
         set_elapsed_ms_value_macro("read_sink_to_stata_elapsed_ms", sink_elapsed_ms);
-        res
+        res.map(|(loaded, batches, _, _)| (loaded, batches))
     }
 }
 
@@ -1443,6 +1469,10 @@ fn emit_init_macros(prefix: &str) {
         set_macro("read_open_scan_elapsed_ms", "0", true);
         set_macro("read_collect_elapsed_ms", "0", true);
         set_macro("read_apply_cast_elapsed_ms", "0", true);
+        set_macro("read_sink_prepare_elapsed_us", "0", true);
+        set_macro("read_sink_write_elapsed_us", "0", true);
+        set_macro("read_sink_prepare_elapsed_ms", "0", true);
+        set_macro("read_sink_write_elapsed_ms", "0", true);
         set_macro("read_sink_to_stata_elapsed_ms", "0", true);
         set_macro("read_execute_elapsed_ms", "0", true);
     } else if prefix == "write" {
@@ -1468,6 +1498,10 @@ fn set_elapsed_ms_macro(name: &str, started: Instant) {
 
 fn set_elapsed_ms_value_macro(name: &str, elapsed_ms: u128) {
     set_macro(name, &elapsed_ms.to_string(), true);
+}
+
+fn set_elapsed_us_value_macro(name: &str, elapsed_us: u128) {
+    set_macro(name, &elapsed_us.to_string(), true);
 }
 
 fn emit_runtime_common(

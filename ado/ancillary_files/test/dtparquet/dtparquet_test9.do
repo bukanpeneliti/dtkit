@@ -54,7 +54,7 @@ local chunksizes "0 50000 250000"
 tempname post_matrix
 tempfile matrix_results
 postfile `post_matrix' str8 mode long chunksize int run byte warmup double seconds long nobs int nvars ///
-    double collect_ms sink_ms execute_ms selected_batch batch_adjustments ///
+    double collect_ms sink_prepare_ms sink_write_ms sink_ms execute_ms selected_batch batch_adjustments ///
     using "`matrix_results'", replace
 
 foreach mode of local parallel_modes {
@@ -69,12 +69,14 @@ foreach mode of local parallel_modes {
             quietly timer list 1
             local t1 = r(t1)
             local m_collect = real("$read_collect_elapsed_ms")
+            local m_sink_prepare = real("$read_sink_prepare_elapsed_us") / 1000
+            local m_sink_write = real("$read_sink_write_elapsed_us") / 1000
             local m_sink = real("$read_sink_to_stata_elapsed_ms")
             local m_execute = real("$read_execute_elapsed_ms")
             local m_selected_batch = real("$read_selected_batch_size")
             local m_batch_adjustments = real("$read_batch_adjustments")
             post `post_matrix' ("`mode'") (`chunksize') (`r') (`is_warmup') (`t1') (_N) (c(k)) ///
-                (`m_collect') (`m_sink') (`m_execute') (`m_selected_batch') (`m_batch_adjustments')
+                (`m_collect') (`m_sink_prepare') (`m_sink_write') (`m_sink') (`m_execute') (`m_selected_batch') (`m_batch_adjustments')
         }
     }
 }
@@ -87,19 +89,20 @@ list mode chunksize run warmup seconds nobs nvars, sepby(mode chunksize) noobs
 
 keep if warmup == 0
 collapse (mean) mean_seconds=seconds mean_collect_ms=collect_ms mean_sink_ms=sink_ms ///
-    mean_execute_ms=execute_ms mean_selected_batch=selected_batch mean_batch_adjustments=batch_adjustments ///
+    mean_sink_prepare_ms=sink_prepare_ms mean_sink_write_ms=sink_write_ms mean_execute_ms=execute_ms ///
+    mean_selected_batch=selected_batch mean_batch_adjustments=batch_adjustments ///
     (min) min_seconds=seconds (max) max_seconds=seconds, by(mode chunksize)
 gsort mean_seconds
 
 display _newline "Matrix summary over measured runs"
-list mode chunksize mean_seconds min_seconds max_seconds mean_collect_ms mean_sink_ms mean_execute_ms ///
+list mode chunksize mean_seconds min_seconds max_seconds mean_collect_ms mean_sink_prepare_ms mean_sink_write_ms mean_sink_ms mean_execute_ms ///
     mean_selected_batch mean_batch_adjustments, noobs
 
 display _newline "[3] Focused repro (rows + chunksize(0) vs pq vs dta)"
 tempname post_repro
 tempfile repro_results
 postfile `post_repro' str10 engine int run byte warmup double seconds long nobs int nvars ///
-    double scanplan_ms open_ms collect_ms cast_ms sink_ms execute_ms ///
+    double scanplan_ms open_ms collect_ms cast_ms sink_prepare_ms sink_write_ms sink_ms execute_ms ///
     double stata_plugin_ms stata_strl_fix_ms stata_meta_ms stata_foreign_cat_ms ///
     double stata_describe_ms stata_loadmeta_ms stata_varprep_ms stata_mapping_ms ///
     double stata_filevars_ms stata_matchwin_ms stata_genrecast_ms stata_readfields_ms stata_castjson_ms ///
@@ -119,6 +122,8 @@ forvalues r = 1/`total' {
     local m_open = real("$read_open_scan_elapsed_ms")
     local m_collect = real("$read_collect_elapsed_ms")
     local m_cast = real("$read_apply_cast_elapsed_ms")
+    local m_sink_prepare = real("$read_sink_prepare_elapsed_us") / 1000
+    local m_sink_write = real("$read_sink_write_elapsed_us") / 1000
     local m_sink = real("$read_sink_to_stata_elapsed_ms")
     local m_execute = real("$read_execute_elapsed_ms")
     local s_plugin = real("$dtpq_use_plugin_ms")
@@ -135,7 +140,7 @@ forvalues r = 1/`total' {
     local s_readfields = real("$dtpq_use_readfields_ms")
     local s_castjson = real("$dtpq_use_castjson_ms")
     post `post_repro' ("dtparquet") (`r') (`is_warmup') (`t1') (_N) (c(k)) ///
-        (`m_scanplan') (`m_open') (`m_collect') (`m_cast') (`m_sink') (`m_execute') ///
+        (`m_scanplan') (`m_open') (`m_collect') (`m_cast') (`m_sink_prepare') (`m_sink_write') (`m_sink') (`m_execute') ///
         (`s_plugin') (`s_strl_fix') (`s_meta') (`s_foreign_cat') ///
         (`s_describe') (`s_loadmeta') (`s_varprep') (`s_mapping') ///
         (`s_filevars') (`s_matchwin') (`s_genrecast') (`s_readfields') (`s_castjson')
@@ -149,7 +154,7 @@ forvalues r = 1/`total' {
         quietly timer list 3
         local t2 = r(t3)
         post `post_repro' ("pq") (`r') (`is_warmup') (`t2') (_N) (c(k)) ///
-            (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.)
+            (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.)
     }
 
     clear
@@ -160,7 +165,7 @@ forvalues r = 1/`total' {
     quietly timer list 4
     local t3 = r(t4)
     post `post_repro' ("stata") (`r') (`is_warmup') (`t3') (_N) (c(k)) ///
-        (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.)
+        (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.) (.)
 }
 
 postclose `post_repro'
@@ -172,7 +177,7 @@ keep if warmup == 0
 preserve
 keep if engine == "dtparquet"
 collapse (mean) mean_scanplan_ms=scanplan_ms mean_open_ms=open_ms mean_collect_ms=collect_ms ///
-    mean_cast_ms=cast_ms mean_sink_ms=sink_ms mean_execute_ms=execute_ms ///
+    mean_cast_ms=cast_ms mean_sink_prepare_ms=sink_prepare_ms mean_sink_write_ms=sink_write_ms mean_sink_ms=sink_ms mean_execute_ms=execute_ms ///
     mean_stata_plugin_ms=stata_plugin_ms mean_stata_strl_fix_ms=stata_strl_fix_ms ///
     mean_stata_meta_ms=stata_meta_ms mean_stata_foreign_cat_ms=stata_foreign_cat_ms ///
     mean_stata_describe_ms=stata_describe_ms mean_stata_loadmeta_ms=stata_loadmeta_ms ///
@@ -181,7 +186,7 @@ collapse (mean) mean_scanplan_ms=scanplan_ms mean_open_ms=open_ms mean_collect_m
     mean_stata_genrecast_ms=stata_genrecast_ms mean_stata_readfields_ms=stata_readfields_ms ///
     mean_stata_castjson_ms=stata_castjson_ms
 display _newline "dtparquet focused phase means over measured runs (ms)"
-list mean_scanplan_ms mean_open_ms mean_collect_ms mean_cast_ms mean_sink_ms mean_execute_ms ///
+list mean_scanplan_ms mean_open_ms mean_collect_ms mean_cast_ms mean_sink_prepare_ms mean_sink_write_ms mean_sink_ms mean_execute_ms ///
     mean_stata_plugin_ms mean_stata_strl_fix_ms mean_stata_meta_ms mean_stata_foreign_cat_ms ///
     mean_stata_describe_ms mean_stata_loadmeta_ms mean_stata_varprep_ms mean_stata_mapping_ms ///
     mean_stata_filevars_ms mean_stata_matchwin_ms mean_stata_genrecast_ms mean_stata_readfields_ms ///

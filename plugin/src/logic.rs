@@ -33,6 +33,7 @@ pub const ENV_BATCH_TARGET_MS: &str = "DTPARQUET_BATCH_TARGET_MS";
 pub const ENV_WRITE_PIPELINE_MODE: &str = "DTPARQUET_WRITE_PIPELINE_MODE";
 pub const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
 pub const ENV_CAST_POSITION_MODE: &str = "DTPARQUET_CAST_POSITION";
+pub const ENV_READ_SINK_MAX_WORKERS: &str = "DTPARQUET_READ_SINK_MAX_WORKERS";
 
 pub const DEFAULT_MEMORY_BUDGET_MB: usize = 512;
 pub const ROW_ESTIMATE_BYTES: usize = 64;
@@ -481,6 +482,16 @@ pub fn determine_parallelization_strategy(n_cols: usize, n_rows: usize, cores: u
         BatchMode::ByColumn
     } else {
         BatchMode::ByRow
+    }
+}
+
+pub fn read_sink_worker_target(available_workers: usize, n_cols: usize, n_rows: usize) -> usize {
+    let requested_cap = get_env_u(ENV_READ_SINK_MAX_WORKERS).unwrap_or(0);
+    if requested_cap > 0 {
+        available_workers.min(requested_cap).max(1)
+    } else {
+        let _ = (n_cols, n_rows);
+        available_workers.max(1)
     }
 }
 
