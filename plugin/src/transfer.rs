@@ -438,9 +438,10 @@ where
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
     let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
     for value in iter {
         if let Some(v) = value {
-            stata_sys::replace_number_unchecked_i32(mapper(v), row, col);
+            unsafe { vstore(col, row, mapper(v)) };
         }
         row += 1;
     }
@@ -460,29 +461,13 @@ where
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
     let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
     for value in iter {
-        stata_sys::replace_number_unchecked_i32(mapper(value), row, col);
+        unsafe { vstore(col, row, mapper(value)) };
         row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
-}
-
-fn write_all_missing_range(
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-    replacer: impl Fn(usize, usize),
-) {
-    for row_idx in start_row..end_row {
-        let global_row_idx = row_idx + start_index;
-        replacer(
-            global_row_idx + 1 + stata_offset,
-            transfer_column.stata_col_index + 1,
-        );
-    }
 }
 
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
@@ -490,18 +475,41 @@ fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let str_col = ctx.col.str()?;
     let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
-    for value in str_col.iter() {
-        let Some(s) = value else {
-            row += 1;
-            continue;
-        };
-        if s.is_empty() {
-            row += 1;
-            continue;
+    let sstore = stata_sys::sstore_unchecked_fn();
+    let mut buffer: Vec<std::os::raw::c_char> = Vec::new();
+
+    let mut write_value = |s: &str, row: i32| {
+        let len = s.len();
+        buffer.resize(len + 1, 0);
+        unsafe {
+            std::ptr::copy_nonoverlapping(s.as_ptr(), buffer.as_mut_ptr() as *mut u8, len);
+            buffer[len] = 0;
+            sstore(col, row, buffer.as_mut_ptr());
         }
-        stata_sys::replace_string_ref_i32(Some(s), row, col);
-        write_calls += 1;
-        row += 1;
+    };
+
+    if str_col.null_count() == 0 {
+        for s in str_col.into_no_null_iter() {
+            if !s.is_empty() {
+                write_value(s, row);
+                write_calls += 1;
+            }
+            row += 1;
+        }
+    } else {
+        for value in str_col.iter() {
+            let Some(s) = value else {
+                row += 1;
+                continue;
+            };
+            if s.is_empty() {
+                row += 1;
+                continue;
+            }
+            write_value(s, row);
+            write_calls += 1;
+            row += 1;
+        }
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
     Ok(())
@@ -531,20 +539,6 @@ fn write_strict_typed_numeric_column_range(
 
 fn write_missing_range(ctx: &TransferContext, as_string: bool) -> PolarsResult<()> {
     let n_calls = (ctx.end_row - ctx.start_row) as u64;
-    write_all_missing_range(
-        ctx.transfer_column,
-        ctx.start_index,
-        ctx.start_row,
-        ctx.end_row,
-        ctx.stata_offset,
-        |row, col| {
-            if as_string {
-                stata_sys::replace_string(None, row, col);
-            } else {
-                stata_sys::replace_number(None, row, col);
-            }
-        },
-    );
     if as_string {
         add_transfer_metric_counts(0, n_calls, 0, 0, 0);
     } else {
