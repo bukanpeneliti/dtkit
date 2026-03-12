@@ -404,7 +404,7 @@ capture program drop dtparquet_use
 program dtparquet_use
     version 16
 
-    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string)]
+    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string) PARallel(string)]
     
     local vlist ""
     local if_exp ""
@@ -469,6 +469,15 @@ program dtparquet_use
         exit 198
     }
 
+    local parallel_mode = lower(trim("`parallel'"))
+    if "`parallel_mode'" == "" {
+        local parallel_mode "auto"
+    }
+    if !inlist("`parallel_mode'", "auto", "rows", "columns") {
+        display as error "parallel() must be one of: auto, rows, columns"
+        exit 198
+    }
+
     local file = subinstr(trim(`"`filename'"'), `"""', "", .)
     local file : subinstr local file "\" "/", all
 
@@ -495,16 +504,20 @@ program dtparquet_use
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
 
-    local loadmeta_started = clock("$S_TIME", "hms")
+    timer clear 96
+    timer on 96
     plugin call dtparquet_plugin, "load_meta" "`file'"
-    local t_loadmeta_ms = clock("$S_TIME", "hms") - `loadmeta_started'
-    if (`t_loadmeta_ms' < 0) local t_loadmeta_ms = 0
+    timer off 96
+    quietly timer list 96
+    local t_loadmeta_ms = round(`=r(t96)' * 1000, 1)
 
     local describe_detailed = cond("`dtmeta_loaded'" == "1", "0", "1")
-    local describe_started = clock("$S_TIME", "hms")
+    timer clear 97
+    timer on 97
     plugin call dtparquet_plugin, "describe" "`file'" "`describe_detailed'" "1" "" "" "0" "0"
-    local t_describe_ms = clock("$S_TIME", "hms") - `describe_started'
-    if (`t_describe_ms' < 0) local t_describe_ms = 0
+    timer off 97
+    quietly timer list 97
+    local t_describe_ms = round(`=r(t97)' * 1000, 1)
 
     timer clear 91
     timer on 91
@@ -668,6 +681,8 @@ program dtparquet_use
     local schema_protocol_version 2
     local mapping `"{""v"":`schema_protocol_version',""f"":[`read_fields_json']}"'
     local parallelize ""
+    if "`parallel_mode'" == "rows" local parallelize "rows"
+    else if "`parallel_mode'" == "columns" local parallelize "columns"
     local vertical_relaxed 0
     local asterisk_to_variable ""
     local sort ""
@@ -684,13 +699,15 @@ program dtparquet_use
 
     quietly set obs `n_obs_after'
 
-    local plugin_started = clock("$S_TIME", "hms")
+    timer clear 98
+    timer on 98
     capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'"
     if _rc != 0 {
         plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     }
-    local t_plugin_ms = clock("$S_TIME", "hms") - `plugin_started'
-    if (`t_plugin_ms' < 0) local t_plugin_ms = 0
+    timer off 98
+    quietly timer list 98
+    local t_plugin_ms = round(`=r(t98)' * 1000, 1)
 
     local n_loaded_rows = real("`n_loaded_rows'")
     if missing(`n_loaded_rows') local n_loaded_rows = `row_to_read'
@@ -700,7 +717,8 @@ program dtparquet_use
     }
 
     if "`dtmeta_loaded'" == "1" {
-        local strl_fix_started = clock("$S_TIME", "hms")
+        timer clear 99
+        timer on 99
         local nvars_meta = real("`dtmeta_var_count'")
         forvalues i = 1/`nvars_meta' {
             local vname `dtmeta_varname_`i''
@@ -715,12 +733,14 @@ program dtparquet_use
                 }
             }
         }
-        local t_strl_fix_ms = clock("$S_TIME", "hms") - `strl_fix_started'
-        if (`t_strl_fix_ms' < 0) local t_strl_fix_ms = 0
+        timer off 99
+        quietly timer list 99
+        local t_strl_fix_ms = round(`=r(t99)' * 1000, 1)
     }
 
     if `is_nolabel' == 0 {
-        local meta_started = clock("$S_TIME", "hms")
+        timer clear 88
+        timer on 88
         if "`dtmeta_loaded'" == "1" {
             local apply_labels = (`"`dtmeta_dta_label'"' != "")
 
@@ -811,15 +831,18 @@ program dtparquet_use
                     }
                 }
                 if `"`foreign_cat_vars'"' != "" {
-                    local foreign_cat_started = clock("$S_TIME", "hms")
+                    timer clear 87
+                    timer on 87
                     _apply_foreign_cat_labels `foreign_cat_vars', mode(`catmode_norm')
-                    local t_foreign_cat_ms = clock("$S_TIME", "hms") - `foreign_cat_started'
-                    if (`t_foreign_cat_ms' < 0) local t_foreign_cat_ms = 0
+                    timer off 87
+                    quietly timer list 87
+                    local t_foreign_cat_ms = round(`=r(t87)' * 1000, 1)
                 }
             }
         }
-        local t_meta_ms = clock("$S_TIME", "hms") - `meta_started'
-        if (`t_meta_ms' < 0) local t_meta_ms = 0
+        timer off 88
+        quietly timer list 88
+        local t_meta_ms = round(`=r(t88)' * 1000, 1)
     }
 
     global dtpq_use_plugin_ms `t_plugin_ms'
