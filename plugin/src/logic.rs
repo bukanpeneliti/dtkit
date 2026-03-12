@@ -216,11 +216,11 @@ pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     }
 }
 
-pub fn pull_string_cell_as_str_unchecked<'a>(
+pub fn pull_string_cell_as_str_unchecked(
     col: usize,
     row: usize,
-    buffer: &'a mut Vec<i8>,
-) -> Option<&'a str> {
+    buffer: &mut Vec<i8>,
+) -> Option<&str> {
     use std::ffi::{c_char, CStr};
     unsafe {
         if buffer.is_empty() {

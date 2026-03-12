@@ -477,13 +477,36 @@ program dtparquet_use
     }
     local file "`file'.parquet"
 
+    local t_plugin_ms 0
+    local t_strl_fix_ms 0
+    local t_meta_ms 0
+    local t_foreign_cat_ms 0
+    local t_describe_ms 0
+    local t_loadmeta_ms 0
+    local t_varprep_ms 0
+    local t_mapping_ms 0
+    local t_filevars_ms 0
+    local t_match_window_ms 0
+    local t_genrecast_ms 0
+    local t_readfields_ms 0
+    local t_castjson_ms 0
+
     confirm file `"`file'"'
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
 
+    local describe_started = clock("$S_TIME", "hms")
     plugin call dtparquet_plugin, "describe" "`file'" "1" "1" "" "" "0" "0"
-    plugin call dtparquet_plugin, "load_meta" "`file'"
+    local t_describe_ms = clock("$S_TIME", "hms") - `describe_started'
+    if (`t_describe_ms' < 0) local t_describe_ms = 0
 
+    local loadmeta_started = clock("$S_TIME", "hms")
+    plugin call dtparquet_plugin, "load_meta" "`file'"
+    local t_loadmeta_ms = clock("$S_TIME", "hms") - `loadmeta_started'
+    if (`t_loadmeta_ms' < 0) local t_loadmeta_ms = 0
+
+    timer clear 91
+    timer on 91
     local n_rows = real("`n_rows'")
     local n_columns = real("`n_columns'")
     local vars_in_file
@@ -514,6 +537,13 @@ program dtparquet_use
         }
     }
 
+    timer off 91
+    quietly timer list 91
+    local t_filevars_ms = round(`=r(t91)' * 1000, 1)
+
+    timer clear 92
+    timer on 92
+
     if "`vlist'" == "" | "`vlist'" == "*" {
         local matched_vars `vars_in_file'
     }
@@ -537,7 +567,13 @@ program dtparquet_use
     local row_to_read = max(0, min(`n_rows', `last_n') - `offset' + (`offset' > 0))
     local n_obs_already = _N
     local n_obs_after = `n_obs_already' + `row_to_read'
-    quietly set obs `n_obs_after'
+
+    timer off 92
+    quietly timer list 92
+    local t_match_window_ms = round(`=r(t92)' * 1000, 1)
+
+    timer clear 93
+    timer on 93
 
     local match_vars_non_binary
     local cast_string_vars
@@ -575,7 +611,13 @@ program dtparquet_use
 
     local matched_vars `match_vars_non_binary'
     local n_matched_vars: word count `matched_vars'
+    timer off 93
+    quietly timer list 93
+    local t_genrecast_ms = round(`=r(t93)' * 1000, 1)
+    local t_varprep_ms = `t_filevars_ms' + `t_match_window_ms' + `t_genrecast_ms'
 
+    timer clear 94
+    timer on 94
     local i = 0
     local read_fields_json ""
     foreach vari of varlist * {
@@ -600,6 +642,12 @@ program dtparquet_use
         }
     }
 
+    timer off 94
+    quietly timer list 94
+    local t_readfields_ms = round(`=r(t94)' * 1000, 1)
+
+    timer clear 95
+    timer on 95
     local cast_json ""
     local n_cast_string_vars : word count `cast_string_vars'
     if (`n_cast_string_vars' > 0) {
@@ -628,11 +676,20 @@ program dtparquet_use
     local order_by_type 0
     local order_descending 0
     local plugin_offset = max(0, `offset' - 1)
+    timer off 95
+    quietly timer list 95
+    local t_castjson_ms = round(`=r(t95)' * 1000, 1)
+    local t_mapping_ms = `t_readfields_ms' + `t_castjson_ms'
 
+    quietly set obs `n_obs_after'
+
+    local plugin_started = clock("$S_TIME", "hms")
     capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'"
     if _rc != 0 {
         plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     }
+    local t_plugin_ms = clock("$S_TIME", "hms") - `plugin_started'
+    if (`t_plugin_ms' < 0) local t_plugin_ms = 0
 
     local n_loaded_rows = real("`n_loaded_rows'")
     if missing(`n_loaded_rows') local n_loaded_rows = `row_to_read'
@@ -642,6 +699,7 @@ program dtparquet_use
     }
 
     if "`dtmeta_loaded'" == "1" {
+        local strl_fix_started = clock("$S_TIME", "hms")
         local nvars_meta = real("`dtmeta_var_count'")
         forvalues i = 1/`nvars_meta' {
             local vname `dtmeta_varname_`i''
@@ -656,9 +714,12 @@ program dtparquet_use
                 }
             }
         }
+        local t_strl_fix_ms = clock("$S_TIME", "hms") - `strl_fix_started'
+        if (`t_strl_fix_ms' < 0) local t_strl_fix_ms = 0
     }
 
     if `is_nolabel' == 0 {
+        local meta_started = clock("$S_TIME", "hms")
         if "`dtmeta_loaded'" == "1" {
             local apply_labels = (`"`dtmeta_dta_label'"' != "")
 
@@ -749,11 +810,30 @@ program dtparquet_use
                     }
                 }
                 if `"`foreign_cat_vars'"' != "" {
+                    local foreign_cat_started = clock("$S_TIME", "hms")
                     _apply_foreign_cat_labels `foreign_cat_vars', mode(`catmode_norm')
+                    local t_foreign_cat_ms = clock("$S_TIME", "hms") - `foreign_cat_started'
+                    if (`t_foreign_cat_ms' < 0) local t_foreign_cat_ms = 0
                 }
             }
         }
+        local t_meta_ms = clock("$S_TIME", "hms") - `meta_started'
+        if (`t_meta_ms' < 0) local t_meta_ms = 0
     }
+
+    global dtpq_use_plugin_ms `t_plugin_ms'
+    global dtpq_use_strl_ms `t_strl_fix_ms'
+    global dtpq_use_meta_ms `t_meta_ms'
+    global dtpq_use_cat_ms `t_foreign_cat_ms'
+    global dtpq_use_describe_ms `t_describe_ms'
+    global dtpq_use_loadmeta_ms `t_loadmeta_ms'
+    global dtpq_use_varprep_ms `t_varprep_ms'
+    global dtpq_use_mapping_ms `t_mapping_ms'
+    global dtpq_use_filevars_ms `t_filevars_ms'
+    global dtpq_use_matchwin_ms `t_match_window_ms'
+    global dtpq_use_genrecast_ms `t_genrecast_ms'
+    global dtpq_use_readfields_ms `t_readfields_ms'
+    global dtpq_use_castjson_ms `t_castjson_ms'
 
     capture error 0
 end

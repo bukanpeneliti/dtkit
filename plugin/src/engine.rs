@@ -546,6 +546,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
     let (mut collects, mut processed) = (0usize, 0usize);
     init_runtime("read");
 
+    let scan_plan_started = Instant::now();
     let boundary = resolve_read_boundary_inputs(req.variables_as_str, req.mapping)?;
     let plan = build_read_scan_plan(
         req.path,
@@ -556,6 +557,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         req.order_by,
         req.random_share,
     )?;
+    set_elapsed_ms_macro("read_scan_plan_elapsed_ms", scan_plan_started);
     emit_plan_macros("read", plan.schema_handoff_mode);
 
     let col_list: Vec<&str> = plan
@@ -564,12 +566,14 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         .map(|s| s.as_str())
         .collect();
     let row_width_bytes = estimate_transfer_row_width_bytes(&plan.transfer_columns);
+    let execute_started = Instant::now();
     let (loaded, batches, tuner) = if plan.can_use_eager {
         if !col_list.is_empty() {
             if let Err(e) = validate_parquet_schema(req.path, &col_list) {
                 display(&format!("Schema validation warning: {e}"));
             }
         }
+        let collect_started = Instant::now();
         let mut df = ParquetReader::new(File::open(req.path)?)
             .with_slice(Some((req.offset, req.n_rows)))
             .finish()?;
@@ -579,6 +583,8 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
                 .map(|s| PlSmallStr::from(*s))
                 .collect::<Vec<_>>(),
         )?;
+        set_elapsed_ms_value_macro("read_open_scan_elapsed_ms", 0);
+        set_elapsed_ms_macro("read_collect_elapsed_ms", collect_started);
         let read_cast_started = Instant::now();
         apply_df_casts(&mut df, &boundary.cast_json)?;
         set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
@@ -606,7 +612,9 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         set_elapsed_ms_macro("read_sink_to_stata_elapsed_ms", sink_started);
         (l, b, t)
     } else {
+        let open_scan_started = Instant::now();
         let mut lf = open_parquet_scan(req.path, req.asterisk_var)?;
+        set_elapsed_ms_macro("read_open_scan_elapsed_ms", open_scan_started);
         let (cast_early, cast_mode, cast_reason) =
             should_apply_cast_early(&boundary.cast_json, req.sql_if, req.order_by);
         set_macro("read_cast_mode", cast_mode, true);
@@ -669,6 +677,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         )?;
         (l, b, t)
     };
+    set_elapsed_ms_macro("read_execute_elapsed_ms", execute_started);
     finalize_runtime("read", batches, loaded, collects, processed, &tuner, start);
     Ok(0)
 }
@@ -928,17 +937,23 @@ fn run_lazy_pipeline(
         set_macro("read_streaming_enabled", "0", true);
     }
 
+    let mut collect_elapsed_ms = 0u128;
+    let mut sink_elapsed_ms = 0u128;
+
     if batch_mode {
         let (mut off, mut loaded, mut batches) = (0, 0, 0);
         while off < n_rows {
             let b_len = (n_rows - off).min(tuner.selected_batch_size());
             let b_off = src_off + off;
             let b_lf = lf.clone().slice(b_off as i64, b_len as u32);
+            let collect_started = Instant::now();
             *collects += 1;
             let b_df = b_lf.collect()?;
+            collect_elapsed_ms += collect_started.elapsed().as_millis();
             if b_df.height() == 0 {
                 break;
             }
+            let sink_started = Instant::now();
             sink_dataframe_in_batches(
                 &b_df,
                 b_off - src_off,
@@ -948,19 +963,24 @@ fn run_lazy_pipeline(
                 tuner,
                 proc,
             )?;
+            sink_elapsed_ms += sink_started.elapsed().as_millis();
             loaded += b_df.height();
             batches += 1;
             off += b_len;
         }
+        set_elapsed_ms_value_macro("read_collect_elapsed_ms", collect_elapsed_ms);
+        set_elapsed_ms_value_macro("read_sink_to_stata_elapsed_ms", sink_elapsed_ms);
         Ok((loaded, batches))
     } else {
         let collect_started = Instant::now();
         *collects += 1;
         let df = lf.collect()?;
-        set_elapsed_ms_macro("read_collect_elapsed_ms", collect_started);
+        collect_elapsed_ms = collect_started.elapsed().as_millis();
         let sink_started = Instant::now();
         let res = sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc);
-        set_elapsed_ms_macro("read_sink_to_stata_elapsed_ms", sink_started);
+        sink_elapsed_ms = sink_started.elapsed().as_millis();
+        set_elapsed_ms_value_macro("read_collect_elapsed_ms", collect_elapsed_ms);
+        set_elapsed_ms_value_macro("read_sink_to_stata_elapsed_ms", sink_elapsed_ms);
         res
     }
 }
@@ -1419,6 +1439,12 @@ fn emit_init_macros(prefix: &str) {
         set_macro("read_streaming_enabled", "0", true);
         set_macro("read_cast_mode", "none", true);
         set_macro("read_cast_defer_reason", "none", true);
+        set_macro("read_scan_plan_elapsed_ms", "0", true);
+        set_macro("read_open_scan_elapsed_ms", "0", true);
+        set_macro("read_collect_elapsed_ms", "0", true);
+        set_macro("read_apply_cast_elapsed_ms", "0", true);
+        set_macro("read_sink_to_stata_elapsed_ms", "0", true);
+        set_macro("read_execute_elapsed_ms", "0", true);
     } else if prefix == "write" {
         set_macro("write_collect_elapsed_ms", "0", true);
         set_macro("write_parquet_elapsed_ms", "0", true);
@@ -1438,6 +1464,10 @@ fn init_runtime(prefix: &str) {
 
 fn set_elapsed_ms_macro(name: &str, started: Instant) {
     set_macro(name, &started.elapsed().as_millis().to_string(), true);
+}
+
+fn set_elapsed_ms_value_macro(name: &str, elapsed_ms: u128) {
+    set_macro(name, &elapsed_ms.to_string(), true);
 }
 
 fn emit_runtime_common(
