@@ -389,15 +389,24 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
 
 fn write_date_values(ctx: &TransferContext) -> PolarsResult<()> {
     let ca = ctx.col.date()?;
-    write_numeric_iter(ctx, ca.physical().iter(), |v| {
-        (v + STATA_DATE_ORIGIN) as f64
-    })
+    let physical = ca.physical();
+    if ca.null_count() == 0 {
+        write_numeric_iter_no_null(ctx, physical.into_no_null_iter(), |v| {
+            (v + STATA_DATE_ORIGIN) as f64
+        })
+    } else {
+        write_numeric_iter(ctx, physical.iter(), |v| (v + STATA_DATE_ORIGIN) as f64)
+    }
 }
 
 fn write_time_values(ctx: &TransferContext) -> PolarsResult<()> {
     let physical = ctx.col.to_physical_repr();
     let ca = physical.i64()?;
-    write_numeric_iter(ctx, ca.iter(), |v| (v / TIME_US) as f64)
+    if ca.null_count() == 0 {
+        write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| (v / TIME_US) as f64)
+    } else {
+        write_numeric_iter(ctx, ca.iter(), |v| (v / TIME_US) as f64)
+    }
 }
 
 fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
@@ -409,9 +418,16 @@ fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
         TimeUnit::Milliseconds => 1.0,
     };
     let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
-    write_numeric_iter(ctx, ca.physical().iter(), |v| {
-        v as f64 / factor + sec_shift_scaled
-    })
+    let physical = ca.physical();
+    if ca.null_count() == 0 {
+        write_numeric_iter_no_null(ctx, physical.into_no_null_iter(), |v| {
+            v as f64 / factor + sec_shift_scaled
+        })
+    } else {
+        write_numeric_iter(ctx, physical.iter(), |v| {
+            v as f64 / factor + sec_shift_scaled
+        })
+    }
 }
 
 fn write_numeric_iter<T, I, F>(ctx: &TransferContext, iter: I, mapper: F) -> PolarsResult<()>
