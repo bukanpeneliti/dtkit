@@ -273,81 +273,81 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Int8 => {
             let ca = ctx.col.i8()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_i8_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_i8_iter(ctx, ca.iter())
             }
         }
         DataType::Int16 => {
             let ca = ctx.col.i16()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_i16_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_i16_iter(ctx, ca.iter())
             }
         }
         DataType::Int32 => {
             let ca = ctx.col.i32()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_i32_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_i32_iter(ctx, ca.iter())
             }
         }
         DataType::Int64 => {
             let ca = ctx.col.i64()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_i64_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_i64_iter(ctx, ca.iter())
             }
         }
         DataType::UInt8 => {
             let ca = ctx.col.u8()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_u8_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_u8_iter(ctx, ca.iter())
             }
         }
         DataType::UInt16 => {
             let ca = ctx.col.u16()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_u16_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_u16_iter(ctx, ca.iter())
             }
         }
         DataType::UInt32 => {
             let ca = ctx.col.u32()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_u32_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_u32_iter(ctx, ca.iter())
             }
         }
         DataType::UInt64 => {
             let ca = ctx.col.u64()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_u64_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_u64_iter(ctx, ca.iter())
             }
         }
         DataType::Float32 => {
             let ca = ctx.col.f32()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+                write_f32_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+                write_f32_iter(ctx, ca.iter())
             }
         }
         DataType::Float64 => {
             let ca = ctx.col.f64()?;
             if ca.null_count() == 0 {
-                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v)
+                write_f64_iter_no_null(ctx, ca.into_no_null_iter())
             } else {
-                write_numeric_iter(ctx, ca.iter(), |v| v)
+                write_f64_iter(ctx, ca.iter())
             }
         }
         DataType::Date => write_date_values(ctx),
@@ -471,6 +471,97 @@ where
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
 }
+
+macro_rules! define_typed_numeric_writers_cast {
+    ($iter_fn:ident, $iter_no_null_fn:ident, $ty:ty) => {
+        #[inline(always)]
+        fn $iter_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = Option<$ty>>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                if let Some(v) = value {
+                    unsafe { vstore(col, row, v as f64) };
+                }
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $iter_no_null_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = $ty>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                unsafe { vstore(col, row, value as f64) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+    };
+}
+
+macro_rules! define_typed_numeric_writers_identity {
+    ($iter_fn:ident, $iter_no_null_fn:ident, $ty:ty) => {
+        #[inline(always)]
+        fn $iter_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = Option<$ty>>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                if let Some(v) = value {
+                    unsafe { vstore(col, row, v) };
+                }
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $iter_no_null_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = $ty>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                unsafe { vstore(col, row, value) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+    };
+}
+
+define_typed_numeric_writers_cast!(write_i8_iter, write_i8_iter_no_null, i8);
+define_typed_numeric_writers_cast!(write_i16_iter, write_i16_iter_no_null, i16);
+define_typed_numeric_writers_cast!(write_i32_iter, write_i32_iter_no_null, i32);
+define_typed_numeric_writers_cast!(write_i64_iter, write_i64_iter_no_null, i64);
+define_typed_numeric_writers_cast!(write_u8_iter, write_u8_iter_no_null, u8);
+define_typed_numeric_writers_cast!(write_u16_iter, write_u16_iter_no_null, u16);
+define_typed_numeric_writers_cast!(write_u32_iter, write_u32_iter_no_null, u32);
+define_typed_numeric_writers_cast!(write_u64_iter, write_u64_iter_no_null, u64);
+define_typed_numeric_writers_cast!(write_f32_iter, write_f32_iter_no_null, f32);
+define_typed_numeric_writers_identity!(write_f64_iter, write_f64_iter_no_null, f64);
 
 #[inline(always)]
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
