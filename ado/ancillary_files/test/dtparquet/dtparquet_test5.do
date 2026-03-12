@@ -372,7 +372,7 @@ capture noisily {
         gen double x`j' = runiform() * `j'
     }
 
-    dtparquet save "`t12_pool_stub'", replace chunksize(`t12_chunk_size')
+    dtparquet save "`t12_pool_stub'", replace chunksize(`t12_chunk_size') timer(plugin)
 
     local t12_parquet_file "`t12_pool_stub'.parquet"
     local t12_compute_after_save = real("$compute_pool_inits")
@@ -383,7 +383,7 @@ capture noisily {
     assert `t12_io_after_save' >= 1
 
     clear
-    dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size')
+    dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size') timer(plugin)
     local t12_compute_after_use1 = real("$compute_pool_inits")
     local t12_io_after_use1 = real("$io_pool_inits")
     local t12_planned_batches = real("$read_planned_batches")
@@ -394,7 +394,7 @@ capture noisily {
     assert `t12_processed_batches' > 1
 
     clear
-    dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size')
+    dtparquet use using "`t12_parquet_file'", clear chunksize(`t12_chunk_size') timer(plugin)
     local t12_compute_after_use2 = real("$compute_pool_inits")
     local t12_io_after_use2 = real("$io_pool_inits")
     assert `t12_compute_after_use2' == `t12_compute_after_save'
@@ -437,10 +437,10 @@ capture noisily {
     gen str24 code = "c_" + string(_n, "%06.0f")
     gen strL note = "row_" + string(_n) + "_abcdefghijklmnopqrstuvwxyz0123456789"
 
-    dtparquet save "`t13_transfer_stub'", replace chunksize(`t13_chunk_size')
+    dtparquet save "`t13_transfer_stub'", replace chunksize(`t13_chunk_size') timer(plugin)
 
     clear
-    dtparquet use using "`t13_transfer_stub'.parquet", clear chunksize(`t13_chunk_size')
+    dtparquet use using "`t13_transfer_stub'.parquet", clear chunksize(`t13_chunk_size') timer(plugin)
 
     assert _N == `t13_n_rows'
     assert c(k) == 9
@@ -488,10 +488,10 @@ capture noisily {
     gen double value = _n * 1.5
     gen str16 tag = "r_" + string(_n, "%06.0f")
 
-    dtparquet save "test_t06_lazy.parquet", replace chunksize(`t14_chunk_size')
+    dtparquet save "test_t06_lazy.parquet", replace chunksize(`t14_chunk_size') timer(plugin)
 
     clear
-    dtparquet use id grp value tag using "test_t06_lazy.parquet" if grp > 0 in 1/`t14_n_rows', clear chunksize(`t14_chunk_size')
+    dtparquet use id grp value tag using "test_t06_lazy.parquet" if grp > 0 in 1/`t14_n_rows', clear chunksize(`t14_chunk_size') timer(plugin)
 
     count
     assert r(N) == 80000
@@ -527,7 +527,7 @@ timer on 19
 local ++total_tests
 capture noisily {
     clear
-    dtparquet use id grp value tag using "test_t06_lazy.parquet" in 1000001/1100000, clear chunksize(`t14_chunk_size')
+    dtparquet use id grp value tag using "test_t06_lazy.parquet" in 1000001/1100000, clear chunksize(`t14_chunk_size') timer(plugin)
 
     count
     assert r(N) == 0
@@ -560,10 +560,10 @@ capture noisily {
     gen long id = _n
     gen byte grp = mod(_n, 5)
 
-    dtparquet save "test_t06_streaming_trigger.parquet", replace chunksize(20000)
+    dtparquet save "test_t06_streaming_trigger.parquet", replace chunksize(20000) timer(plugin)
 
     clear
-    dtparquet use id grp using "test_t06_streaming_trigger.parquet" if id >= 1, clear chunksize(20000)
+    dtparquet use id grp using "test_t06_streaming_trigger.parquet" if id >= 1, clear chunksize(20000) timer(plugin)
 
     count
     assert r(N) == `t14c_n_rows'
@@ -602,7 +602,7 @@ capture noisily {
         gen str32 s`j' = "v" + string(mod(_n * `j', 100000), "%05.0f")
     }
 
-    dtparquet save "test_t07_autotune.parquet", replace chunksize(`t15_save_chunk')
+    dtparquet save "test_t07_autotune.parquet", replace chunksize(`t15_save_chunk') timer(plugin)
 
     local t15_write_selected = real("$write_selected_batch_size")
     local t15_write_row_width = real("$write_batch_row_width_bytes")
@@ -619,7 +619,7 @@ capture noisily {
     assert inlist("$write_batch_tuner_mode", "adaptive", "fixed")
 
     clear
-    dtparquet use using "test_t07_autotune.parquet", clear chunksize(`t15_use_chunk')
+    dtparquet use using "test_t07_autotune.parquet", clear chunksize(`t15_use_chunk') timer(plugin)
 
     assert _N == `t15_n_rows'
 
@@ -669,7 +669,7 @@ capture noisily {
         gen str40 s`j' = "q" + string(mod(_n * `j', 100000), "%05.0f")
     }
 
-    dtparquet save "test_t08_pipeline.parquet", replace chunksize(`t16_chunk_size')
+    dtparquet save "test_t08_pipeline.parquet", replace chunksize(`t16_chunk_size') timer(plugin)
 
     local t16_mode "$write_pipeline_mode"
     local t16_capacity = real("$write_queue_capacity")
@@ -736,7 +736,7 @@ capture noisily {
     }
     replace payload = payload + "_" + string(_n, "%08.0f")
 
-    dtparquet save "test_t10_strl.parquet", replace chunksize(4000)
+    dtparquet save "test_t10_strl.parquet", replace chunksize(4000) timer(plugin)
 
     local t17_pull_strl = real("$write_pull_strl_calls")
     local t17_trunc_events = real("$write_strl_trunc_events")
@@ -781,11 +781,11 @@ capture noisily {
     gen double value = _n * 1.25
     gen str20 label = "row_" + string(_n, "%06.0f")
 
-    dtparquet save "test_t12_boundaries.parquet", replace chunksize(700)
+    dtparquet save "test_t12_boundaries.parquet", replace chunksize(700) timer(plugin)
     assert inlist("$write_engine_stage", "execute", "stata_sink")
 
     clear
-    dtparquet use using "test_t12_boundaries.parquet", clear chunksize(700)
+    dtparquet use using "test_t12_boundaries.parquet", clear chunksize(700) timer(plugin)
     count
     assert r(N) == 2000
     assert inlist("$read_engine_stage", "execute", "stata_sink")

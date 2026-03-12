@@ -199,7 +199,7 @@ capture program drop dtparquet
 run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
-dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear
+dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear timer(plugin)
 local t3_err 0
 if inlist("$read_schema_handoff", "json_v2", "legacy_macros") == 0 local ++t3_err
 count
@@ -216,6 +216,44 @@ else {
 timer off 3
 capture timer list 3
 display as text "Test 3 finished in " as result %4.2f r(t3) "s"
+
+// Test Case 3b: Unified timer() mode matrix
+display _newline "=== TEST CASE 3b: timer() mode matrix ==="
+timer clear 31
+timer on 31
+local ++total_tests
+local t3b_err 0
+foreach tmode in off stata plugin all {
+    capture noisily dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50, clear timer(`tmode')
+    if _rc != 0 local ++t3b_err
+    foreach rs in plugin_ms strl_fix_ms meta_ms cat_ms describe_ms loadmeta_ms varprep_ms mapping_ms filevars_ms matchwin_ms genrecast_ms readfields_ms castjson_ms loaded_rows plugin_timers {
+        capture scalar __rcheck = r(`rs')
+        if _rc != 0 local ++t3b_err
+        else if inlist("`rs'", "loaded_rows") {
+            if (__rcheck <= 0) local ++t3b_err
+        }
+        else {
+            if (missing(__rcheck) | __rcheck < 0) local ++t3b_err
+        }
+    }
+    capture local rfile = r(file)
+    if _rc != 0 local ++t3b_err
+    else if `"`rfile'"' == "" local ++t3b_err
+    local exp_plugin = inlist("`tmode'", "plugin", "all")
+    if (r(plugin_timers) != `exp_plugin') local ++t3b_err
+}
+
+if `t3b_err' == 0 {
+    display as result "Test 3b completed successfully"
+    local passed_tests "`passed_tests' 3b"
+}
+else {
+    display as error "Test 3b failed: timer() modes did not map correctly"
+    local failed_tests "`failed_tests' 3b"
+}
+timer off 31
+capture timer list 31
+display as text "Test 3b finished in " as result %4.2f r(t31) "s"
 
 // Test Case 4: Subset varlist path
 display _newline "=== TEST CASE 4: Subset varlist path ==="
@@ -533,7 +571,7 @@ local id_first = ID[1]
 local id_last = ID[_N]
 local year_first = year[1]
 
-dtparquet save "`roundtrip_file'", replace
+dtparquet save "`roundtrip_file'", replace timer(plugin)
 local t7_err 0
 if fileexists("`roundtrip_file'") == 0 local ++t7_err
 if inlist("$write_schema_handoff", "json_v2", "legacy_macros") == 0 local ++t7_err
@@ -799,8 +837,8 @@ if id[1] != 1 local ++t11_err
 if code[3] != 1234567890123 local ++t11_err
 
 dtparquet import "`import_allstring_dta'" using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
-local t11_import_read_ms = real("$dtparquet_import_read_elapsed_ms")
-local t11_import_save_ms = real("$dtparquet_import_save_elapsed_ms")
+local t11_import_read_ms = r(import_read_elapsed_ms)
+local t11_import_save_ms = r(import_save_elapsed_ms)
 local t11_read_cast_ms = real("$read_apply_cast_elapsed_ms")
 if missing(`t11_import_read_ms') local t11_import_read_ms = 0
 if missing(`t11_import_save_ms') local t11_import_save_ms = 0

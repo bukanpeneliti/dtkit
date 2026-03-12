@@ -64,7 +64,7 @@ foreach mode of local parallel_modes {
             clear
             timer clear 1
             timer on 1
-            quietly dtparquet use `parquet_file', clear notimer parallel(`mode') chunksize(`chunksize')
+            quietly dtparquet use `parquet_file', clear timer(plugin) parallel(`mode') chunksize(`chunksize')
             timer off 1
             quietly timer list 1
             local t1 = r(t1)
@@ -114,7 +114,20 @@ forvalues r = 1/`total' {
     clear
     timer clear 2
     timer on 2
-    quietly dtparquet use `parquet_file', clear notimer parallel(rows) chunksize(0)
+    quietly dtparquet use `parquet_file', clear timer(plugin) parallel(rows) chunksize(0)
+    local s_plugin = r(plugin_ms)
+    local s_strl_fix = r(strl_fix_ms)
+    local s_meta = r(meta_ms)
+    local s_foreign_cat = r(cat_ms)
+    local s_describe = r(describe_ms)
+    local s_loadmeta = r(loadmeta_ms)
+    local s_varprep = r(varprep_ms)
+    local s_mapping = r(mapping_ms)
+    local s_filevars = r(filevars_ms)
+    local s_matchwin = r(matchwin_ms)
+    local s_genrecast = r(genrecast_ms)
+    local s_readfields = r(readfields_ms)
+    local s_castjson = r(castjson_ms)
     timer off 2
     quietly timer list 2
     local t1 = r(t2)
@@ -126,19 +139,6 @@ forvalues r = 1/`total' {
     local m_sink_write = real("$read_sink_write_elapsed_us") / 1000
     local m_sink = real("$read_sink_to_stata_elapsed_ms")
     local m_execute = real("$read_execute_elapsed_ms")
-    local s_plugin = real("$dtpq_use_plugin_ms")
-    local s_strl_fix = real("$dtpq_use_strl_ms")
-    local s_meta = real("$dtpq_use_meta_ms")
-    local s_foreign_cat = real("$dtpq_use_cat_ms")
-    local s_describe = real("$dtpq_use_describe_ms")
-    local s_loadmeta = real("$dtpq_use_loadmeta_ms")
-    local s_varprep = real("$dtpq_use_varprep_ms")
-    local s_mapping = real("$dtpq_use_mapping_ms")
-    local s_filevars = real("$dtpq_use_filevars_ms")
-    local s_matchwin = real("$dtpq_use_matchwin_ms")
-    local s_genrecast = real("$dtpq_use_genrecast_ms")
-    local s_readfields = real("$dtpq_use_readfields_ms")
-    local s_castjson = real("$dtpq_use_castjson_ms")
     post `post_repro' ("dtparquet") (`r') (`is_warmup') (`t1') (_N) (c(k)) ///
         (`m_scanplan') (`m_open') (`m_collect') (`m_cast') (`m_sink_prepare') (`m_sink_write') (`m_sink') (`m_execute') ///
         (`s_plugin') (`s_strl_fix') (`s_meta') (`s_foreign_cat') ///

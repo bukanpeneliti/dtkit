@@ -36,7 +36,24 @@ impl EngineStage {
     }
 }
 fn set_engine_stage(prefix: &str, stage: EngineStage) {
-    set_macro(&format!("{prefix}_engine_stage"), stage.as_str(), true);
+    set_runtime_macro(&format!("{prefix}_engine_stage"), stage.as_str());
+}
+
+fn rust_timer_macros_enabled() -> bool {
+    let raw = read_macro("dtparquet_emit_rust_timers", false, None);
+    if raw.trim().is_empty() {
+        return true;
+    }
+    matches!(
+        raw.trim().to_ascii_lowercase().as_str(),
+        "1" | "true" | "yes" | "on"
+    )
+}
+
+fn set_runtime_macro(name: &str, value: &str) {
+    if rust_timer_macros_enabled() {
+        set_macro(name, value, true);
+    }
 }
 
 #[derive(Debug)]
@@ -588,8 +605,8 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         let read_cast_started = Instant::now();
         apply_df_casts(&mut df, &boundary.cast_json)?;
         set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
-        set_macro("read_cast_mode", "eager", true);
-        set_macro("read_cast_defer_reason", "eager_path", true);
+        set_runtime_macro("read_cast_mode", "eager");
+        set_runtime_macro("read_cast_defer_reason", "eager_path");
         let mut t = AdaptiveBatchTuner::new(row_width_bytes, req.batch_size, 0);
         set_engine_stage("read", EngineStage::StataSink);
         let strategy = req.parallel_strategy.unwrap_or_else(|| {
@@ -623,14 +640,14 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         set_elapsed_ms_macro("read_open_scan_elapsed_ms", open_scan_started);
         let (cast_early, cast_mode, cast_reason) =
             should_apply_cast_early(&boundary.cast_json, req.sql_if, req.order_by);
-        set_macro("read_cast_mode", cast_mode, true);
-        set_macro("read_cast_defer_reason", cast_reason, true);
+        set_runtime_macro("read_cast_mode", cast_mode);
+        set_runtime_macro("read_cast_defer_reason", cast_reason);
         if cast_early {
             let read_cast_started = Instant::now();
             lf = apply_cast(lf, &boundary.cast_json)?;
             set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         } else {
-            set_macro("read_apply_cast_elapsed_ms", "0", true);
+            set_runtime_macro("read_apply_cast_elapsed_ms", "0");
         }
         lf = normalize_categorical(lf)?;
         let has_if = req.sql_if.map(|s| !s.trim().is_empty()).unwrap_or(false);
@@ -641,7 +658,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         }
         let (lf_f, has_f) = apply_if_filter(lf, req.sql_if)?;
         if has_f {
-            set_macro("if_filter_mode", "expr", true);
+            set_runtime_macro("if_filter_mode", "expr");
         }
         let lf_s = apply_random_sample(lf_f, req.random_share, req.random_seed, &mut collects)?;
         let mut lf_sorted = apply_sort_transform(lf_s, req.order_by);
@@ -938,9 +955,9 @@ fn run_lazy_pipeline(
     }
     if use_streaming {
         lf = lf.with_new_streaming(true);
-        set_macro("read_streaming_enabled", "1", true);
+        set_runtime_macro("read_streaming_enabled", "1");
     } else {
-        set_macro("read_streaming_enabled", "0", true);
+        set_runtime_macro("read_streaming_enabled", "0");
     }
 
     let mut collect_elapsed_ms = 0u128;
@@ -1033,7 +1050,7 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
     let start = Instant::now();
     let mut collects = 0usize;
     init_runtime("write");
-    set_macro("write_pipeline_mode", "legacy_direct", true);
+    set_runtime_macro("write_pipeline_mode", "legacy_direct");
     if write_pipeline_mode() == WritePipelineMode::ProducerConsumer {
         display("dtparquet: queue write mode is deprecated; using direct mode");
     }
@@ -1095,7 +1112,7 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
         .transpose()?
     {
         lf = lf.filter(e);
-        set_macro("if_filter_mode", "expr", true);
+        set_runtime_macro("if_filter_mode", "expr");
     }
 
     if plan.partition_cols.is_empty() {
@@ -1281,7 +1298,7 @@ fn write_single_dataframe_direct_batches(
         return Err(err);
     }
 
-    set_macro("write_collect_elapsed_ms", "0", true);
+    set_runtime_macro("write_collect_elapsed_ms", "0");
     set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);
 
     Ok(DirectWriteStats {
@@ -1449,40 +1466,46 @@ fn parquet_compression(c: &str, l: Option<usize>) -> Result<ParquetCompression, 
 // --- Internal Helpers ---
 
 fn emit_init_macros(prefix: &str) {
+    if !rust_timer_macros_enabled() {
+        return;
+    }
     for m in [
         "selected_batch_size",
         "batch_row_width_bytes",
         "batch_memory_cap_rows",
         "batch_adjustments",
     ] {
-        set_macro(&format!("{prefix}_{m}"), "0", true);
+        set_runtime_macro(&format!("{prefix}_{m}"), "0");
     }
-    set_macro(&format!("{prefix}_batch_tuner_mode"), "fixed", true);
-    set_macro(&format!("{prefix}_schema_handoff"), "legacy_macros", true);
-    set_macro("if_filter_mode", "none", true);
+    set_runtime_macro(&format!("{prefix}_batch_tuner_mode"), "fixed");
+    set_runtime_macro(&format!("{prefix}_schema_handoff"), "legacy_macros");
+    set_runtime_macro("if_filter_mode", "none");
     if prefix == "read" {
-        set_macro("read_lazy_mode", "none", true);
-        set_macro("read_streaming_enabled", "0", true);
-        set_macro("read_cast_mode", "none", true);
-        set_macro("read_cast_defer_reason", "none", true);
-        set_macro("read_scan_plan_elapsed_ms", "0", true);
-        set_macro("read_open_scan_elapsed_ms", "0", true);
-        set_macro("read_collect_elapsed_ms", "0", true);
-        set_macro("read_apply_cast_elapsed_ms", "0", true);
-        set_macro("read_sink_prepare_elapsed_us", "0", true);
-        set_macro("read_sink_write_elapsed_us", "0", true);
-        set_macro("read_sink_prepare_elapsed_ms", "0", true);
-        set_macro("read_sink_write_elapsed_ms", "0", true);
-        set_macro("read_sink_to_stata_elapsed_ms", "0", true);
-        set_macro("read_execute_elapsed_ms", "0", true);
+        set_runtime_macro("read_lazy_mode", "none");
+        set_runtime_macro("read_streaming_enabled", "0");
+        set_runtime_macro("read_cast_mode", "none");
+        set_runtime_macro("read_cast_defer_reason", "none");
+        set_runtime_macro("read_scan_plan_elapsed_ms", "0");
+        set_runtime_macro("read_open_scan_elapsed_ms", "0");
+        set_runtime_macro("read_collect_elapsed_ms", "0");
+        set_runtime_macro("read_apply_cast_elapsed_ms", "0");
+        set_runtime_macro("read_sink_prepare_elapsed_us", "0");
+        set_runtime_macro("read_sink_write_elapsed_us", "0");
+        set_runtime_macro("read_sink_prepare_elapsed_ms", "0");
+        set_runtime_macro("read_sink_write_elapsed_ms", "0");
+        set_runtime_macro("read_sink_to_stata_elapsed_ms", "0");
+        set_runtime_macro("read_execute_elapsed_ms", "0");
     } else if prefix == "write" {
-        set_macro("write_collect_elapsed_ms", "0", true);
-        set_macro("write_parquet_elapsed_ms", "0", true);
+        set_runtime_macro("write_collect_elapsed_ms", "0");
+        set_runtime_macro("write_parquet_elapsed_ms", "0");
     }
     set_engine_stage(prefix, EngineStage::ScanPlan);
 }
 fn emit_plan_macros(prefix: &str, mode: &str) {
-    set_macro(&format!("{prefix}_schema_handoff"), mode, true);
+    if !rust_timer_macros_enabled() {
+        return;
+    }
+    set_runtime_macro(&format!("{prefix}_schema_handoff"), mode);
     set_engine_stage(prefix, EngineStage::Execute);
 }
 fn init_runtime(prefix: &str) {
@@ -1493,15 +1516,15 @@ fn init_runtime(prefix: &str) {
 }
 
 fn set_elapsed_ms_macro(name: &str, started: Instant) {
-    set_macro(name, &started.elapsed().as_millis().to_string(), true);
+    set_runtime_macro(name, &started.elapsed().as_millis().to_string());
 }
 
 fn set_elapsed_ms_value_macro(name: &str, elapsed_ms: u128) {
-    set_macro(name, &elapsed_ms.to_string(), true);
+    set_runtime_macro(name, &elapsed_ms.to_string());
 }
 
 fn set_elapsed_us_value_macro(name: &str, elapsed_us: u128) {
-    set_macro(name, &elapsed_us.to_string(), true);
+    set_runtime_macro(name, &elapsed_us.to_string());
 }
 
 fn emit_runtime_common(
@@ -1511,6 +1534,9 @@ fn emit_runtime_common(
     processed: usize,
     start: Instant,
 ) {
+    if !rust_timer_macros_enabled() {
+        return;
+    }
     let mut m = CommonRuntimeMetrics::zero();
     m.collect_calls = collects;
     m.planned_batches = planned;
@@ -1528,9 +1554,11 @@ fn finalize_runtime(
     tuner: &AdaptiveBatchTuner,
     start: Instant,
 ) {
-    set_engine_stage(prefix, EngineStage::StataSink);
-    CommonBatchTunerMetrics::from_tuner(tuner).emit_to_macros(prefix);
-    emit_runtime_common(prefix, collects, batches, proc, start);
+    if rust_timer_macros_enabled() {
+        set_engine_stage(prefix, EngineStage::StataSink);
+        CommonBatchTunerMetrics::from_tuner(tuner).emit_to_macros(prefix);
+        emit_runtime_common(prefix, collects, batches, proc, start);
+    }
     for (m, v) in [
         ("n_batches", batches.to_string()),
         ("loaded_rows", loaded.to_string()),
@@ -1540,15 +1568,17 @@ fn finalize_runtime(
     }
 }
 fn finalize_runtime_write(scan: &StataRowSource, collects: usize, start: Instant) {
-    set_engine_stage("write", EngineStage::StataSink);
-    CommonBatchTunerMetrics::from_tuner(&scan.batch_tuner_snapshot()).emit_to_macros("write");
-    emit_runtime_common(
-        "write",
-        collects,
-        scan.planned_batches(),
-        scan.processed_batches(),
-        start,
-    );
+    if rust_timer_macros_enabled() {
+        set_engine_stage("write", EngineStage::StataSink);
+        CommonBatchTunerMetrics::from_tuner(&scan.batch_tuner_snapshot()).emit_to_macros("write");
+        emit_runtime_common(
+            "write",
+            collects,
+            scan.planned_batches(),
+            scan.processed_batches(),
+            start,
+        );
+    }
 }
 fn lazy_execution_uses_legacy_batches() -> bool {
     env::var(ENV_LAZY_EXECUTION_MODE)
