@@ -282,8 +282,8 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
         }),
         CommandArgs::Describe(args) => Ok(file_summary(
             &args.file_path,
-            args.memory_savvy,
             args.detailed,
+            args.memory_savvy,
         )),
         CommandArgs::HasMetadataKey(args) => {
             let found = has_parquet_metadata_key(&args.file_path, &args.key)?;

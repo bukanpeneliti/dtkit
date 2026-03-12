@@ -241,29 +241,6 @@ fn to_range_error(context: &str) -> PolarsError {
     PolarsError::ComputeError(format!("Invalid Stata bounds in {context}").into())
 }
 
-fn validate_write_transfer_range(
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    if start_row >= end_row {
-        return Ok(());
-    }
-    let row_start = start_index + start_row + 1 + stata_offset;
-    let row_end_exclusive = start_index + end_row + 1 + stata_offset;
-    let col = transfer_column.stata_col_index + 1;
-    validate_stata_range(
-        row_start,
-        row_end_exclusive,
-        col,
-        col + 1,
-        "write_transfer_column_range",
-    )
-    .map_err(|_| to_range_error("write_transfer_column_range"))
-}
-
 fn validate_read_transfer_range(
     col: usize,
     offset: usize,
@@ -282,18 +259,97 @@ fn validate_read_transfer_range(
 pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
         DataType::Boolean => {
-            write_numeric_iter(ctx, ctx.col.bool()?.iter(), |v| if v { 1.0 } else { 0.0 })
+            let ca = ctx.col.bool()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(
+                    ctx,
+                    ca.into_no_null_iter(),
+                    |v| if v { 1.0 } else { 0.0 },
+                )
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| if v { 1.0 } else { 0.0 })
+            }
         }
-        DataType::Int8 => write_numeric_iter(ctx, ctx.col.i8()?.iter(), |v| v as f64),
-        DataType::Int16 => write_numeric_iter(ctx, ctx.col.i16()?.iter(), |v| v as f64),
-        DataType::Int32 => write_numeric_iter(ctx, ctx.col.i32()?.iter(), |v| v as f64),
-        DataType::Int64 => write_numeric_iter(ctx, ctx.col.i64()?.iter(), |v| v as f64),
-        DataType::UInt8 => write_numeric_iter(ctx, ctx.col.u8()?.iter(), |v| v as f64),
-        DataType::UInt16 => write_numeric_iter(ctx, ctx.col.u16()?.iter(), |v| v as f64),
-        DataType::UInt32 => write_numeric_iter(ctx, ctx.col.u32()?.iter(), |v| v as f64),
-        DataType::UInt64 => write_numeric_iter(ctx, ctx.col.u64()?.iter(), |v| v as f64),
-        DataType::Float32 => write_numeric_iter(ctx, ctx.col.f32()?.iter(), |v| v as f64),
-        DataType::Float64 => write_numeric_iter(ctx, ctx.col.f64()?.iter(), |v| v),
+        DataType::Int8 => {
+            let ca = ctx.col.i8()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::Int16 => {
+            let ca = ctx.col.i16()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::Int32 => {
+            let ca = ctx.col.i32()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::Int64 => {
+            let ca = ctx.col.i64()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::UInt8 => {
+            let ca = ctx.col.u8()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::UInt16 => {
+            let ca = ctx.col.u16()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::UInt32 => {
+            let ca = ctx.col.u32()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::UInt64 => {
+            let ca = ctx.col.u64()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::Float32 => {
+            let ca = ctx.col.f32()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v as f64)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v as f64)
+            }
+        }
+        DataType::Float64 => {
+            let ca = ctx.col.f64()?;
+            if ca.null_count() == 0 {
+                write_numeric_iter_no_null(ctx, ca.into_no_null_iter(), |v| v)
+            } else {
+                write_numeric_iter(ctx, ca.iter(), |v| v)
+            }
+        }
         DataType::Date => write_date_values(ctx),
         DataType::Time => write_time_values(ctx),
         DataType::Datetime(_, _) => write_datetime_values(ctx),
@@ -363,15 +419,36 @@ where
     I: Iterator<Item = Option<T>>,
     F: Fn(T) -> f64 + Copy,
 {
-    let mut write_calls = 0u64;
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
     for (local_idx, value) in iter.enumerate() {
         let global_row_idx = local_idx + ctx.start_index;
-        stata_sys::replace_number(
-            value.map(mapper),
+        let row = global_row_idx + 1 + ctx.stata_offset;
+        let col = ctx.transfer_column.stata_col_index + 1;
+        if let Some(v) = value {
+            stata_sys::replace_number_unchecked(mapper(v), row, col);
+        }
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+fn write_numeric_iter_no_null<T, I, F>(
+    ctx: &TransferContext,
+    iter: I,
+    mapper: F,
+) -> PolarsResult<()>
+where
+    I: Iterator<Item = T>,
+    F: Fn(T) -> f64 + Copy,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    for (local_idx, value) in iter.enumerate() {
+        let global_row_idx = local_idx + ctx.start_index;
+        stata_sys::replace_number_unchecked(
+            mapper(value),
             global_row_idx + 1 + ctx.stata_offset,
             ctx.transfer_column.stata_col_index + 1,
         );
-        write_calls += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -398,10 +475,16 @@ fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
     let str_col = ctx.col.str()?;
     for (local_idx, value) in str_col.iter().enumerate() {
+        let Some(s) = value else {
+            continue;
+        };
+        if s.is_empty() {
+            continue;
+        }
         let global_row_idx = local_idx + ctx.start_index;
         let row = global_row_idx + 1 + ctx.stata_offset;
         let col = ctx.transfer_column.stata_col_index + 1;
-        stata_sys::replace_string_ref(value, row, col);
+        stata_sys::replace_string_ref(Some(s), row, col);
         write_calls += 1;
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
@@ -462,13 +545,6 @@ pub(crate) fn write_transfer_column_range(
     end_row: usize,
     stata_offset: usize,
 ) -> PolarsResult<()> {
-    validate_write_transfer_range(
-        transfer_column,
-        start_index,
-        start_row,
-        end_row,
-        stata_offset,
-    )?;
     let ctx = TransferContext {
         col,
         transfer_column,

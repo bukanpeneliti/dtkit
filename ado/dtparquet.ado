@@ -495,15 +495,16 @@ program dtparquet_use
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
 
-    local describe_started = clock("$S_TIME", "hms")
-    plugin call dtparquet_plugin, "describe" "`file'" "1" "1" "" "" "0" "0"
-    local t_describe_ms = clock("$S_TIME", "hms") - `describe_started'
-    if (`t_describe_ms' < 0) local t_describe_ms = 0
-
     local loadmeta_started = clock("$S_TIME", "hms")
     plugin call dtparquet_plugin, "load_meta" "`file'"
     local t_loadmeta_ms = clock("$S_TIME", "hms") - `loadmeta_started'
     if (`t_loadmeta_ms' < 0) local t_loadmeta_ms = 0
+
+    local describe_detailed = cond("`dtmeta_loaded'" == "1", "0", "1")
+    local describe_started = clock("$S_TIME", "hms")
+    plugin call dtparquet_plugin, "describe" "`file'" "`describe_detailed'" "1" "" "" "0" "0"
+    local t_describe_ms = clock("$S_TIME", "hms") - `describe_started'
+    if (`t_describe_ms' < 0) local t_describe_ms = 0
 
     timer clear 91
     timer on 91
@@ -672,7 +673,7 @@ program dtparquet_use
     local sort ""
     local sql_if "`if_exp'"
     local sql_if = trim(subinstr(`"`sql_if'"', "if", "", 1))
-    local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
+    local batch_size = cond("`chunksize'" == "", 5000000, real("`chunksize'"))
     local order_by_type 0
     local order_descending 0
     local plugin_offset = max(0, `offset' - 1)

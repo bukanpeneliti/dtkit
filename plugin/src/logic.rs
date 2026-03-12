@@ -994,25 +994,84 @@ struct DescribeSchemaPayload {
 
 pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
     set_macro("cast_json", "", false);
-    let r = match File::open(path).map(ParquetReader::new) {
+    let source = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
+    let mut r = match File::open(path).map(ParquetReader::new) {
         Ok(v) => v,
         Err(e) => {
             display(&format!("Error: {e}"));
             return 198;
         }
     };
-    let df = match r.finish() {
+
+    let mut lf = match LazyFrame::scan_parquet(
+        PlRefPath::new(&source),
+        ScanArgsParquet {
+            allow_missing_columns: true,
+            cache: false,
+            ..Default::default()
+        },
+    ) {
         Ok(v) => v,
         Err(e) => {
             display(&format!("Error: {e:?}"));
             return 198;
         }
     };
+
+    let schema = match lf.collect_schema() {
+        Ok(v) => v,
+        Err(e) => {
+            display(&format!("Error: {e:?}"));
+            return 198;
+        }
+    };
+
+    let n_rows = match r.get_metadata() {
+        Ok(meta) => meta.num_rows,
+        Err(e) => {
+            display(&format!("Error: {e:?}"));
+            return 198;
+        }
+    };
+
     let mut lens = HashMap::new();
     if det {
-        for (n, dt) in df.schema().iter() {
-            if dt.is_string() {
-                if let Ok(col) = df.column(n) {
+        let string_cols: Vec<PlSmallStr> = schema
+            .iter()
+            .filter_map(|(n, dt)| dt.is_string().then_some(n.clone()))
+            .collect();
+        if !string_cols.is_empty() {
+            let lf = match LazyFrame::scan_parquet(
+                PlRefPath::new(&source),
+                ScanArgsParquet {
+                    allow_missing_columns: true,
+                    cache: false,
+                    ..Default::default()
+                },
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    display(&format!("Error: {e:?}"));
+                    return 198;
+                }
+            };
+            let mut s_exprs = Vec::with_capacity(string_cols.len());
+            for n in &string_cols {
+                s_exprs.push(col(n.clone()));
+            }
+            let string_df = match lf.select(s_exprs).collect() {
+                Ok(v) => v,
+                Err(e) => {
+                    display(&format!("Error: {e:?}"));
+                    return 198;
+                }
+            };
+            for n in &string_cols {
+                if let Ok(col) = string_df.column(n.as_str()) {
                     if let Ok(ca) = col.str() {
                         lens.insert(
                             n.to_string(),
@@ -1026,10 +1085,10 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
             }
         }
     }
-    match set_schema_macros(df.schema(), &lens, det, q) {
+    match set_schema_macros(schema.as_ref(), &lens, det, q) {
         Ok(c) => {
             set_macro("n_columns", &c.to_string(), false);
-            set_macro("n_rows", &df.height().to_string(), false);
+            set_macro("n_rows", &n_rows.to_string(), false);
             0
         }
         Err(e) => {

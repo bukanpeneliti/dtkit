@@ -218,6 +218,11 @@ pub fn replace_number(value: Option<f64>, row: usize, column: usize) -> i32 {
 }
 
 #[inline]
+pub fn replace_number_unchecked(value: f64, row: usize, column: usize) -> i32 {
+    unsafe { SF_vstore(column as i32, row as i32, value) }
+}
+
+#[inline]
 pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     replace_string_ref(value.as_deref(), row, column)
 }
