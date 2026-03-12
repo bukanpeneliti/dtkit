@@ -430,6 +430,7 @@ fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
     }
 }
 
+#[inline(always)]
 fn write_numeric_iter<T, I, F>(ctx: &TransferContext, iter: I, mapper: F) -> PolarsResult<()>
 where
     I: Iterator<Item = Option<T>>,
@@ -449,6 +450,7 @@ where
     Ok(())
 }
 
+#[inline(always)]
 fn write_numeric_iter_no_null<T, I, F>(
     ctx: &TransferContext,
     iter: I,
@@ -470,28 +472,24 @@ where
     Ok(())
 }
 
+#[inline(always)]
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
     let str_col = ctx.col.str()?;
     let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let sstore = stata_sys::sstore_unchecked_fn();
-    let mut buffer: Vec<std::os::raw::c_char> = Vec::new();
-
-    let mut write_value = |s: &str, row: i32| {
-        let len = s.len();
-        buffer.resize(len + 1, 0);
-        unsafe {
-            std::ptr::copy_nonoverlapping(s.as_ptr(), buffer.as_mut_ptr() as *mut u8, len);
-            buffer[len] = 0;
-            sstore(col, row, buffer.as_mut_ptr());
-        }
-    };
+    let mut buffer: Vec<u8> = Vec::new();
 
     if str_col.null_count() == 0 {
         for s in str_col.into_no_null_iter() {
             if !s.is_empty() {
-                write_value(s, row);
+                buffer.clear();
+                buffer.extend_from_slice(s.as_bytes());
+                buffer.push(0);
+                unsafe {
+                    sstore(col, row, buffer.as_mut_ptr() as *mut std::os::raw::c_char);
+                }
                 write_calls += 1;
             }
             row += 1;
@@ -506,7 +504,12 @@ fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
                 row += 1;
                 continue;
             }
-            write_value(s, row);
+            buffer.clear();
+            buffer.extend_from_slice(s.as_bytes());
+            buffer.push(0);
+            unsafe {
+                sstore(col, row, buffer.as_mut_ptr() as *mut std::os::raw::c_char);
+            }
             write_calls += 1;
             row += 1;
         }
