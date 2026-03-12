@@ -420,13 +420,13 @@ where
     F: Fn(T) -> f64 + Copy,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    for (local_idx, value) in iter.enumerate() {
-        let global_row_idx = local_idx + ctx.start_index;
-        let row = global_row_idx + 1 + ctx.stata_offset;
-        let col = ctx.transfer_column.stata_col_index + 1;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    for value in iter {
         if let Some(v) = value {
-            stata_sys::replace_number_unchecked(mapper(v), row, col);
+            stata_sys::replace_number_unchecked_i32(mapper(v), row, col);
         }
+        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -442,13 +442,11 @@ where
     F: Fn(T) -> f64 + Copy,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    for (local_idx, value) in iter.enumerate() {
-        let global_row_idx = local_idx + ctx.start_index;
-        stata_sys::replace_number_unchecked(
-            mapper(value),
-            global_row_idx + 1 + ctx.stata_offset,
-            ctx.transfer_column.stata_col_index + 1,
-        );
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    for value in iter {
+        stata_sys::replace_number_unchecked_i32(mapper(value), row, col);
+        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -474,18 +472,20 @@ fn write_all_missing_range(
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
     let str_col = ctx.col.str()?;
-    for (local_idx, value) in str_col.iter().enumerate() {
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    for value in str_col.iter() {
         let Some(s) = value else {
+            row += 1;
             continue;
         };
         if s.is_empty() {
+            row += 1;
             continue;
         }
-        let global_row_idx = local_idx + ctx.start_index;
-        let row = global_row_idx + 1 + ctx.stata_offset;
-        let col = ctx.transfer_column.stata_col_index + 1;
-        stata_sys::replace_string_ref(Some(s), row, col);
+        stata_sys::replace_string_ref_i32(Some(s), row, col);
         write_calls += 1;
+        row += 1;
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
     Ok(())

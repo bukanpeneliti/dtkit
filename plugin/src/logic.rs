@@ -424,7 +424,7 @@ pub fn get_compute_thread_pool() -> &'static ThreadPool {
         COMPUTE_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
         let n = get_env_u(ENV_DTPARQUET_THREADS)
             .or_else(|| get_env_u(ENV_POLARS_MAX_THREADS))
-            .unwrap_or_else(get_hw_threads);
+            .unwrap_or_else(|| get_hw_threads().saturating_mul(6).clamp(8, 64));
         if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(n.max(1))
             .thread_name(|i| format!("dtparquet-cpu-{i}"))

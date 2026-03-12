@@ -223,6 +223,11 @@ pub fn replace_number_unchecked(value: f64, row: usize, column: usize) -> i32 {
 }
 
 #[inline]
+pub fn replace_number_unchecked_i32(value: f64, row: i32, column: i32) -> i32 {
+    unsafe { SF_vstore(column, row, value) }
+}
+
+#[inline]
 pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     replace_string_ref(value.as_deref(), row, column)
 }
@@ -240,6 +245,24 @@ pub fn replace_string_ref(value: Option<&str>, row: usize, column: usize) -> i32
             }
             buffer.push(0);
             unsafe { SF_sstore(column as i32, row as i32, buffer.as_mut_ptr()) }
+        }),
+        None => 0,
+    }
+}
+
+#[inline]
+pub fn replace_string_ref_i32(value: Option<&str>, row: i32, column: i32) -> i32 {
+    match value {
+        Some(val) => SSTORE_BUFFER.with(|cell| {
+            let mut buffer = cell.borrow_mut();
+            buffer.clear();
+            buffer.reserve(val.len() + 1);
+            for b in val.bytes() {
+                assert!(b != 0, "embedded NUL in replace_string input");
+                buffer.push(b as std::os::raw::c_char);
+            }
+            buffer.push(0);
+            unsafe { SF_sstore(column, row, buffer.as_mut_ptr()) }
         }),
         None => 0,
     }
