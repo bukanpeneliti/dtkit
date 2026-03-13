@@ -218,6 +218,21 @@ pub fn replace_number(value: Option<f64>, row: usize, column: usize) -> i32 {
 }
 
 #[inline]
+pub fn replace_number_unchecked(value: f64, row: usize, column: usize) -> i32 {
+    unsafe { SF_vstore(column as i32, row as i32, value) }
+}
+
+#[inline]
+pub fn replace_number_unchecked_i32(value: f64, row: i32, column: i32) -> i32 {
+    unsafe { SF_vstore(column, row, value) }
+}
+
+#[inline]
+pub fn vstore_unchecked_fn() -> unsafe extern "C" fn(i32, i32, f64) -> i32 {
+    unsafe { (*_stata_).store.expect("vstore function is not available") }
+}
+
+#[inline]
 pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     replace_string_ref(value.as_deref(), row, column)
 }
@@ -238,6 +253,30 @@ pub fn replace_string_ref(value: Option<&str>, row: usize, column: usize) -> i32
         }),
         None => 0,
     }
+}
+
+#[inline]
+pub fn replace_string_ref_i32(value: Option<&str>, row: i32, column: i32) -> i32 {
+    match value {
+        Some(val) => SSTORE_BUFFER.with(|cell| {
+            let mut buffer = cell.borrow_mut();
+            let len = val.len();
+            buffer.clear();
+            buffer.reserve(len + 1);
+            unsafe {
+                buffer.set_len(len + 1);
+                std::ptr::copy_nonoverlapping(val.as_ptr(), buffer.as_mut_ptr() as *mut u8, len);
+            }
+            buffer[len] = 0;
+            unsafe { SF_sstore(column, row, buffer.as_mut_ptr()) }
+        }),
+        None => 0,
+    }
+}
+
+#[inline]
+pub fn sstore_unchecked_fn() -> unsafe extern "C" fn(i32, i32, *mut std::os::raw::c_char) -> i32 {
+    unsafe { (*_stata_).sstore.expect("sstore function is not available") }
 }
 
 //  Internal wrappers

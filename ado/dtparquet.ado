@@ -17,8 +17,9 @@ program dtparquet
     }
     _cleanup_orphaned
 
-    // Check for NOTIMER option (supports: notimer, notime, notim, noti, not)
-    local has_notimer 0
+    // Parse unified timer mode: timer(stata|plugin|all|off)
+    local timer_mode "off"
+    local timer_raw ""
     local cmd_line `"`0'"'
     local rest_cmd `"`0'"'
 
@@ -26,24 +27,17 @@ program dtparquet
     local len = length("`sub'")
     local new_rest ""
 
-    if strpos(`"`rest'"', `"""') > 0 {
-        local new_rest = trim(`"`rest'"')
-    }
-    else {
-        local word_count : word count `rest'
-        forvalues j = 1/`word_count' {
-            local word : word `j' of `rest'
-            local word_lower = lower("`word'")
-            local word_len = length("`word_lower'")
-            if "`word_lower'" == substr("notimer", 1, max(5, `word_len')) {
-                local has_notimer 1
-            }
-            else {
-                local new_rest `"`new_rest' `word'"'
-            }
+    local new_rest = trim(`"`rest'"')
+
+    if regexm(lower(`"`rest'"'), "timer\\(([^)]*)\\)") {
+        local timer_raw = trim(regexs(1))
+        if !inlist("`timer_raw'", "stata", "plugin", "all", "off") {
+            display as error "timer() must be one of: stata, plugin, all, off"
+            exit 198
         }
-        local new_rest = trim("`new_rest'")
+        local timer_mode "`timer_raw'"
     }
+    local show_stata_elapsed = inlist("`timer_mode'", "stata", "all")
 
     if `len' == 0 {
         display as error "Subcommand required: save, use, export, or import"
@@ -75,6 +69,10 @@ program dtparquet
             else {
                 gettoken tok scan_rest : scan_rest, bind
             }
+        }
+        if "`dtparquet__file'" == "" {
+            gettoken fname : new_rest, parse(" ,")
+            local dtparquet__file "`fname'"
         }
         dtparquet_use `new_rest'
         local rc = _rc
@@ -122,8 +120,8 @@ program dtparquet
         exit 198
     }
 
-    // Display timing only on success and if notimer not specified
-    if `rc' == 0 & `has_notimer' == 0 {
+    // Display elapsed summary only when Stata timing is enabled
+    if `rc' == 0 & `show_stata_elapsed' {
         local elapsed = clock("$S_TIME", "hms") - `start_time'
         local elapsed_sec = `elapsed' / 1000
 
@@ -147,6 +145,9 @@ program dtparquet
         local display_file = subinstr("`dtparquet__file'", `""', "", .)
         local display_file = subinstr("`display_file'", "'", "", .)
         local display_file = trim("`display_file'")
+        if substr("`display_file'", -1, 1) == "," {
+            local display_file = substr("`display_file'", 1, length("`display_file'") - 1)
+        }
 
         // Display message based on subcommand
         if "`dtparquet__sub'" == "save" {
@@ -241,7 +242,17 @@ end
 
 capture program drop dtparquet_save
 program dtparquet_save
-    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTitionby(string)]
+    syntax anything(name=filename) [, REplace NOLabel CHunksize(integer 0) COMPress(string) PARTitionby(string) TIMER(string)]
+    local timer_mode = lower(trim("`timer'"))
+    if "`timer_mode'" == "" {
+        local timer_mode "off"
+    }
+    if !inlist("`timer_mode'", "stata", "plugin", "all", "off") {
+        display as error "timer() must be one of: stata, plugin, all, off"
+        exit 198
+    }
+    local emit_rust_timers = inlist("`timer_mode'", "plugin", "all")
+    local dtparquet_emit_rust_timers = cond(`emit_rust_timers', "1", "0")
     local is_nolabel = ("`nolabel'" != "")
     local compression = lower(trim("`compress'"))
     if "`compression'" == "" local compression fast
@@ -394,10 +405,20 @@ program dtparquet_save
 end
 
 capture program drop dtparquet_use
-program dtparquet_use
+program dtparquet_use, rclass
     version 16
 
-    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string)]
+    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string) PARallel(string) TIMER(string)]
+    local timer_mode = lower(trim("`timer'"))
+    if "`timer_mode'" == "" {
+        local timer_mode "off"
+    }
+    if !inlist("`timer_mode'", "stata", "plugin", "all", "off") {
+        display as error "timer() must be one of: stata, plugin, all, off"
+        exit 198
+    }
+    local emit_rust_timers = inlist("`timer_mode'", "plugin", "all")
+    local dtparquet_emit_rust_timers = cond(`emit_rust_timers', "1", "0")
     
     local vlist ""
     local if_exp ""
@@ -462,6 +483,15 @@ program dtparquet_use
         exit 198
     }
 
+    local parallel_mode = lower(trim("`parallel'"))
+    if "`parallel_mode'" == "" {
+        local parallel_mode "auto"
+    }
+    if !inlist("`parallel_mode'", "auto", "rows", "columns") {
+        display as error "parallel() must be one of: auto, rows, columns"
+        exit 198
+    }
+
     local file = subinstr(trim(`"`filename'"'), `"""', "", .)
     local file : subinstr local file "\" "/", all
 
@@ -470,13 +500,41 @@ program dtparquet_use
     }
     local file "`file'.parquet"
 
+    local t_plugin_ms 0
+    local t_strl_fix_ms 0
+    local t_meta_ms 0
+    local t_foreign_cat_ms 0
+    local t_describe_ms 0
+    local t_loadmeta_ms 0
+    local t_varprep_ms 0
+    local t_mapping_ms 0
+    local t_filevars_ms 0
+    local t_match_window_ms 0
+    local t_genrecast_ms 0
+    local t_readfields_ms 0
+    local t_castjson_ms 0
+
     confirm file `"`file'"'
     if `is_clear' == 0 & (c(N) > 0 | c(k) > 0) error 4
     if `is_clear' == 1 quietly clear
 
-    plugin call dtparquet_plugin, "describe" "`file'" "1" "1" "" "" "0" "0"
+    timer clear 96
+    timer on 96
     plugin call dtparquet_plugin, "load_meta" "`file'"
+    timer off 96
+    quietly timer list 96
+    local t_loadmeta_ms = round(`=r(t96)' * 1000, 1)
 
+    local describe_detailed = cond("`dtmeta_loaded'" == "1", "0", "1")
+    timer clear 97
+    timer on 97
+    plugin call dtparquet_plugin, "describe" "`file'" "`describe_detailed'" "1" "" "" "0" "0"
+    timer off 97
+    quietly timer list 97
+    local t_describe_ms = round(`=r(t97)' * 1000, 1)
+
+    timer clear 91
+    timer on 91
     local n_rows = real("`n_rows'")
     local n_columns = real("`n_columns'")
     local vars_in_file
@@ -507,6 +565,13 @@ program dtparquet_use
         }
     }
 
+    timer off 91
+    quietly timer list 91
+    local t_filevars_ms = round(`=r(t91)' * 1000, 1)
+
+    timer clear 92
+    timer on 92
+
     if "`vlist'" == "" | "`vlist'" == "*" {
         local matched_vars `vars_in_file'
     }
@@ -530,7 +595,13 @@ program dtparquet_use
     local row_to_read = max(0, min(`n_rows', `last_n') - `offset' + (`offset' > 0))
     local n_obs_already = _N
     local n_obs_after = `n_obs_already' + `row_to_read'
-    quietly set obs `n_obs_after'
+
+    timer off 92
+    quietly timer list 92
+    local t_match_window_ms = round(`=r(t92)' * 1000, 1)
+
+    timer clear 93
+    timer on 93
 
     local match_vars_non_binary
     local cast_string_vars
@@ -568,7 +639,13 @@ program dtparquet_use
 
     local matched_vars `match_vars_non_binary'
     local n_matched_vars: word count `matched_vars'
+    timer off 93
+    quietly timer list 93
+    local t_genrecast_ms = round(`=r(t93)' * 1000, 1)
+    local t_varprep_ms = `t_filevars_ms' + `t_match_window_ms' + `t_genrecast_ms'
 
+    timer clear 94
+    timer on 94
     local i = 0
     local read_fields_json ""
     foreach vari of varlist * {
@@ -593,6 +670,12 @@ program dtparquet_use
         }
     }
 
+    timer off 94
+    quietly timer list 94
+    local t_readfields_ms = round(`=r(t94)' * 1000, 1)
+
+    timer clear 95
+    timer on 95
     local cast_json ""
     local n_cast_string_vars : word count `cast_string_vars'
     if (`n_cast_string_vars' > 0) {
@@ -612,20 +695,33 @@ program dtparquet_use
     local schema_protocol_version 2
     local mapping `"{""v"":`schema_protocol_version',""f"":[`read_fields_json']}"'
     local parallelize ""
+    if "`parallel_mode'" == "rows" local parallelize "rows"
+    else if "`parallel_mode'" == "columns" local parallelize "columns"
     local vertical_relaxed 0
     local asterisk_to_variable ""
     local sort ""
     local sql_if "`if_exp'"
     local sql_if = trim(subinstr(`"`sql_if'"', "if", "", 1))
-    local batch_size = cond("`chunksize'" == "", 50000, real("`chunksize'"))
+    local batch_size = cond("`chunksize'" == "", 5000000, real("`chunksize'"))
     local order_by_type 0
     local order_descending 0
     local plugin_offset = max(0, `offset' - 1)
+    timer off 95
+    quietly timer list 95
+    local t_castjson_ms = round(`=r(t95)' * 1000, 1)
+    local t_mapping_ms = `t_readfields_ms' + `t_castjson_ms'
 
+    quietly set obs `n_obs_after'
+
+    timer clear 98
+    timer on 98
     capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'"
     if _rc != 0 {
         plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
     }
+    timer off 98
+    quietly timer list 98
+    local t_plugin_ms = round(`=r(t98)' * 1000, 1)
 
     local n_loaded_rows = real("`n_loaded_rows'")
     if missing(`n_loaded_rows') local n_loaded_rows = `row_to_read'
@@ -635,6 +731,8 @@ program dtparquet_use
     }
 
     if "`dtmeta_loaded'" == "1" {
+        timer clear 99
+        timer on 99
         local nvars_meta = real("`dtmeta_var_count'")
         forvalues i = 1/`nvars_meta' {
             local vname `dtmeta_varname_`i''
@@ -649,9 +747,14 @@ program dtparquet_use
                 }
             }
         }
+        timer off 99
+        quietly timer list 99
+        local t_strl_fix_ms = round(`=r(t99)' * 1000, 1)
     }
 
     if `is_nolabel' == 0 {
+        timer clear 88
+        timer on 88
         if "`dtmeta_loaded'" == "1" {
             local apply_labels = (`"`dtmeta_dta_label'"' != "")
 
@@ -742,11 +845,37 @@ program dtparquet_use
                     }
                 }
                 if `"`foreign_cat_vars'"' != "" {
+                    timer clear 87
+                    timer on 87
                     _apply_foreign_cat_labels `foreign_cat_vars', mode(`catmode_norm')
+                    timer off 87
+                    quietly timer list 87
+                    local t_foreign_cat_ms = round(`=r(t87)' * 1000, 1)
                 }
             }
         }
+        timer off 88
+        quietly timer list 88
+        local t_meta_ms = round(`=r(t88)' * 1000, 1)
     }
+
+    return clear
+    return scalar plugin_ms = `t_plugin_ms'
+    return scalar strl_fix_ms = `t_strl_fix_ms'
+    return scalar meta_ms = `t_meta_ms'
+    return scalar cat_ms = `t_foreign_cat_ms'
+    return scalar describe_ms = `t_describe_ms'
+    return scalar loadmeta_ms = `t_loadmeta_ms'
+    return scalar varprep_ms = `t_varprep_ms'
+    return scalar mapping_ms = `t_mapping_ms'
+    return scalar filevars_ms = `t_filevars_ms'
+    return scalar matchwin_ms = `t_match_window_ms'
+    return scalar genrecast_ms = `t_genrecast_ms'
+    return scalar readfields_ms = `t_readfields_ms'
+    return scalar castjson_ms = `t_castjson_ms'
+    return scalar loaded_rows = `n_loaded_rows'
+    return scalar plugin_timers = `emit_rust_timers'
+    return local file `"`file'"'
 
     capture error 0
 end
@@ -808,7 +937,15 @@ program dtparquet_export
         local rest `", `rest'"'
     }
     local 0 `"`rest'"'
-    syntax [, REplace NOLabel CHunksize(integer 50000)]
+    syntax [, REplace NOLabel CHunksize(integer 50000) TIMER(string)]
+    local timer_mode = lower(trim("`timer'"))
+    if "`timer_mode'" == "" {
+        local timer_mode "off"
+    }
+    if !inlist("`timer_mode'", "stata", "plugin", "all", "off") {
+        display as error "timer() must be one of: stata, plugin, all, off"
+        exit 198
+    }
     local is_nolabel = ("`nolabel'" != "")
 
     if `"`pqfile'"' == "" | `"`dtafile'"' == "" | `"`using_kw'"' != "using" {
@@ -840,6 +977,7 @@ program dtparquet_export
     local save_opts
     if "`replace'" != "" local save_opts `save_opts' replace
     if `is_nolabel' local save_opts `save_opts' nolabel
+    local save_opts `save_opts' timer(`timer_mode')
 
     if `"`save_opts'"' == "" {
         dtparquet_save "`target'"
@@ -853,7 +991,7 @@ program dtparquet_export
 end
 
 capture program drop dtparquet_import
-program dtparquet_import
+program dtparquet_import, rclass
     local rest `"`0'"'
     gettoken dtafile rest : rest, bind
     gettoken using_kw rest : rest, bind
@@ -863,7 +1001,16 @@ program dtparquet_import
         local rest `", `rest'"'
     }
     local 0 `"`rest'"'
-    syntax [, REplace NOLabel CHunksize(integer 50000) ALLstring]
+    syntax [, REplace NOLabel CHunksize(integer 50000) ALLstring TIMER(string)]
+    local timer_mode = lower(trim("`timer'"))
+    if "`timer_mode'" == "" {
+        local timer_mode "off"
+    }
+    if !inlist("`timer_mode'", "stata", "plugin", "all", "off") {
+        display as error "timer() must be one of: stata, plugin, all, off"
+        exit 198
+    }
+    local emit_rust_timers = inlist("`timer_mode'", "plugin", "all")
 
     if `"`dtafile'"' == "" | `"`pqfile'"' == "" | `"`using_kw'"' != "using" {
         display as error "Syntax: dtparquet import dta_file using parquet_file"
@@ -893,16 +1040,16 @@ program dtparquet_import
     local import_read_started = clock("$S_TIME", "hms")
 
     if "`nolabel'" == "" & "`allstring'" == "" {
-        dtparquet_use using `"`source'"', clear
+        dtparquet_use using `"`source'"', clear timer(`timer_mode')
     }
     else if "`nolabel'" != "" & "`allstring'" == "" {
-        dtparquet_use using `"`source'"', clear nolabel
+        dtparquet_use using `"`source'"', clear nolabel timer(`timer_mode')
     }
     else if "`nolabel'" == "" & "`allstring'" != "" {
-        dtparquet_use using `"`source'"', clear allstring
+        dtparquet_use using `"`source'"', clear allstring timer(`timer_mode')
     }
     else {
-        dtparquet_use using `"`source'"', clear nolabel allstring
+        dtparquet_use using `"`source'"', clear nolabel allstring timer(`timer_mode')
     }
 
     local import_read_elapsed_ms = clock("$S_TIME", "hms") - `import_read_started'
@@ -919,8 +1066,12 @@ program dtparquet_import
 
     local import_save_elapsed_ms = clock("$S_TIME", "hms") - `import_save_started'
     if (`import_save_elapsed_ms' < 0) local import_save_elapsed_ms = 0
-    global dtparquet_import_read_elapsed_ms `import_read_elapsed_ms'
-    global dtparquet_import_save_elapsed_ms `import_save_elapsed_ms'
+    return clear
+    return scalar import_read_elapsed_ms = `import_read_elapsed_ms'
+    return scalar import_save_elapsed_ms = `import_save_elapsed_ms'
+    return scalar plugin_timers = `emit_rust_timers'
+    return local source `"`source'"'
+    return local target `"`target'"'
 
     frame change `orig_frame'
     frame drop `import_frame'

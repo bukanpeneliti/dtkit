@@ -97,6 +97,7 @@ Options are presented under the following headings:
 Presets: {cmd:fast}, {cmd:balanced} (zstd), {cmd:archive} (brotli). 
 Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cmd:lzo}, {cmd:uncompressed}.{p_end}
 {synopt :{opt part:itionby(varlist)}}write partitioned Parquet output by variables{p_end}
+{synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
 {synoptline}
 
 {marker use_options}{...}
@@ -111,6 +112,7 @@ Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cm
 {synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
 {synopt :{opt cat:mode(mode)}}handling for foreign categorical/enum columns:
 {cmd:encode} (default), {cmd:raw}, or {cmd:both}.{p_end}
+{synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
 {synoptline}
 
 {marker export_options}{...}
@@ -121,6 +123,7 @@ Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cm
 {synoptline}
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress writing custom Stata metadata{p_end}
+{synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
 {synoptline}
 
 {marker import_options}{...}
@@ -132,10 +135,15 @@ Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cm
 {synopt :{opt re:place}}overwrite existing file{p_end}
 {synopt :{opt nol:abel}}suppress reading custom Stata metadata{p_end}
 {synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
+{synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
 {synoptline}
 
 {pstd}
-Global option: {cmd:notimer} suppresses the elapsed-time message.
+Use {opt timer(mode)} to control timer output in one place:
+{break}{cmd:stata}: show Stata elapsed summary, disable Rust telemetry macros
+{break}{cmd:plugin}: enable plugin telemetry macros, suppress Stata elapsed summary
+{break}{cmd:all}: enable both
+{break}{cmd:off}: disable both (default)
 
 
 {marker remarks}{...}

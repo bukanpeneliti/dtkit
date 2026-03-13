@@ -33,6 +33,7 @@ pub const ENV_BATCH_TARGET_MS: &str = "DTPARQUET_BATCH_TARGET_MS";
 pub const ENV_WRITE_PIPELINE_MODE: &str = "DTPARQUET_WRITE_PIPELINE_MODE";
 pub const ENV_LAZY_EXECUTION_MODE: &str = "DTPARQUET_LAZY_EXECUTION_MODE";
 pub const ENV_CAST_POSITION_MODE: &str = "DTPARQUET_CAST_POSITION";
+pub const ENV_READ_SINK_MAX_WORKERS: &str = "DTPARQUET_READ_SINK_MAX_WORKERS";
 
 pub const DEFAULT_MEMORY_BUDGET_MB: usize = 512;
 pub const ROW_ESTIMATE_BYTES: usize = 64;
@@ -216,11 +217,11 @@ pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     }
 }
 
-pub fn pull_string_cell_as_str_unchecked<'a>(
+pub fn pull_string_cell_as_str_unchecked(
     col: usize,
     row: usize,
-    buffer: &'a mut Vec<i8>,
-) -> Option<&'a str> {
+    buffer: &mut Vec<i8>,
+) -> Option<&str> {
     use std::ffi::{c_char, CStr};
     unsafe {
         if buffer.is_empty() {
@@ -424,7 +425,7 @@ pub fn get_compute_thread_pool() -> &'static ThreadPool {
         COMPUTE_POOL_INIT_COUNT.fetch_add(1, Ordering::Relaxed);
         let n = get_env_u(ENV_DTPARQUET_THREADS)
             .or_else(|| get_env_u(ENV_POLARS_MAX_THREADS))
-            .unwrap_or_else(get_hw_threads);
+            .unwrap_or_else(|| get_hw_threads().saturating_mul(6).clamp(8, 64));
         if let Ok(pool) = ThreadPoolBuilder::new()
             .num_threads(n.max(1))
             .thread_name(|i| format!("dtparquet-cpu-{i}"))
@@ -481,6 +482,16 @@ pub fn determine_parallelization_strategy(n_cols: usize, n_rows: usize, cores: u
         BatchMode::ByColumn
     } else {
         BatchMode::ByRow
+    }
+}
+
+pub fn read_sink_worker_target(available_workers: usize, n_cols: usize, n_rows: usize) -> usize {
+    let requested_cap = get_env_u(ENV_READ_SINK_MAX_WORKERS).unwrap_or(0);
+    if requested_cap > 0 {
+        available_workers.min(requested_cap).max(1)
+    } else {
+        let _ = (n_cols, n_rows);
+        available_workers.max(1)
     }
 }
 
@@ -994,25 +1005,84 @@ struct DescribeSchemaPayload {
 
 pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
     set_macro("cast_json", "", false);
-    let r = match File::open(path).map(ParquetReader::new) {
+    let source = if cfg!(windows) {
+        path.replace('\\', "/")
+    } else {
+        path.to_string()
+    };
+    let mut r = match File::open(path).map(ParquetReader::new) {
         Ok(v) => v,
         Err(e) => {
             display(&format!("Error: {e}"));
             return 198;
         }
     };
-    let df = match r.finish() {
+
+    let mut lf = match LazyFrame::scan_parquet(
+        PlRefPath::new(&source),
+        ScanArgsParquet {
+            allow_missing_columns: true,
+            cache: false,
+            ..Default::default()
+        },
+    ) {
         Ok(v) => v,
         Err(e) => {
             display(&format!("Error: {e:?}"));
             return 198;
         }
     };
+
+    let schema = match lf.collect_schema() {
+        Ok(v) => v,
+        Err(e) => {
+            display(&format!("Error: {e:?}"));
+            return 198;
+        }
+    };
+
+    let n_rows = match r.get_metadata() {
+        Ok(meta) => meta.num_rows,
+        Err(e) => {
+            display(&format!("Error: {e:?}"));
+            return 198;
+        }
+    };
+
     let mut lens = HashMap::new();
     if det {
-        for (n, dt) in df.schema().iter() {
-            if dt.is_string() {
-                if let Ok(col) = df.column(n) {
+        let string_cols: Vec<PlSmallStr> = schema
+            .iter()
+            .filter_map(|(n, dt)| dt.is_string().then_some(n.clone()))
+            .collect();
+        if !string_cols.is_empty() {
+            let lf = match LazyFrame::scan_parquet(
+                PlRefPath::new(&source),
+                ScanArgsParquet {
+                    allow_missing_columns: true,
+                    cache: false,
+                    ..Default::default()
+                },
+            ) {
+                Ok(v) => v,
+                Err(e) => {
+                    display(&format!("Error: {e:?}"));
+                    return 198;
+                }
+            };
+            let mut s_exprs = Vec::with_capacity(string_cols.len());
+            for n in &string_cols {
+                s_exprs.push(col(n.clone()));
+            }
+            let string_df = match lf.select(s_exprs).collect() {
+                Ok(v) => v,
+                Err(e) => {
+                    display(&format!("Error: {e:?}"));
+                    return 198;
+                }
+            };
+            for n in &string_cols {
+                if let Ok(col) = string_df.column(n.as_str()) {
                     if let Ok(ca) = col.str() {
                         lens.insert(
                             n.to_string(),
@@ -1026,10 +1096,10 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
             }
         }
     }
-    match set_schema_macros(df.schema(), &lens, det, q) {
+    match set_schema_macros(schema.as_ref(), &lens, det, q) {
         Ok(c) => {
             set_macro("n_columns", &c.to_string(), false);
-            set_macro("n_rows", &df.height().to_string(), false);
+            set_macro("n_rows", &n_rows.to_string(), false);
             0
         }
         Err(e) => {

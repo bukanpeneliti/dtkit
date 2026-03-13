@@ -95,11 +95,13 @@ pub fn sink_dataframe_in_batches(
     stata_offset: usize,
     batch_tuner: &mut AdaptiveBatchTuner,
     processed_batches: &mut usize,
-) -> PolarsResult<(usize, usize)> {
+) -> PolarsResult<(usize, usize, u128, u128)> {
     let total_rows = df.height();
     let mut loaded_rows = 0usize;
     let mut n_batches = 0usize;
     let mut batch_offset = 0usize;
+    let mut sink_prepare_elapsed_us = 0u128;
+    let mut sink_write_elapsed_us = 0u128;
 
     while batch_offset < total_rows {
         let batch_length = (total_rows - batch_offset).min(batch_tuner.selected_batch_size());
@@ -109,13 +111,15 @@ pub fn sink_dataframe_in_batches(
         }
 
         let batch_started_at = Instant::now();
-        process_batch_with_strategy(
+        let (batch_prepare_us, batch_write_us) = process_batch_with_strategy(
             &batch_df,
             start_index_base + batch_offset,
             transfer_columns,
             strategy,
             stata_offset,
         )?;
+        sink_prepare_elapsed_us += batch_prepare_us;
+        sink_write_elapsed_us += batch_write_us;
 
         let batch_rows = batch_df.height();
         loaded_rows += batch_rows;
@@ -125,7 +129,12 @@ pub fn sink_dataframe_in_batches(
         batch_tuner.observe_batch(batch_rows, batch_started_at.elapsed().as_millis());
     }
 
-    Ok((loaded_rows, n_batches))
+    Ok((
+        loaded_rows,
+        n_batches,
+        sink_prepare_elapsed_us,
+        sink_write_elapsed_us,
+    ))
 }
 
 fn process_batch_with_strategy(
@@ -134,25 +143,33 @@ fn process_batch_with_strategy(
     transfer_columns: &[TransferColumnSpec],
     strategy: BatchMode,
     stata_offset: usize,
-) -> PolarsResult<()> {
+) -> PolarsResult<(u128, u128)> {
     let row_count = batch.height();
+    let prepare_started = Instant::now();
     let prepared_columns = prepare_transfer_columns(batch, transfer_columns)?;
+    let prepare_elapsed_us = prepare_started.elapsed().as_micros();
+    let write_started = Instant::now();
     let pool = get_compute_thread_pool();
     if pool.current_num_threads() <= 1 || row_count < 4_096 {
-        return process_row_range(
+        process_row_range(
             &prepared_columns,
             start_index,
             0,
             row_count,
             transfer_columns,
             stata_offset,
-        );
+        )?;
+        return Ok((prepare_elapsed_us, write_started.elapsed().as_micros()));
     }
 
     pool.install(|| match strategy {
         BatchMode::ByRow => {
-            let n_workers = rayon::current_num_threads().max(1);
-            let chunk_size = std::cmp::max(8_192, row_count.div_ceil(n_workers * 2));
+            let n_workers = read_sink_worker_target(
+                rayon::current_num_threads().max(1),
+                transfer_columns.len(),
+                row_count,
+            );
+            let chunk_size = std::cmp::max(8_192, row_count.div_ceil(n_workers));
             let n_chunks = row_count.div_ceil(chunk_size);
             (0..n_chunks).into_par_iter().try_for_each(|chunk_idx| {
                 let start_row = chunk_idx * chunk_size;
@@ -183,7 +200,9 @@ fn process_batch_with_strategy(
                     stata_offset,
                 )
             }),
-    })
+    })?;
+
+    Ok((prepare_elapsed_us, write_started.elapsed().as_micros()))
 }
 
 fn prepare_transfer_columns(
@@ -241,29 +260,6 @@ fn to_range_error(context: &str) -> PolarsError {
     PolarsError::ComputeError(format!("Invalid Stata bounds in {context}").into())
 }
 
-fn validate_write_transfer_range(
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-) -> PolarsResult<()> {
-    if start_row >= end_row {
-        return Ok(());
-    }
-    let row_start = start_index + start_row + 1 + stata_offset;
-    let row_end_exclusive = start_index + end_row + 1 + stata_offset;
-    let col = transfer_column.stata_col_index + 1;
-    validate_stata_range(
-        row_start,
-        row_end_exclusive,
-        col,
-        col + 1,
-        "write_transfer_column_range",
-    )
-    .map_err(|_| to_range_error("write_transfer_column_range"))
-}
-
 fn validate_read_transfer_range(
     col: usize,
     offset: usize,
@@ -282,18 +278,133 @@ fn validate_read_transfer_range(
 pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
     match ctx.col.dtype() {
         DataType::Boolean => {
-            write_numeric_iter(ctx, ctx.col.bool()?.iter(), |v| if v { 1.0 } else { 0.0 })
+            let ca = ctx.col.bool()?;
+            if ca.null_count() == 0 {
+                write_bool_iter_no_null(ctx, ca.into_no_null_iter())
+            } else {
+                write_bool_iter(ctx, ca.iter())
+            }
         }
-        DataType::Int8 => write_numeric_iter(ctx, ctx.col.i8()?.iter(), |v| v as f64),
-        DataType::Int16 => write_numeric_iter(ctx, ctx.col.i16()?.iter(), |v| v as f64),
-        DataType::Int32 => write_numeric_iter(ctx, ctx.col.i32()?.iter(), |v| v as f64),
-        DataType::Int64 => write_numeric_iter(ctx, ctx.col.i64()?.iter(), |v| v as f64),
-        DataType::UInt8 => write_numeric_iter(ctx, ctx.col.u8()?.iter(), |v| v as f64),
-        DataType::UInt16 => write_numeric_iter(ctx, ctx.col.u16()?.iter(), |v| v as f64),
-        DataType::UInt32 => write_numeric_iter(ctx, ctx.col.u32()?.iter(), |v| v as f64),
-        DataType::UInt64 => write_numeric_iter(ctx, ctx.col.u64()?.iter(), |v| v as f64),
-        DataType::Float32 => write_numeric_iter(ctx, ctx.col.f32()?.iter(), |v| v as f64),
-        DataType::Float64 => write_numeric_iter(ctx, ctx.col.f64()?.iter(), |v| v),
+        DataType::Int8 => {
+            let ca = ctx.col.i8()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_i8_slice_no_null(ctx, values)
+                } else {
+                    write_i8_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_i8_iter(ctx, ca.iter())
+            }
+        }
+        DataType::Int16 => {
+            let ca = ctx.col.i16()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_i16_slice_no_null(ctx, values)
+                } else {
+                    write_i16_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_i16_iter(ctx, ca.iter())
+            }
+        }
+        DataType::Int32 => {
+            let ca = ctx.col.i32()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_i32_slice_no_null(ctx, values)
+                } else {
+                    write_i32_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_i32_iter(ctx, ca.iter())
+            }
+        }
+        DataType::Int64 => {
+            let ca = ctx.col.i64()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_i64_slice_no_null(ctx, values)
+                } else {
+                    write_i64_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_i64_iter(ctx, ca.iter())
+            }
+        }
+        DataType::UInt8 => {
+            let ca = ctx.col.u8()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_u8_slice_no_null(ctx, values)
+                } else {
+                    write_u8_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_u8_iter(ctx, ca.iter())
+            }
+        }
+        DataType::UInt16 => {
+            let ca = ctx.col.u16()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_u16_slice_no_null(ctx, values)
+                } else {
+                    write_u16_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_u16_iter(ctx, ca.iter())
+            }
+        }
+        DataType::UInt32 => {
+            let ca = ctx.col.u32()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_u32_slice_no_null(ctx, values)
+                } else {
+                    write_u32_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_u32_iter(ctx, ca.iter())
+            }
+        }
+        DataType::UInt64 => {
+            let ca = ctx.col.u64()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_u64_slice_no_null(ctx, values)
+                } else {
+                    write_u64_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_u64_iter(ctx, ca.iter())
+            }
+        }
+        DataType::Float32 => {
+            let ca = ctx.col.f32()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_f32_slice_no_null(ctx, values)
+                } else {
+                    write_f32_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_f32_iter(ctx, ca.iter())
+            }
+        }
+        DataType::Float64 => {
+            let ca = ctx.col.f64()?;
+            if ca.null_count() == 0 {
+                if let Ok(values) = ca.cont_slice() {
+                    write_f64_slice_no_null(ctx, values)
+                } else {
+                    write_f64_iter_no_null(ctx, ca.into_no_null_iter())
+                }
+            } else {
+                write_f64_iter(ctx, ca.iter())
+            }
+        }
         DataType::Date => write_date_values(ctx),
         DataType::Time => write_time_values(ctx),
         DataType::Datetime(_, _) => write_datetime_values(ctx),
@@ -333,15 +444,22 @@ pub fn write_string_column_range(ctx: &TransferContext) -> PolarsResult<()> {
 
 fn write_date_values(ctx: &TransferContext) -> PolarsResult<()> {
     let ca = ctx.col.date()?;
-    write_numeric_iter(ctx, ca.physical().iter(), |v| {
-        (v + STATA_DATE_ORIGIN) as f64
-    })
+    let physical = ca.physical();
+    if ca.null_count() == 0 {
+        write_date_iter_no_null(ctx, physical.into_no_null_iter())
+    } else {
+        write_date_iter(ctx, physical.iter())
+    }
 }
 
 fn write_time_values(ctx: &TransferContext) -> PolarsResult<()> {
     let physical = ctx.col.to_physical_repr();
     let ca = physical.i64()?;
-    write_numeric_iter(ctx, ca.iter(), |v| (v / TIME_US) as f64)
+    if ca.null_count() == 0 {
+        write_time_iter_no_null(ctx, ca.into_no_null_iter())
+    } else {
+        write_time_iter(ctx, ca.iter())
+    }
 }
 
 fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
@@ -353,56 +471,378 @@ fn write_datetime_values(ctx: &TransferContext) -> PolarsResult<()> {
         TimeUnit::Milliseconds => 1.0,
     };
     let sec_shift_scaled = (STATA_EPOCH_MS as f64) * (TIME_MS as f64);
-    write_numeric_iter(ctx, ca.physical().iter(), |v| {
-        v as f64 / factor + sec_shift_scaled
-    })
+    let physical = ca.physical();
+    if ca.null_count() == 0 {
+        write_datetime_iter_no_null(ctx, physical.into_no_null_iter(), factor, sec_shift_scaled)
+    } else {
+        write_datetime_iter(ctx, physical.iter(), factor, sec_shift_scaled)
+    }
 }
 
-fn write_numeric_iter<T, I, F>(ctx: &TransferContext, iter: I, mapper: F) -> PolarsResult<()>
+#[inline(always)]
+fn write_bool_iter<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
 where
-    I: Iterator<Item = Option<T>>,
-    F: Fn(T) -> f64 + Copy,
+    I: Iterator<Item = Option<bool>>,
 {
-    let mut write_calls = 0u64;
-    for (local_idx, value) in iter.enumerate() {
-        let global_row_idx = local_idx + ctx.start_index;
-        stata_sys::replace_number(
-            value.map(mapper),
-            global_row_idx + 1 + ctx.stata_offset,
-            ctx.transfer_column.stata_col_index + 1,
-        );
-        write_calls += 1;
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        if let Some(v) = value {
+            unsafe { vstore(col, row, if v { 1.0 } else { 0.0 }) };
+        }
+        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
 }
 
-fn write_all_missing_range(
-    transfer_column: &TransferColumnSpec,
-    start_index: usize,
-    start_row: usize,
-    end_row: usize,
-    stata_offset: usize,
-    replacer: impl Fn(usize, usize),
-) {
-    for row_idx in start_row..end_row {
-        let global_row_idx = row_idx + start_index;
-        replacer(
-            global_row_idx + 1 + stata_offset,
-            transfer_column.stata_col_index + 1,
-        );
+#[inline(always)]
+fn write_bool_iter_no_null<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+where
+    I: Iterator<Item = bool>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        unsafe { vstore(col, row, if value { 1.0 } else { 0.0 }) };
+        row += 1;
     }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
 }
 
+#[inline(always)]
+fn write_date_iter<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+where
+    I: Iterator<Item = Option<i32>>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        if let Some(v) = value {
+            unsafe { vstore(col, row, (v + STATA_DATE_ORIGIN) as f64) };
+        }
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+#[inline(always)]
+fn write_date_iter_no_null<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+where
+    I: Iterator<Item = i32>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        unsafe { vstore(col, row, (value + STATA_DATE_ORIGIN) as f64) };
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+#[inline(always)]
+fn write_time_iter<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+where
+    I: Iterator<Item = Option<i64>>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        if let Some(v) = value {
+            unsafe { vstore(col, row, (v / TIME_US) as f64) };
+        }
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+#[inline(always)]
+fn write_time_iter_no_null<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+where
+    I: Iterator<Item = i64>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        unsafe { vstore(col, row, (value / TIME_US) as f64) };
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+#[inline(always)]
+fn write_datetime_iter<I>(
+    ctx: &TransferContext,
+    iter: I,
+    factor: f64,
+    sec_shift_scaled: f64,
+) -> PolarsResult<()>
+where
+    I: Iterator<Item = Option<i64>>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        if let Some(v) = value {
+            unsafe { vstore(col, row, v as f64 / factor + sec_shift_scaled) };
+        }
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+#[inline(always)]
+fn write_datetime_iter_no_null<I>(
+    ctx: &TransferContext,
+    iter: I,
+    factor: f64,
+    sec_shift_scaled: f64,
+) -> PolarsResult<()>
+where
+    I: Iterator<Item = i64>,
+{
+    let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let vstore = stata_sys::vstore_unchecked_fn();
+    for value in iter {
+        unsafe { vstore(col, row, value as f64 / factor + sec_shift_scaled) };
+        row += 1;
+    }
+    add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+    Ok(())
+}
+
+macro_rules! define_typed_numeric_writers_cast {
+    ($iter_fn:ident, $iter_no_null_fn:ident, $slice_no_null_fn:ident, $ty:ty) => {
+        #[inline(always)]
+        fn $iter_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = Option<$ty>>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                if let Some(v) = value {
+                    unsafe { vstore(col, row, v as f64) };
+                }
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $iter_no_null_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = $ty>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                unsafe { vstore(col, row, value as f64) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $slice_no_null_fn(ctx: &TransferContext, values: &[$ty]) -> PolarsResult<()> {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for &value in values {
+                unsafe { vstore(col, row, value as f64) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+    };
+}
+
+macro_rules! define_typed_numeric_writers_identity {
+    ($iter_fn:ident, $iter_no_null_fn:ident, $slice_no_null_fn:ident, $ty:ty) => {
+        #[inline(always)]
+        fn $iter_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = Option<$ty>>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                if let Some(v) = value {
+                    unsafe { vstore(col, row, v) };
+                }
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $iter_no_null_fn<I>(ctx: &TransferContext, iter: I) -> PolarsResult<()>
+        where
+            I: Iterator<Item = $ty>,
+        {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for value in iter {
+                unsafe { vstore(col, row, value) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+
+        #[inline(always)]
+        fn $slice_no_null_fn(ctx: &TransferContext, values: &[$ty]) -> PolarsResult<()> {
+            let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
+            let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+            let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+            let vstore = stata_sys::vstore_unchecked_fn();
+            for &value in values {
+                unsafe { vstore(col, row, value) };
+                row += 1;
+            }
+            add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
+            Ok(())
+        }
+    };
+}
+
+define_typed_numeric_writers_cast!(
+    write_i8_iter,
+    write_i8_iter_no_null,
+    write_i8_slice_no_null,
+    i8
+);
+define_typed_numeric_writers_cast!(
+    write_i16_iter,
+    write_i16_iter_no_null,
+    write_i16_slice_no_null,
+    i16
+);
+define_typed_numeric_writers_cast!(
+    write_i32_iter,
+    write_i32_iter_no_null,
+    write_i32_slice_no_null,
+    i32
+);
+define_typed_numeric_writers_cast!(
+    write_i64_iter,
+    write_i64_iter_no_null,
+    write_i64_slice_no_null,
+    i64
+);
+define_typed_numeric_writers_cast!(
+    write_u8_iter,
+    write_u8_iter_no_null,
+    write_u8_slice_no_null,
+    u8
+);
+define_typed_numeric_writers_cast!(
+    write_u16_iter,
+    write_u16_iter_no_null,
+    write_u16_slice_no_null,
+    u16
+);
+define_typed_numeric_writers_cast!(
+    write_u32_iter,
+    write_u32_iter_no_null,
+    write_u32_slice_no_null,
+    u32
+);
+define_typed_numeric_writers_cast!(
+    write_u64_iter,
+    write_u64_iter_no_null,
+    write_u64_slice_no_null,
+    u64
+);
+define_typed_numeric_writers_cast!(
+    write_f32_iter,
+    write_f32_iter_no_null,
+    write_f32_slice_no_null,
+    f32
+);
+define_typed_numeric_writers_identity!(
+    write_f64_iter,
+    write_f64_iter_no_null,
+    write_f64_slice_no_null,
+    f64
+);
+
+#[inline(always)]
 fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut write_calls = 0u64;
     let str_col = ctx.col.str()?;
-    for (local_idx, value) in str_col.iter().enumerate() {
-        let global_row_idx = local_idx + ctx.start_index;
-        let row = global_row_idx + 1 + ctx.stata_offset;
-        let col = ctx.transfer_column.stata_col_index + 1;
-        stata_sys::replace_string_ref(value, row, col);
-        write_calls += 1;
+    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
+    let col = (ctx.transfer_column.stata_col_index + 1) as i32;
+    let sstore = stata_sys::sstore_unchecked_fn();
+    let mut buffer: Vec<u8> = Vec::new();
+
+    if str_col.null_count() == 0 {
+        for s in str_col.into_no_null_iter() {
+            if !s.is_empty() {
+                buffer.clear();
+                buffer.extend_from_slice(s.as_bytes());
+                buffer.push(0);
+                unsafe {
+                    sstore(col, row, buffer.as_mut_ptr() as *mut std::os::raw::c_char);
+                }
+                write_calls += 1;
+            }
+            row += 1;
+        }
+    } else {
+        for value in str_col.iter() {
+            let Some(s) = value else {
+                row += 1;
+                continue;
+            };
+            if s.is_empty() {
+                row += 1;
+                continue;
+            }
+            buffer.clear();
+            buffer.extend_from_slice(s.as_bytes());
+            buffer.push(0);
+            unsafe {
+                sstore(col, row, buffer.as_mut_ptr() as *mut std::os::raw::c_char);
+            }
+            write_calls += 1;
+            row += 1;
+        }
     }
     add_transfer_metric_counts(0, write_calls, 0, 0, 0);
     Ok(())
@@ -432,20 +872,6 @@ fn write_strict_typed_numeric_column_range(
 
 fn write_missing_range(ctx: &TransferContext, as_string: bool) -> PolarsResult<()> {
     let n_calls = (ctx.end_row - ctx.start_row) as u64;
-    write_all_missing_range(
-        ctx.transfer_column,
-        ctx.start_index,
-        ctx.start_row,
-        ctx.end_row,
-        ctx.stata_offset,
-        |row, col| {
-            if as_string {
-                stata_sys::replace_string(None, row, col);
-            } else {
-                stata_sys::replace_number(None, row, col);
-            }
-        },
-    );
     if as_string {
         add_transfer_metric_counts(0, n_calls, 0, 0, 0);
     } else {
@@ -462,13 +888,6 @@ pub(crate) fn write_transfer_column_range(
     end_row: usize,
     stata_offset: usize,
 ) -> PolarsResult<()> {
-    validate_write_transfer_range(
-        transfer_column,
-        start_index,
-        start_row,
-        end_row,
-        stata_offset,
-    )?;
     let ctx = TransferContext {
         col,
         transfer_column,
