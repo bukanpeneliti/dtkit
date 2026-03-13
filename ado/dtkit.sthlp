@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 2.0.1  11mar2026}{...}
+{* *! version 2.0.2  13mar2026}{...}
 {vieweralsosee "dtfreq" "help dtfreq"}{...}
 {vieweralsosee "dtstat" "help dtstat"}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
@@ -146,7 +146,7 @@ Available options are:
 {phang2}{cmd:. dtkit, upgrade}{p_end}
 
 {pstd}Upgrade and force a specific release-tagged plugin binary{p_end}
-{phang2}{cmd:. dtkit, update tag(v2.0.0)}{p_end}
+{phang2}{cmd:. dtkit, update tag(v2.0.2)}{p_end}
 
 {pstd}Check dtparquet plugin install/version status{p_end}
 {phang2}{cmd:. dtkit, pluginstatus}{p_end}
