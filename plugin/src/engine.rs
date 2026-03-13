@@ -56,6 +56,10 @@ fn set_runtime_macro(name: &str, value: &str) {
     }
 }
 
+fn set_state_macro(name: &str, value: &str) {
+    set_macro(name, value, true);
+}
+
 #[derive(Debug)]
 pub struct ReadScanPlan {
     pub selected_column_list: Vec<String>,
@@ -658,7 +662,7 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         }
         let (lf_f, has_f) = apply_if_filter(lf, req.sql_if)?;
         if has_f {
-            set_runtime_macro("if_filter_mode", "expr");
+            set_state_macro("if_filter_mode", "expr");
         }
         let lf_s = apply_random_sample(lf_f, req.random_share, req.random_seed, &mut collects)?;
         let mut lf_sorted = apply_sort_transform(lf_s, req.order_by);
@@ -1112,7 +1116,7 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
         .transpose()?
     {
         lf = lf.filter(e);
-        set_runtime_macro("if_filter_mode", "expr");
+        set_state_macro("if_filter_mode", "expr");
     }
 
     if plan.partition_cols.is_empty() {
@@ -1466,6 +1470,7 @@ fn parquet_compression(c: &str, l: Option<usize>) -> Result<ParquetCompression, 
 // --- Internal Helpers ---
 
 fn emit_init_macros(prefix: &str) {
+    set_state_macro("if_filter_mode", "none");
     if !rust_timer_macros_enabled() {
         return;
     }
@@ -1479,7 +1484,6 @@ fn emit_init_macros(prefix: &str) {
     }
     set_runtime_macro(&format!("{prefix}_batch_tuner_mode"), "fixed");
     set_runtime_macro(&format!("{prefix}_schema_handoff"), "legacy_macros");
-    set_runtime_macro("if_filter_mode", "none");
     if prefix == "read" {
         set_runtime_macro("read_lazy_mode", "none");
         set_runtime_macro("read_streaming_enabled", "0");
