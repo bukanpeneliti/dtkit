@@ -5,6 +5,23 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.2] - 2026-03-13
+
+- **Patch release** for dtparquet `use` performance and benchmark reliability.
+- Component versions:
+  - **dtkit: v2.0.2 (Updated)**
+  - **dtparquet: v2.0.2 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.2**:
+  - Reduced numeric sink overhead in typed `use` paths with contiguous no-null
+    fast paths.
+  - Preserved `if_filter_mode` state macro under `timer(off)` to keep test
+    behavior consistent.
+  - Consolidated benchmark and test coverage updates used for release
+    validation.
+
 ## Package Release [v2.0.1] - 2026-03-11
 
 - **Critical performance optimization** for the Rust plugin.
