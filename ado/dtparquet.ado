@@ -25,6 +25,7 @@ program dtparquet
 
     gettoken sub rest : rest_cmd
     local len = length("`sub'")
+    local sub_lc = lower(trim("`sub'"))
     local new_rest ""
 
     local new_rest = trim(`"`rest'"')
@@ -49,14 +50,14 @@ program dtparquet
     local dtparquet__file ""
     local dtparquet__sub ""
 
-    if "`sub'" == substr("save", 1, max(2, `len')) {
+    if substr("save", 1, max(2, length("`sub_lc'"))) == "`sub_lc'" {
         local dtparquet__sub "save"
         gettoken fname : new_rest, parse(" ,")
         local dtparquet__file "`fname'"
         dtparquet_save `new_rest'
         local rc = _rc
     }
-    else if "`sub'" == substr("use", 1, max(1, `len')) {
+    else if substr("use", 1, max(1, length("`sub_lc'"))) == "`sub_lc'" {
         local dtparquet__sub "use"
         local scan_rest `"`new_rest'"'
         gettoken tok scan_rest : scan_rest, bind
@@ -77,14 +78,14 @@ program dtparquet
         dtparquet_use `new_rest'
         local rc = _rc
     }
-    else if "`sub'" == substr("export", 1, max(3, `len')) {
+    else if substr("export", 1, max(3, length("`sub_lc'"))) == "`sub_lc'" {
         local dtparquet__sub "export"
         gettoken fname : new_rest, parse(" ")
         local dtparquet__file "`fname'"
         dtparquet_export `new_rest'
         local rc = _rc
     }
-    else if "`sub'" == substr("import", 1, max(3, `len')) {
+    else if substr("import", 1, max(3, length("`sub_lc'"))) == "`sub_lc'" {
         local dtparquet__sub "import"
         local scan_rest `"`new_rest'"'
         gettoken tok scan_rest : scan_rest, bind
@@ -101,11 +102,17 @@ program dtparquet
         dtparquet_import `new_rest'
         local rc = _rc
     }
+    else if substr("describe", 1, max(3, length("`sub_lc'"))) == "`sub_lc'" {
+        local dtparquet__sub "describe"
+        dtparquet_describe `new_rest'
+        local rc = _rc
+    }
     else {
         display as error "Unknown subcommand '`sub''"
         
         // Inference logic
-        local has_using = strpos(`"`rest''"', " using ") > 0 | substr(trim(`"`rest''"'), 1, 5) == "using"
+        local rest_lc = lower(trim(`"`new_rest'"'))
+        local has_using = strpos(" `rest_lc' ", " using ") > 0 | substr("`rest_lc'", 1, 5) == "using"
         
         if `has_using' {
             display as error "Did you mean 'use', 'export', or 'import'?"
@@ -525,10 +532,10 @@ program dtparquet_use, rclass
     quietly timer list 96
     local t_loadmeta_ms = round(`=r(t96)' * 1000, 1)
 
-    local describe_detailed = cond("`dtmeta_loaded'" == "1", "0", "1")
+    local describe_detailed = cond("`dtmeta_loaded'" == "1", "1", "0")
     timer clear 97
     timer on 97
-    plugin call dtparquet_plugin, "describe" "`file'" "`describe_detailed'" "1" "" "" "0" "0"
+    plugin call dtparquet_plugin, "schema" "`file'" "`describe_detailed'" "0"
     timer off 97
     quietly timer list 97
     local t_describe_ms = round(`=r(t97)' * 1000, 1)
@@ -984,6 +991,146 @@ program dtparquet_export
     frame drop `export_frame'
 end
 
+capture program drop dtparquet_describe
+program dtparquet_describe, rclass
+    version 16
+
+    syntax using/ [, quietly short simple fullnames numbers detailed replace]
+    local quietly_flag = cond("`quietly'" != "", "1", "0")
+    local simple_flag = cond("`simple'" != "", "1", "0")
+    local short_flag = cond("`short'" != "", "1", "0")
+    local fullnames_flag = cond("`fullnames'" != "", "1", "0")
+    local detailed_flag = cond("`detailed'" != "", "1", "0")
+    local numbers_flag = cond("`numbers'" != "", "1", "0")
+    local is_replace = ("`replace'" != "")
+
+    confirm file `"`using'"'
+
+    plugin call dtparquet_plugin, "schema" `"`using'"' "`detailed_flag'" "0"
+
+    local n_rows = real("`n_rows'")
+    local n_columns = real("`n_columns'")
+
+    if "`quietly'" == "" {
+        display _newline as text "Parquet file: " as result `"`using'"'
+        display as text "Observations: " as result %12.0gc `n_rows'
+        display as text "Variables:    " as result %12.0gc `n_columns'
+
+        if "`short'" == "" {
+            display ""
+
+            if "`simple'" != "" {
+                forvalues i = 1/`n_columns' {
+                    local vname `"`name_`i''"'
+                    if "`numbers'" != "" {
+                        display as text %4.0f `i' ". " as result `"`vname'"'
+                    }
+                    else {
+                        display as result `"`vname'"'
+                    }
+                }
+            }
+            else {
+                local header "Variable Name | Stata Type | Polars Type"
+                local divider "------------- | ---------- | -----------"
+                if "`numbers'" != "" {
+                    local header "No. | `header'"
+                    local divider "--- | `divider'"
+                }
+                display as text "`header'"
+                display as text "`divider'"
+
+                forvalues i = 1/`n_columns' {
+                    local vname `"`name_`i''"'
+                    local vtype `"`type_`i''"'
+                    local ptype `"`polars_type_`i''"'
+                    local slen = real("`string_length_`i''")
+
+                    if "`fullnames'" == "" {
+                        local vname = abbrev(`"`vname'"', 32)
+                    }
+                    if "`detailed'" != "" & inlist(lower("`vtype'"), "string", "strl") {
+                        local vtype `"`vtype'(`slen')"'
+                    }
+
+                    if "`numbers'" != "" {
+                        display as text %3.0f `i' " | " as result `"`vname'"' as text " | " as result `"`vtype'"' as text " | " as result `"`ptype'"'
+                    }
+                    else {
+                        display as result `"`vname'"' as text " | " as result `"`vtype'"' as text " | " as result `"`ptype'"'
+                    }
+                }
+            }
+        }
+    }
+
+    if `is_replace' {
+        quietly clear
+        
+        quietly generate str32 varname = ""
+        quietly generate str8 vartype = ""
+        quietly generate str8 format = ""
+        quietly generate str32 vallab = ""
+        quietly generate strL varlab = ""
+        
+        quietly set obs `n_columns'
+        
+        forvalues i = 1/`n_columns' {
+            local varname `"`name_`i''"'
+            local vartype `"`type_`i''"'
+            local string_len = real("`string_length_`i''")
+            
+            local fmt "%s"
+            if inlist("`vartype'", "byte", "int", "long") {
+                local fmt "%8.0g"
+            }
+            else if inlist("`vartype'", "float", "double") {
+                local fmt "%9.0g"
+            }
+            else if "`vartype'" == "date" {
+                local fmt "%tdd_m_YY"
+            }
+            else if "`vartype'" == "datetime" {
+                local fmt "%tc"
+            }
+            else if "`vartype'" == "time" {
+                local fmt "%tchh:mm:ss"
+            }
+            else if inlist("`vartype'", "string", "strl") {
+                if `string_len' > 80 {
+                    local fmt "%s"
+                }
+                else if `string_len' > 12 {
+                    local fmt "%-12s"
+                }
+                else {
+                    local fmt "%-9s"
+                }
+            }
+            
+            quietly replace varname = `"`varname'"' in `i'
+            quietly replace vartype = `"`vartype'"' in `i'
+            quietly replace format = `"`fmt'"' in `i'
+        }
+        
+        quietly compress
+        label variable varname "Variable name"
+        label variable vartype "Storage type"
+        label variable format "Display format"
+        label variable vallab "Value label name"
+        label variable varlab "Variable label"
+    }
+
+    return scalar N = `n_rows'
+    return scalar k = `n_columns'
+    
+    local varlist ""
+    forvalues i = 1/`n_columns' {
+        local varlist `"`varlist' `name_`i''"'
+    }
+    return local varlist = trim(`"`varlist'"')
+end
+
 capture program drop dtparquet_import
 program dtparquet_import, rclass
     local rest `"`0'"'
@@ -1034,16 +1181,16 @@ program dtparquet_import, rclass
     local import_read_started = clock("$S_TIME", "hms")
 
     if "`nolabel'" == "" & "`allstring'" == "" {
-        dtparquet_use using `"`source'"', clear timer(`timer_mode')
+        dtparquet_use using `"`source'"', clear chunksize(`chunksize') timer(`timer_mode')
     }
     else if "`nolabel'" != "" & "`allstring'" == "" {
-        dtparquet_use using `"`source'"', clear nolabel timer(`timer_mode')
+        dtparquet_use using `"`source'"', clear nolabel chunksize(`chunksize') timer(`timer_mode')
     }
     else if "`nolabel'" == "" & "`allstring'" != "" {
-        dtparquet_use using `"`source'"', clear allstring timer(`timer_mode')
+        dtparquet_use using `"`source'"', clear allstring chunksize(`chunksize') timer(`timer_mode')
     }
     else {
-        dtparquet_use using `"`source'"', clear nolabel allstring timer(`timer_mode')
+        dtparquet_use using `"`source'"', clear nolabel allstring chunksize(`chunksize') timer(`timer_mode')
     }
 
     local import_read_elapsed_ms = clock("$S_TIME", "hms") - `import_read_started'

@@ -371,6 +371,55 @@ timer off 8
 timer list 8
 display as text "Test 8 finished in" as result %6.2f r(t8) "s"
 
+// Test Case 9: Basic dtparquet describe
+display _newline "=== TEST CASE 9: Basic dtparquet describe ==="
+timer clear 9
+timer on 9
+local ++total_tests
+clear
+set obs 10
+generate byte v_byte = _n
+generate int v_int = _n * 100
+generate long v_long = _n * 10000
+generate str10 v_str = "row " + string(_n)
+
+dtparquet save "test_case9.parquet", replace
+
+// 9a: Basic describe with return scalars
+dtparquet describe using "test_case9.parquet"
+local t9a_err 0
+if r(N) != 10 local ++t9a_err
+if r(k) != 4 local ++t9a_err
+
+// 9b: describe quietly (no display)
+clear
+dtparquet describe using "test_case9.parquet", quietly
+if r(N) != 10 local ++t9a_err
+
+// 9c: describe short (header only, no variable table)
+clear
+dtparquet describe using "test_case9.parquet", short
+
+// 9d: describe simple (variable names only)
+clear
+dtparquet describe using "test_case9.parquet", simple
+
+// 9e: describe detailed (compute string lengths)
+clear
+dtparquet describe using "test_case9.parquet", detailed
+
+if `t9a_err' == 0 {
+    display as result "Test 9 completed successfully"
+    local passed_tests "`passed_tests' 9"
+}
+else {
+    display as error "Test 9 failed: describe return scalars incorrect"
+    local failed_tests "`failed_tests' 9"
+}
+timer off 9
+timer list 9
+display as text "Test 9 finished in" as result %6.2f r(t9) "s"
+
 // Cleanup
 capture erase "test_case1.parquet"
 capture erase "test_case2.parquet"
@@ -382,6 +431,7 @@ capture erase "test_case5.parquet"
 capture erase "test_case6.parquet"
 capture erase "test_case8_noext.parquet"
 capture erase "test_case8_upper.parquet"
+capture erase "test_case9.parquet"
 capture erase "test.parquet"
 capture erase "test_orig.dta"
 

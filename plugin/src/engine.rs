@@ -117,8 +117,14 @@ pub struct SaveArgs {
 #[derive(Debug, Clone)]
 pub struct DescribeArgs {
     pub file_path: String,
+    pub quietly: bool,
     pub detailed: bool,
-    pub memory_savvy: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchemaArgs {
+    pub file_path: String,
+    pub detailed: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -138,6 +144,7 @@ pub enum CommandArgs {
     Read(ReadArgs),
     Save(SaveArgs),
     Describe(DescribeArgs),
+    Schema(SchemaArgs),
     HasMetadataKey(HasMetadataKeyArgs),
     LoadMeta(LoadMetaArgs),
 }
@@ -160,6 +167,7 @@ pub fn parse_command(name: &str, args: &[&str]) -> ParseResult<CommandArgs> {
         "read" => parse_read_args(args),
         "save" => parse_save_args(args),
         "describe" => parse_describe_args(args),
+        "schema" => parse_schema_args(args),
         "has_metadata_key" => parse_has_metadata_key_args(args),
         "load_meta" => parse_load_meta_args(args),
         _ => Err(DtparquetError::SubcommandUnknown(name.to_string())),
@@ -232,8 +240,21 @@ fn parse_describe_args(args: &[&str]) -> ParseResult<CommandArgs> {
         .ok_or_else(|| DtparquetError::FileNotFound(args[0].to_string()))?;
     Ok(CommandArgs::Describe(DescribeArgs {
         file_path,
+        quietly: args[1] == "1",
+        detailed: args[5] == "1",
+    }))
+}
+
+fn parse_schema_args(args: &[&str]) -> ParseResult<CommandArgs> {
+    if args.len() < 3 {
+        return Err(DtparquetError::SubcommandArgCount("schema", 3));
+    }
+    let file_path = verify_parquet_path(args[0])
+        .then(|| args[0].to_string())
+        .ok_or_else(|| DtparquetError::FileNotFound(args[0].to_string()))?;
+    Ok(CommandArgs::Schema(SchemaArgs {
+        file_path,
         detailed: args[1] == "1",
-        memory_savvy: args[2] == "1",
     }))
 }
 
@@ -301,11 +322,10 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
             overwrite: args.overwrite,
             batch_size: args.batch_size,
         }),
-        CommandArgs::Describe(args) => Ok(file_summary(
-            &args.file_path,
-            args.detailed,
-            args.memory_savvy,
-        )),
+        CommandArgs::Describe(args) => {
+            Ok(file_summary(&args.file_path, args.detailed, args.quietly))
+        }
+        CommandArgs::Schema(args) => Ok(file_summary(&args.file_path, args.detailed, true)),
         CommandArgs::HasMetadataKey(args) => {
             let found = has_parquet_metadata_key(&args.file_path, &args.key)?;
             set_macro("has_metadata_key", if found { "1" } else { "0" }, false);

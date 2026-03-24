@@ -11,7 +11,7 @@ pub mod transfer;
 
 pub use engine::{
     dispatch_command, parse_command, CommandArgs, DescribeArgs, HasMetadataKeyArgs, LoadMetaArgs,
-    ReadArgs, SaveArgs,
+    ReadArgs, SaveArgs, SchemaArgs,
 };
 pub use error::DtparquetError;
 pub use logic::{display, ST_retcode, SCHEMA_HANDOFF_PROTOCOL_VERSION};
