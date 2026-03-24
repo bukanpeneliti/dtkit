@@ -1101,6 +1101,31 @@ pub fn export_parquet_request(req: &WriteRequest<'_>) -> Result<i32, DtparquetEr
         return Ok(0);
     }
 
+    if !plan.partition_cols.is_empty() && !has_if_filter {
+        write_partitioned_dataframe_direct(
+            req.path,
+            &plan.selected_infos,
+            plan.start_row,
+            plan.rows_to_read,
+            req.compression,
+            req.compression_level,
+            &plan.partition_cols,
+            req.overwrite,
+            &plan.dtmeta_json,
+            &mut collects,
+        )?;
+        finalize_runtime(
+            "write",
+            1,
+            plan.rows_to_read,
+            collects,
+            1,
+            &AdaptiveBatchTuner::new(plan.row_width_bytes, req.batch_size, 1),
+            start,
+        );
+        return Ok(0);
+    }
+
     let scan = Arc::new(StataRowSource::new(
         plan.selected_infos.clone(),
         plan.start_row,
@@ -1383,6 +1408,42 @@ fn write_partitioned_dataframe(
     let opts = build_parquet_write_opts(comp, level, meta)?;
     let collect_started = Instant::now();
     let mut df = lf.collect()?;
+    set_elapsed_ms_macro("write_collect_elapsed_ms", collect_started);
+    write_partitioned_dataset_local(&mut df, out, part, &opts)?;
+    set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_partitioned_dataframe_direct(
+    path: &str,
+    column_info: &[ExportField],
+    start_row: usize,
+    n_rows: usize,
+    comp: &str,
+    level: Option<usize>,
+    part: &[PlSmallStr],
+    overwrite: bool,
+    meta: &str,
+    collects: &mut usize,
+) -> Result<(), DtparquetError> {
+    let parquet_started = Instant::now();
+    let out = Path::new(path);
+    if out.exists() {
+        if !overwrite {
+            return Err(format!("Path exists: {path}").into());
+        }
+        if out.is_file() {
+            std::fs::remove_file(out)?;
+        } else {
+            std::fs::remove_dir_all(out)?;
+        }
+    }
+    create_dir_all(out)?;
+    let opts = build_parquet_write_opts(comp, level, meta)?;
+    let collect_started = Instant::now();
+    *collects += 1;
+    let mut df = read_batch_from_columns(column_info, start_row, n_rows)?;
     set_elapsed_ms_macro("write_collect_elapsed_ms", collect_started);
     write_partitioned_dataset_local(&mut df, out, part, &opts)?;
     set_elapsed_ms_macro("write_parquet_elapsed_ms", parquet_started);

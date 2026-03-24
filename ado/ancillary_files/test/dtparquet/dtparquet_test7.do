@@ -61,6 +61,11 @@ capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/tes
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
 capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
+local _partition_root "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data"
+local _partition_dirs : dir "`_partition_root'" dirs "rust_partitioned_out_*"
+foreach _d of local _partition_dirs {
+    capture noisily _cleanup_dir_recursive "`_partition_root'/`_d'"
+}
 
 * Load the plugin
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
@@ -141,7 +146,7 @@ display _newline "=== TEST CASE 2: Describe contract macros ==="
 timer clear 2
 timer on 2
 local ++total_tests
-plugin call dtparquet_plugin, "describe" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "1" "0" "" "" "0" "0"
+plugin call dtparquet_plugin, "describe" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "0" "0" "0" "0" "1" "0"
 local t2_err 0
 if real("`n_rows'") <= 0 local ++t2_err
 if real("`n_columns'") <= 0 local ++t2_err
@@ -601,6 +606,7 @@ display _newline "=== TEST CASE 8: Partition_by save + overwrite guard ==="
 timer clear 8
 timer on 8
 local ++total_tests
+set seed `=mod(clock(c(current_date) + " " + c(current_time), "DMYhms"), 2147483647)'
 local partition_run_id = string(floor(runiform()*1000000000), "%12.0f")
 local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out_`partition_run_id'"
 capture noisily _cleanup_dir_recursive "`partition_dir'"
