@@ -756,18 +756,16 @@ program dtparquet_use, rclass
         timer clear 88
         timer on 88
         if "`dtmeta_loaded'" == "1" {
-            local apply_labels = (`"`dtmeta_dta_label'"' != "")
+            local nlab = real("`dtmeta_label_count'")
+            if missing(`nlab') local nlab = 0
 
-            if (`apply_labels') {
-                local nlab = real("`dtmeta_label_count'")
-                if (`nlab' > 0) {
-                    forvalues j = 1/`nlab' {
-                        local lname `dtmeta_label_name_`j''
-                        local lvalue `dtmeta_label_value_`j''
-                        local ltext `dtmeta_label_text_`j''
-                        if "`lname'" != "" {
-                            capture noisily label define `lname' `lvalue' `"`ltext'"', modify
-                        }
+            if (`nlab' > 0) {
+                forvalues j = 1/`nlab' {
+                    local lname `dtmeta_label_name_`j''
+                    local lvalue `dtmeta_label_value_`j''
+                    local ltext `dtmeta_label_text_`j''
+                    if "`lname'" != "" {
+                        capture noisily label define `lname' `lvalue' `"`ltext'"', modify
                     }
                 }
             }
@@ -784,17 +782,13 @@ program dtparquet_use, rclass
                         mata: st_varlabel(st_local("vname"), st_local("vlab"))
                     }
                     if `"`vfmt'"' != "" format `vname' `vfmt'
-                    if (`apply_labels') {
-                        if `"`vlbl'"' != "" {
-                            mata: st_varvaluelabel(st_local("vname"), st_local("vlbl"))
-                        }
+                    if `"`vlbl'"' != "" {
+                        mata: st_varvaluelabel(st_local("vname"), st_local("vlbl"))
                     }
                 }
             }
 
-            if (`apply_labels') {
-                if `"`dtmeta_dta_label'"' != "" label data `"`dtmeta_dta_label'"'
-            }
+            if `"`dtmeta_dta_label'"' != "" label data `"`dtmeta_dta_label'"'
 
             local ndta = real("`dtmeta_dta_note_count'")
             if (`ndta' > 0) {

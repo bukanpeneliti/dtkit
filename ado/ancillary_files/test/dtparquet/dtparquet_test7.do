@@ -971,6 +971,50 @@ timer off 13
 capture timer list 13
 display as text "Test 13 finished in " as result %4.2f r(t13) "s"
 
+// Test Case 13b: value labels preserved without data label
+display _newline "=== TEST CASE 13b: Value labels without data label ==="
+timer clear 68
+timer on 68
+local ++total_tests
+local meta_nodlabel_parquet "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/meta_nodlabel_roundtrip.parquet"
+capture erase "`meta_nodlabel_parquet'"
+
+clear
+set obs 2
+gen byte src = _n - 1
+label define vl_src 0 "No" 1 "Yes", replace
+label values src vl_src
+label variable src "Source test"
+
+local t13b_err 0
+dtparquet save "`meta_nodlabel_parquet'", replace
+plugin call dtparquet_plugin, "load_meta" "`meta_nodlabel_parquet'"
+if "`dtmeta_loaded'" != "1" local ++t13b_err
+if real("`dtmeta_label_count'") != 2 local ++t13b_err
+
+dtparquet use using "`meta_nodlabel_parquet'", clear
+local src_var_label_nodlabel : variable label src
+local src_val_label_nodlabel : value label src
+if "`src_var_label_nodlabel'" != "Source test" local ++t13b_err
+if "`src_val_label_nodlabel'" != "vl_src" local ++t13b_err
+
+tempvar src_text
+decode src, gen(`src_text')
+if `src_text'[1] != "No" local ++t13b_err
+if `src_text'[2] != "Yes" local ++t13b_err
+
+if `t13b_err' == 0 {
+    display as result "Test 13b completed successfully"
+    local passed_tests "`passed_tests' 13b"
+}
+else {
+    display as error "Test 13b failed: value labels without data label not preserved"
+    local failed_tests "`failed_tests' 13b"
+}
+timer off 68
+capture timer list 68
+display as text "Test 13b finished in " as result %4.2f r(t68) "s"
+
 // Test Case 14: partitioned metadata embedding
 display _newline "=== TEST CASE 14: Partitioned metadata embedding ==="
 timer clear 14
@@ -1018,6 +1062,7 @@ display as text "Test 14 finished in " as result %4.2f r(t14) "s"
 capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
 
 capture erase "`meta_parquet'"
+capture erase "`meta_nodlabel_parquet'"
 capture erase "`roundtrip_file'"
 capture erase "`filtered_file'"
 capture erase "`compress_zstd'"
