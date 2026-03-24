@@ -7,81 +7,67 @@
 ![GitHub Stars](https://img.shields.io/github/stars/bukanpeneliti/dtkit?style=social)
 [![GitHub license](https://img.shields.io/github/license/bukanpeneliti/dtkit.svg)](https://github.com/bukanpeneliti/dtkit/blob/main/LICENSE)
 
-`dtkit` is a Stata package that transforms data exploration by creating **structured datasets** instead of display-only results. It uses Stata's frame system to deliver improved statistics, frequency analysis, and high-performance file interoperability.
+`dtkit` produces structured datasets from your analysis instead of just printing results to the screen. It uses Stata's frame system for statistics, frequency tables, and Parquet file access.
 
 ## Features
 
-- **Creates reusable datasets** from analysis results
-- **High-performance Parquet I/O** using a native dtparquet plugin
-- **Exports directly to Excel**
+- Creates reusable datasets from analysis results
+- Read and write Parquet files directly from Stata
+- Exports results to Excel
 - Preserves value labels automatically
 - Supports all Stata weight types
-- Optional faster processing with gtools
+- Optional gtools integration for faster processing
 
 ## Installation
 
-Install `dtkit` directly from GitHub using Stata's `net install` command:
+Install from GitHub:
 
 ```stata
 net install dtkit, from("https://raw.githubusercontent.com/bukanpeneliti/dtkit/main/")
 ```
 
-Then run plugin sync (required for first-time `dtparquet` use):
+First-time Parquet users need to sync the plugin:
 
 ```stata
 dtkit, update
 ```
 
-Verify plugin readiness:
+Check plugin status:
 
 ```stata
 dtkit, pluginstatus
 ```
 
-## Updating to Latest Version
-
-To ensure you have the most recent features and bug fixes, use the built-in update command:
+## Updating
 
 ```stata
 dtkit, update
 ```
 
-Alternatively, you can use the synonym:
+Or use the synonym:
 
 ```stata
 dtkit, upgrade
 ```
 
-*Note: For versions older than v1.1.0, use `net install dtkit, replace from(...)` one last time to enable the new update system.*
+*Note: If you installed before v1.1.0, run `net install dtkit, replace from(...)` once to enable the update system.*
 
-`dtkit, update` syncs the `dtparquet.dll` plugin binary from GitHub Releases.
-If you want to pin a specific release asset, use:
+`dtkit, update` downloads the `dtparquet.dll` plugin from GitHub Releases. To pin a specific version:
 
 ```stata
 dtkit, update tag(v2.0.2)
 ```
 
-Check current plugin status with:
-
-```stata
-dtkit, pluginstatus
-```
-
 ## Uninstalling
-
-If you need to remove the package:
 
 ```stata
 ado uninstall dtkit
 ```
 
-### Alternative Uninstall Method
+If that doesn't work (multiple installs, corrupted state):
 
-If the standard uninstall method doesn't work (e.g., if dtkit was installed multiple times), we can follow these steps:
-
-1. Run: `ado dir dtkit` in Stata command window
-2. Note all index numbers shown for dtkit installations
-3. Uninstall packages using index numbers in descending order:
+1. Run `ado dir dtkit` and note the index numbers
+2. Uninstall by index, highest first:
 
    ```stata
    ado uninstall [highest_index]
@@ -90,50 +76,57 @@ If the standard uninstall method doesn't work (e.g., if dtkit was installed mult
 
 ## Commands Overview
 
-### `dtstat` - Descriptive Statistics
+### dtstat - Descriptive Statistics
 
-Creates datasets with descriptive statistics
+Produces datasets with descriptive statistics:
 
 ```stata
 dtstat price mpg weight
 dtstat price mpg, by(foreign)
 ```
 
-### `dtfreq` - Frequency Analysis
+### dtfreq - Frequency Analysis
 
-Generates frequency tables as datasets
+Produces frequency tables as datasets:
 
 ```stata
 dtfreq rep78
 dtfreq rep78, by(foreign)
 ```
 
-### `dtmeta` - Dataset Information
+### dtmeta - Dataset Information
 
-Extracts details about your dataset
+Extracts and saves dataset details:
 
 ```stata
 dtmeta
 dtmeta, save(metadata.xlsx) replace
 ```
 
-### `dtparquet` - Parquet Interoperability
+### dtparquet - Parquet Interoperability
 
-High-performance read/write for Parquet files
+Read and write Parquet files:
 
 ```stata
 dtparquet save "data.parquet", replace
 dtparquet use "data.parquet", clear
 ```
 
-If `dtparquet` reports a plugin mismatch or missing binary, run:
+If you get a plugin mismatch error:
 
 ```stata
 dtkit, update
 ```
 
-If your network blocks release-asset download, manually place `dtparquet.dll`
-in your dtkit ado directory (usually `PLUS/d/`).
+## Performance
+
+Benchmark on 11.16M rows × 20 columns:
+
+| Operation | Stata `.dta` | `dtparquet` |
+|---|---|---|
+| Full read | 0.91s | 1.25s |
+
+Reading and writing Parquet is slower than Stata's native `.dta` format, `.dta` is highly optimized. The benefit is interoperability: you can exchange data with Python, R, Spark, and others. For very wide files with column selection, Parquet can be faster.
 
 ## Practical Workflow
 
@@ -160,14 +153,14 @@ frame _dtvars: list varname type format
 
 ## Compatibility
 
-- Requires Stata 16 or newer
-- Windows 11 compatible
-- `dtparquet` runtime is plugin-native and does not require Python/pyarrow
-- Optional: [`gtools`](https://github.com/mcaceresb/stata-gtools) for speed boost
+- Stata 16 or newer
+- Windows 11
+- `dtparquet` is a plugin binary, no Python or pyarrow needed
+- Optional: [gtools](https://github.com/mcaceresb/stata-gtools) for speed boosts
 
 ## Support
 
-Report issues or suggest improvements:  
+Report issues or suggest features:  
 [GitHub Issues](https://github.com/bukanpeneliti/dtkit/issues)
 
 ## Author
@@ -177,7 +170,7 @@ Hafiz Arfyanto
 
 ## Citation
 
-If you use `dtkit` in your research, please cite:
+If you use `dtkit` in your research:
 
 **Plain Text:**
 
@@ -186,7 +179,7 @@ Hafiz Arfyanto (2026). dtkit: Data Toolkit for Stata. Version 2.0.2.
 Retrieved from https://github.com/bukanpeneliti/dtkit
 ```
 
-**BibTeX Entry:**
+**BibTeX:**
 
 ```bibtex
 @misc{arfyanto2026dtkit,
@@ -199,7 +192,7 @@ Retrieved from https://github.com/bukanpeneliti/dtkit
 }
 ```
 
-For detailed documentation, see the official help file in Stata
+For full documentation in Stata:
 
 ```Stata
 help dtkit
