@@ -1,9 +1,26 @@
+<!-- markdownlint-disable MD013 MD022 MD024 MD032 -->
+
 # Changelog
 
 All notable changes to the dtkit project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## Package Release [v2.0.3] - 2026-03-24
+
+- Patch release for dtparquet metadata restoration.
+- Component versions:
+  - **dtkit: v2.0.3 (Updated)**
+  - **dtparquet: v2.0.3 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.3**:
+  - Restored value labels even when the source dataset has no dataset label.
+  - Separated value-label restoration from `label data` restoration.
+  - Added a regression test for roundtripping value labels without `label
+    data`.
 
 ## Package Release [v2.0.2] - 2026-03-13
 
@@ -30,7 +47,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **dtparquet: v2.0.1 (Updated)**
 
 ### Fixed
-- **dtparquet v2.0.1**: 
+- **dtparquet v2.0.1**:
   - Eliminated O(N²) iterator scaling in parallel save operations (Replaced .skip().take() with O(1) slices).
   - Optimized Stata-to-Rust missingness check using pure Rust bitwise comparisons (Removed 1M+ FFI calls per column).
   - Improved string transfer performance using `StringChunkedBuilder` to reduce individual allocations.
@@ -50,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **dtparquet v2.0.0**: Major Rust plugin overhaul
   - **Polars 0.53 Migration**: Upgraded from Polars 0.52 → 0.53 with full backward compatibility
-  - **Performance Optimization (Phase 12)**: 
+  - **Performance Optimization (Phase 12)**:
     - Bounds validation hoisting for reduced overhead
     - Batched counter publication replacing per-cell atomic increments
     - Reusable string buffers for reduced CString allocations

@@ -30,7 +30,7 @@ capture log close
 log using "`log_file'", text replace
 
 display "--------------------------------------------------------"
-display "Benchmarking INSTALLED dtparquet (v2.0.0 Rust)"
+display "Benchmarking INSTALLED dtparquet (v2.0.3 Rust)"
 display "Timestamp: `c(current_date)` `c(current_time)`"
 display "--------------------------------------------------------"
 

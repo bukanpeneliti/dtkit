@@ -567,7 +567,7 @@ dependencies = [
 
 [[package]]
 name = "dtparquet"
-version = "2.0.2"
+version = "2.0.3"
 dependencies = [
  "glob",
  "polars",
