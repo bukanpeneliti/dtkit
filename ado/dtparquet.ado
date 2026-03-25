@@ -1006,7 +1006,7 @@ program dtparquet_describe, rclass
 
     confirm file `"`using'"'
 
-    plugin call dtparquet_plugin, "schema" `"`using'"' "`detailed_flag'" "0"
+    plugin call dtparquet_plugin, "describe" `"`using'"' "1" "`short_flag'" "`simple_flag'" "`fullnames_flag'" "`detailed_flag'" "`numbers_flag'"
 
     local n_rows = real("`n_rows'")
     local n_columns = real("`n_columns'")
