@@ -407,6 +407,36 @@ dtparquet describe using "test_case9.parquet", simple
 // 9e: describe detailed (compute string lengths)
 clear
 dtparquet describe using "test_case9.parquet", detailed
+if r(k) != 4 local ++t9a_err
+
+// 9f: describe fullnames (smoke test against fixture-backed schema table)
+clear
+dtparquet describe using "test_case9.parquet", fullnames
+if r(k) != 4 local ++t9a_err
+
+// 9g: describe numbers (numbered output)
+clear
+dtparquet describe using "test_case9.parquet", numbers
+if r(k) != 4 local ++t9a_err
+
+// 9h: describe replace (load schema description into memory)
+clear
+dtparquet describe using "test_case9.parquet", replace
+count
+if r(N) != 4 local ++t9a_err
+if c(k) != 5 local ++t9a_err
+capture confirm variable varname
+if _rc != 0 local ++t9a_err
+capture confirm variable vartype
+if _rc != 0 local ++t9a_err
+capture confirm variable format
+if _rc != 0 local ++t9a_err
+capture confirm variable vallab
+if _rc != 0 local ++t9a_err
+capture confirm variable varlab
+if _rc != 0 local ++t9a_err
+if varname[1] != "v_byte" local ++t9a_err
+if vartype[4] != "string" local ++t9a_err
 
 if `t9a_err' == 0 {
     display as result "Test 9 completed successfully"
