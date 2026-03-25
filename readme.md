@@ -175,6 +175,13 @@ Report issues or suggest features:
 Hafiz Arfyanto  
 [Email](mailto:bukanpeneliti@gmail.com) | [GitHub](https://github.com/bukanpeneliti)
 
+## Acknowledgments
+
+`dtparquet` draws on ideas and some code structure from
+[`stata_parquet_io`](https://github.com/jrothbaum/stata_parquet_io)
+(the `pq` command) by Jon Rothbaum at the U.S. Census Bureau. Those
+upstream portions are used under the MIT License.
+
 ## Citation
 
 If you use `dtkit` in your research:
