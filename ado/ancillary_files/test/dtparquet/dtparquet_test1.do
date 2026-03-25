@@ -450,6 +450,35 @@ timer off 9
 timer list 9
 display as text "Test 9 finished in" as result %6.2f r(t9) "s"
 
+// Test Case 10: describe timing on large foreign parquet without dtmeta
+display _newline "=== TEST CASE 10: Foreign describe timing smoke test ==="
+timer clear 10
+timer on 10
+local ++total_tests
+local foreign_large "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet"
+local t10_err 0
+
+capture plugin call dtparquet_plugin, "has_metadata_key" "`foreign_large'" "dtparquet.dtmeta"
+if _rc != 0 local ++t10_err
+else if "`has_metadata_key'" != "0" local ++t10_err
+
+dtparquet describe using "`foreign_large'", quietly
+if r(N) <= 0 local ++t10_err
+if r(k) <= 0 local ++t10_err
+display as text "Test 10 schema:" as result " N=" %12.0gc r(N) as result " k=" %12.0gc r(k)
+
+if `t10_err' == 0 {
+    display as result "Test 10 completed successfully"
+    local passed_tests "`passed_tests' 10"
+}
+else {
+    display as error "Test 10 failed: foreign describe timing smoke test"
+    local failed_tests "`failed_tests' 10"
+}
+timer off 10
+timer list 10
+display as text "Test 10 finished in" as result %6.2f r(t10) "s"
+
 // Cleanup
 capture erase "test_case1.parquet"
 capture erase "test_case2.parquet"

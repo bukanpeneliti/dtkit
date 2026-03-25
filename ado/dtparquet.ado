@@ -1,4 +1,4 @@
-*! version 2.0.4 25mar2026
+*! version 2.0.5 25mar2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -351,6 +351,9 @@ program dtparquet_save
         capture frame _dtinfo: local dtmeta_dta_obs = dta_obs[1]
         capture frame _dtinfo: local dtmeta_dta_vars = dta_vars[1]
         capture frame _dtinfo: local dtmeta_dta_ts = string(dta_ts[1], "%tc")
+        if `"`dtmeta_dta_ts'"' == "" | `"`dtmeta_dta_ts'"' == "." {
+            local dtmeta_dta_ts `"`c(current_date)' `=substr("`c(current_time)'", 1, 5)'"'
+        }
         capture frame _dtlabel: count
 
         if _rc == 0 {
@@ -1003,8 +1006,17 @@ program dtparquet_describe, rclass
     local detailed_flag = cond("`detailed'" != "", "1", "0")
     local numbers_flag = cond("`numbers'" != "", "1", "0")
     local is_replace = ("`replace'" != "")
+    local dtmeta_loaded 0
+    local dtmeta_dta_label ""
+    local dtmeta_dta_ts ""
+    local dtmeta_dta_note_count 0
 
     confirm file `"`using'"'
+
+    plugin call dtparquet_plugin, "has_metadata_key" `"`using'"' "dtparquet.dtmeta"
+    if "`has_metadata_key'" == "1" {
+        plugin call dtparquet_plugin, "load_meta" `"`using'"'
+    }
 
     plugin call dtparquet_plugin, "describe" `"`using'"' "1" "`short_flag'" "`simple_flag'" "`fullnames_flag'" "`detailed_flag'" "`numbers_flag'"
 
@@ -1012,33 +1024,144 @@ program dtparquet_describe, rclass
     local n_columns = real("`n_columns'")
 
     if "`quietly'" == "" {
-        display _newline as text "Parquet file: " as result `"`using'"'
-        display as text "Observations: " as result %12.0gc `n_rows'
-        display as text "Variables:    " as result %12.0gc `n_columns'
+        local meta_col = 47
+        local right1 ""
+        local right2 ""
+        local right3 ""
+
+        if "`dtmeta_loaded'" == "1" {
+            if `"`dtmeta_dta_label'"' != "" & `"`dtmeta_dta_label'"' != "." {
+                local right1 `"`dtmeta_dta_label'"'
+            }
+            if `"`dtmeta_dta_ts'"' != "" & `"`dtmeta_dta_ts'"' != "." {
+                local right2 `"`dtmeta_dta_ts'"'
+            }
+            if real("`dtmeta_dta_note_count'") > 0 {
+                local right3 "(_dta has notes)"
+            }
+        }
+
+        display _newline as text "Contains data from " as result `"`using'"'
+        display as text " Observations: " as result %12.0gc `n_rows' as text _column(`meta_col') `"`right1'"'
+        display as text "    Variables: " as result %12.0gc `n_columns' as text _column(`meta_col') `"`right2'"'
+        if `"`right3'"' != "" {
+            display as text _column(`meta_col') `"`right3'"'
+        }
 
         if "`short'" == "" {
             display ""
 
             if "`simple'" != "" {
+                local wid = 2
+                local numwid = 0
+                if "`numbers'" != "" {
+                    local numwid = length(string(`n_columns'))
+                }
+
                 forvalues i = 1/`n_columns' {
                     local vname `"`name_`i''"'
-                    if "`numbers'" != "" {
-                        display as text %4.0f `i' ". " as result `"`vname'"'
+                    if "`c(hasicu)'" == "1" {
+                        local cellwid = udstrlen(`"`vname'"')
                     }
                     else {
-                        display as result `"`vname'"'
+                        local cellwid = strlen(`"`vname'"')
+                    }
+                    if "`numbers'" != "" {
+                        local cellwid = `cellwid' + `numwid' + 2
+                    }
+                    local wid = max(`wid', `cellwid')
+                }
+
+                local wid = `wid' + 2
+                local cols = int((`c(linesize)' + 1) / `wid')
+                if `cols' < 2 {
+                    forvalues i = 1/`n_columns' {
+                        local vname `"`name_`i''"'
+                        if "`numbers'" != "" {
+                            display as text %`numwid'.0f `i' ". " as result `"`vname'"'
+                        }
+                        else {
+                            display as result `"`vname'"'
+                        }
+                    }
+                }
+                else {
+                    local lines = `n_columns' / `cols'
+                    local lines = int(cond(`lines' > int(`lines'), `lines' + 1, `lines'))
+                    forvalues i = 1/`lines' {
+                        local top = min((`cols') * `lines' + `i', `n_columns')
+                        local col = 1
+                        forvalues j = `i'(`lines')`top' {
+                            local vname `"`name_`j''"'
+                            if "`numbers'" != "" {
+                                display as text _column(`col') %`numwid'.0f `j' ". " as result `"`vname'"' _c
+                            }
+                            else {
+                                display as result _column(`col') `"`vname'"' _c
+                            }
+                            local col = `col' + `wid'
+                        }
+                        display as text ""
                     }
                 }
             }
             else {
-                local header "Variable Name | Stata Type | Polars Type"
-                local divider "------------- | ---------- | -----------"
+                local name_title "Variable name"
+                local type_title "Storage type"
+                local ptype_title "Parquet type"
+                local name_w = 13
+                local type_w = 12
+                local ptype_w = 12
+                local num_w = 0
+
                 if "`numbers'" != "" {
-                    local header "No. | `header'"
-                    local divider "--- | `divider'"
+                    local num_w = length(string(`n_columns'))
                 }
-                display as text "`header'"
-                display as text "`divider'"
+
+                forvalues i = 1/`n_columns' {
+                    local vname `"`name_`i''"'
+                    local vtype `"`type_`i''"'
+                    local ptype `"`polars_type_`i''"'
+                    local slen = real("`string_length_`i''")
+
+                    if "`fullnames'" == "" {
+                        local shown_name = abbrev(`"`vname'"', 32)
+                    }
+                    else {
+                        local shown_name `"`vname'"'
+                    }
+                    if "`detailed'" != "" & inlist(lower("`vtype'"), "string", "strl") {
+                        local vtype `"`vtype'(`slen')"'
+                    }
+
+                    if "`c(hasicu)'" == "1" {
+                        local name_len = udstrlen(`"`shown_name'"')
+                        local type_len = udstrlen(`"`vtype'"')
+                        local ptype_len = udstrlen(`"`ptype'"')
+                    }
+                    else {
+                        local name_len = strlen(`"`shown_name'"')
+                        local type_len = strlen(`"`vtype'"')
+                        local ptype_len = strlen(`"`ptype'"')
+                    }
+
+                    if "`numbers'" != "" {
+                        local name_len = `name_len' + `num_w' + 2
+                    }
+
+                    local name_w = max(`name_w', `name_len')
+                    local type_w = max(`type_w', `type_len')
+                    local ptype_w = max(`ptype_w', `ptype_len')
+                }
+
+                local name_col = 1
+                local type_col = `name_col' + `name_w' + 2
+                local ptype_col = `type_col' + `type_w' + 2
+                local rule_w = `ptype_col' + `ptype_w' - 1
+
+                display as text "{hline `rule_w'}"
+                display as text _column(`name_col') "`name_title'" _column(`type_col') "`type_title'" _column(`ptype_col') "`ptype_title'"
+                display as text "{hline `rule_w'}"
 
                 forvalues i = 1/`n_columns' {
                     local vname `"`name_`i''"'
@@ -1054,12 +1177,14 @@ program dtparquet_describe, rclass
                     }
 
                     if "`numbers'" != "" {
-                        display as text %3.0f `i' " | " as result `"`vname'"' as text " | " as result `"`vtype'"' as text " | " as result `"`ptype'"'
+                        display as text %`num_w'.0f `i' ". " as result `"`vname'"' _column(`type_col') as result `"`vtype'"' _column(`ptype_col') as result `"`ptype'"'
                     }
                     else {
-                        display as result `"`vname'"' as text " | " as result `"`vtype'"' as text " | " as result `"`ptype'"'
+                        display as result _column(`name_col') `"`vname'"' _column(`type_col') `"`vtype'"' _column(`ptype_col') `"`ptype'"'
                     }
                 }
+
+                display as text "{hline `rule_w'}"
             }
         }
     }

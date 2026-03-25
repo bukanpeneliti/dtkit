@@ -7,6 +7,23 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.5] - 2026-03-25
+
+- Patch release for `dtparquet describe` output and timing checks.
+- Component versions:
+  - **dtkit: v2.0.5 (Updated)**
+  - **dtparquet: v2.0.5 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.5**:
+  - Restyled `dtparquet describe` to use aligned, native-style output.
+  - Added dataset label, timestamp, and note header details when `dtmeta`
+    metadata is present.
+  - Skipped metadata loading for foreign Parquet files without the
+    `dtparquet.dtmeta` key.
+  - Added regression coverage for the large foreign-file describe path.
+
 ## Package Release [v2.0.4] - 2026-03-25
 
 - Patch release for `dtparquet describe` support and help coverage.
