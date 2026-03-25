@@ -60,6 +60,10 @@ capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/tes
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
 capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
+local stale_partition_dirs : dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data" dirs "rust_partitioned_out*"
+foreach stale_partition_dir of local stale_partition_dirs {
+    capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/`stale_partition_dir'"
+}
 capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
 local _partition_root "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data"
 local _partition_dirs : dir "`_partition_root'" dirs "rust_partitioned_out_*"

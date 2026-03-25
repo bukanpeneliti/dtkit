@@ -532,7 +532,7 @@ program dtparquet_use, rclass
     quietly timer list 96
     local t_loadmeta_ms = round(`=r(t96)' * 1000, 1)
 
-    local describe_detailed = cond("`dtmeta_loaded'" == "1", "1", "0")
+    local describe_detailed = cond("`dtmeta_loaded'" == "1", "0", "1")
     timer clear 97
     timer on 97
     plugin call dtparquet_plugin, "schema" "`file'" "`describe_detailed'" "0"
