@@ -7,6 +7,20 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.4] - 2026-03-25
+
+- Patch release for `dtparquet describe` support and help coverage.
+- Component versions:
+  - **dtkit: v2.0.4 (Updated)**
+  - **dtparquet: v2.0.4 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.4**:
+  - Routed `dtparquet describe` through the plugin's `describe` subcommand.
+  - Added help-file syntax and option docs for `dtparquet describe`.
+  - Added regression coverage for `fullnames`, `numbers`, and `replace`.
+
 ## Package Release [v2.0.3] - 2026-03-24
 
 - Patch release for dtparquet metadata restoration.

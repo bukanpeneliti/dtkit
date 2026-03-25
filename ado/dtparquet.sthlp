@@ -1,8 +1,9 @@
 {smcl}
-{* *! version 2.0.3  24mar2026}{...}
+{* *! version 2.0.4  25mar2026}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
 {vieweralsosee "dtkit" "help dtkit"}{...}
 {vieweralsosee "[D] use" "help use"}{...}
+{vieweralsosee "[D] describe" "help describe"}{...}
 {vieweralsosee "[D] save" "help save"}{...}
 {vieweralsosee "[D] import" "help import"}{...}
 {vieweralsosee "[D] export" "help export"}{...}
@@ -30,6 +31,9 @@ Memory operations
 
 {p 8 16 2}
 {cmd:dtparquet} {opt u:se} [{varlist}] [{it:if}] [{it:in}] {cmd:using} {it:{help filename}} [{cmd:,} {it:use_options}]
+
+{p 8 16 2}
+{cmd:dtparquet} {opt des:cribe} {cmd:using} {it:{help filename}} [{cmd:,} {it:describe_options}]
 
 {pstd}
 Disk operations (no data loaded into active memory)
@@ -80,6 +84,8 @@ Options are presented under the following headings:
 {phang2}
 {help dtparquet##use_options:Options for dtparquet use}{p_end}
 {phang2}
+{help dtparquet##describe_options:Options for dtparquet describe}{p_end}
+{phang2}
 {help dtparquet##export_options:Options for dtparquet export}{p_end}
 {phang2}
 {help dtparquet##import_options:Options for dtparquet import}{p_end}
@@ -98,6 +104,21 @@ Presets: {cmd:fast}, {cmd:balanced} (zstd), {cmd:archive} (brotli).
 Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cmd:lzo}, {cmd:uncompressed}.{p_end}
 {synopt :{opt part:itionby(varlist)}}write partitioned Parquet output by variables{p_end}
 {synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
+{synoptline}
+
+{marker describe_options}{...}
+{dlgtab:Options for dtparquet describe}
+
+{synoptset 26 tabbed}{...}
+{synopthdr :describe_options}
+{synoptline}
+{synopt :{opt quietly}}suppress printed output and keep returned results{p_end}
+{synopt :{opt short}}show the file summary without the variable table{p_end}
+{synopt :{opt simple}}list variable names only{p_end}
+{synopt :{opt fullnames}}show full variable names instead of abbreviated names{p_end}
+{synopt :{opt numbers}}add variable numbers to the output table{p_end}
+{synopt :{opt detailed}}compute string lengths and show them in the Stata type column{p_end}
+{synopt :{opt replace}}clear memory and load the schema description as a dataset{p_end}
 {synoptline}
 
 {marker use_options}{...}
@@ -197,6 +218,9 @@ before running the command.
 {pstd}Import large IDs from a foreign Parquet file as strings{p_end}
 {phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}{p_end}
 
+{pstd}Inspect a Parquet file without loading the data{p_end}
+{phang2}{cmd:. dtparquet describe using big_ids.parquet, numbers detailed}{p_end}
+
 {pstd}Export a .dta file to Parquet while preserving the active frame{p_end}
 {phang2}{cmd:. dtparquet export results.parquet using raw_data.dta, replace}{p_end}
 
@@ -240,7 +264,7 @@ For questions and suggestions, visit {browse "https://github.com/bukanpeneliti/d
 {title:Also see}
 
 {psee}
-Manual: {manlink D use}, {manlink D save}, {manlink D import}, {manlink D export}
+Manual: {manlink D use}, {manlink D describe}, {manlink D save}, {manlink D import}, {manlink D export}
 
 {psee}
-Online: {helpb use}, {helpb save}, {helpb import}, {helpb export}, {helpb dtmeta}, {helpb frames}
+Online: {helpb use}, {helpb describe}, {helpb save}, {helpb import}, {helpb export}, {helpb dtmeta}, {helpb frames}
