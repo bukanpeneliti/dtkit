@@ -919,6 +919,22 @@ fn polars_schema_types(dt: &DataType, det: bool, sl: usize) -> (&'static str, &'
     }
 }
 
+fn infer_default_format(stata_type: &str) -> String {
+    match stata_type {
+        "byte" | "int" | "long" | "date" | "time" | "datetime" => "%12.0f".to_string(),
+        "float" | "double" => "%12.2f".to_string(),
+        "strl" => "%9s".to_string(),
+        s if s.starts_with("str") => {
+            let w = s
+                .strip_prefix("str")
+                .and_then(|n| n.parse::<usize>().ok())
+                .unwrap_or(9);
+            format!("%{}s", w.max(9))
+        }
+        _ => "".to_string(),
+    }
+}
+
 pub fn validate_parquet_schema(path: &str, exp: &[&str]) -> Result<(), String> {
     let mut r = ParquetReader::new(File::open(path).map_err(|e| e.to_string())?);
     let s = r.schema().map_err(|e| format!("{e:?}"))?;
@@ -960,18 +976,28 @@ pub fn set_schema_macros(
             0
         };
         let (pt, st) = polars_schema_types(dt, det, sl);
+        let st_display = if det && st == "string" && sl > 0 && sl <= 2045 {
+            format!("str{sl}")
+        } else {
+            st.to_string()
+        };
         if !q {
-            display(&format!("{n:<32} | {dt:<32?} | {st}"));
+            display(&format!("{n:<32} | {dt:<32?} | {st_display}"));
         }
         let x = i + 1;
         set_macro(&format!("name_{x}"), n, false);
-        set_macro(&format!("type_{x}"), st, false);
+        set_macro(&format!("type_{x}"), &st_display, false);
+        set_macro(
+            &format!("format_{x}"),
+            &infer_default_format(&st_display),
+            false,
+        );
         set_macro(&format!("polars_type_{x}"), pt, false);
         set_macro(&format!("string_length_{x}"), &sl.to_string(), false);
         set_macro(&format!("rename_{x}"), "", false);
         fields.push(DescribeFieldPayload {
             n: n.to_string(),
-            s: st.to_string(),
+            s: st_display,
             p: pt.to_string(),
             l: sl,
             r: String::new(),

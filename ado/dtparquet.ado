@@ -1,4 +1,4 @@
-*! version 2.0.6 26mar2026
+*! version 2.0.7 26mar2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -1041,7 +1041,7 @@ program dtparquet_describe, rclass
             }
         }
 
-        display _newline as text "Contains data from " as result `"`using'"'
+        display _newline as text "Contains data"
         display as text " Observations: " as result %12.0gc `n_rows' as text _column(`meta_col') `"`right1'"'
         display as text "    Variables: " as result %12.0gc `n_columns' as text _column(`meta_col') `"`right2'"'
         if `"`right3'"' != "" {
@@ -1126,8 +1126,17 @@ program dtparquet_describe, rclass
                     local vname `"`name_`i''"'
                     local vtype `"`type_`i''"'
                     local vfmt `"`dtmeta_varfmt_`i''"'
+                    if `"`vfmt'"' == "" local vfmt `"`format_`i''"'
                     local vallab `"`dtmeta_vallab_`i''"'
                     local varlab `"`dtmeta_varlab_`i''"'
+                    local noted = 0
+                    if real("`dtmeta_var_note_count'") > 0 {
+                        forvalues j = 1/`dtmeta_var_note_count' {
+                            if `"`dtmeta_var_note_var_`j''"' == `"`vname'"' local noted = 1
+                        }
+                    }
+                    local varlab_show `"`varlab'"'
+                    if `noted' local varlab_show `"* `varlab'"'
                     local slen = real("`string_length_`i''")
 
                     if "`fullnames'" == "" {
@@ -1145,14 +1154,14 @@ program dtparquet_describe, rclass
                         local type_len = udstrlen(`"`vtype'"')
                         local fmt_len = udstrlen(`"`vfmt'"')
                         local vallab_len = udstrlen(`"`vallab'"')
-                        local varlab_len = udstrlen(`"`varlab'"')
+                        local varlab_len = udstrlen(`"`varlab_show'"')
                     }
                     else {
                         local name_len = strlen(`"`shown_name'"')
                         local type_len = strlen(`"`vtype'"')
                         local fmt_len = strlen(`"`vfmt'"')
                         local vallab_len = strlen(`"`vallab'"')
-                        local varlab_len = strlen(`"`varlab'"')
+                        local varlab_len = strlen(`"`varlab_show'"')
                     }
 
                     if "`numbers'" != "" {
@@ -1181,8 +1190,17 @@ program dtparquet_describe, rclass
                     local vname `"`name_`i''"'
                     local vtype `"`type_`i''"'
                     local vfmt `"`dtmeta_varfmt_`i''"'
+                    if `"`vfmt'"' == "" local vfmt `"`format_`i''"'
                     local vallab `"`dtmeta_vallab_`i''"'
                     local varlab `"`dtmeta_varlab_`i''"'
+                    local noted = 0
+                    if real("`dtmeta_var_note_count'") > 0 {
+                        forvalues j = 1/`dtmeta_var_note_count' {
+                            if `"`dtmeta_var_note_var_`j''"' == `"`vname'"' local noted = 1
+                        }
+                    }
+                    local varlab_show `"`varlab'"'
+                    if `noted' local varlab_show `"* `varlab'"'
                     local slen = real("`string_length_`i''")
 
                     if "`fullnames'" == "" {
@@ -1193,14 +1211,17 @@ program dtparquet_describe, rclass
                     }
 
                     if "`numbers'" != "" {
-                        display as text %`num_w'.0f `i' ". " as result `"`vname'"' _column(`type_col') as result `"`vtype'"' _column(`fmt_col') as result `"`vfmt'"' _column(`vallab_col') as result `"`vallab'"' _column(`varlab_col') as result `"`varlab'"'
+                        display as text %`num_w'.0f `i' ". " as result `"`vname'"' _column(`type_col') as result `"`vtype'"' _column(`fmt_col') as result `"`vfmt'"' _column(`vallab_col') as result `"`vallab'"' _column(`varlab_col') as result `"`varlab_show'"'
                     }
                     else {
-                        display as result _column(`name_col') `"`vname'"' _column(`type_col') `"`vtype'"' _column(`fmt_col') `"`vfmt'"' _column(`vallab_col') `"`vallab'"' _column(`varlab_col') `"`varlab'"'
+                        display as result _column(`name_col') `"`vname'"' _column(`type_col') `"`vtype'"' _column(`fmt_col') `"`vfmt'"' _column(`vallab_col') `"`vallab'"' _column(`varlab_col') `"`varlab_show'"'
                     }
                 }
 
                 display as text "{hline `rule_w'}"
+                if real("`dtmeta_var_note_count'") > 0 {
+                    display as text "* indicated variables have notes"
+                }
             }
         }
     }
@@ -1220,6 +1241,7 @@ program dtparquet_describe, rclass
             local varname `"`name_`i''"'
             local vartype `"`type_`i''"'
             local fmt `"`dtmeta_varfmt_`i''"'
+            if `"`fmt'"' == "" local fmt `"`format_`i''"'
             local vallab `"`dtmeta_vallab_`i''"'
             local varlab `"`dtmeta_varlab_`i''"'
             
