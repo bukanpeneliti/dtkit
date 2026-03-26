@@ -7,6 +7,24 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.6] - 2026-03-26
+
+- Patch release to align package/plugin version metadata and complete
+  Stata-style `dtparquet describe` output fields.
+- Component versions:
+  - **dtkit: v2.0.6 (Updated)**
+  - **dtparquet: v2.0.6 (Updated)**
+
+### Changed
+
+- **dtparquet v2.0.6**:
+  - Updated `describe` table columns to `Variable name`, `Storage type`,
+    `Display format`, `Value label`, and `Variable label`.
+  - Updated `describe, replace` to populate `format`, `vallab`, and `varlab`
+    directly from embedded `dtmeta` metadata.
+  - Standardized package and plugin version metadata to `2.0.6` across
+    release files.
+
 ## Package Release [v2.0.5] - 2026-03-25
 
 - Patch release for `dtparquet describe` output and timing checks.

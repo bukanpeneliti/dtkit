@@ -1,4 +1,4 @@
-*! version 2.0.5 25mar2026
+*! version 2.0.6 26mar2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -1108,10 +1108,14 @@ program dtparquet_describe, rclass
             else {
                 local name_title "Variable name"
                 local type_title "Storage type"
-                local ptype_title "Parquet type"
+                local fmt_title "Display format"
+                local vallab_title "Value label"
+                local varlab_title "Variable label"
                 local name_w = 13
                 local type_w = 12
-                local ptype_w = 12
+                local fmt_w = 14
+                local vallab_w = 11
+                local varlab_w = 14
                 local num_w = 0
 
                 if "`numbers'" != "" {
@@ -1121,7 +1125,9 @@ program dtparquet_describe, rclass
                 forvalues i = 1/`n_columns' {
                     local vname `"`name_`i''"'
                     local vtype `"`type_`i''"'
-                    local ptype `"`polars_type_`i''"'
+                    local vfmt `"`dtmeta_varfmt_`i''"'
+                    local vallab `"`dtmeta_vallab_`i''"'
+                    local varlab `"`dtmeta_varlab_`i''"'
                     local slen = real("`string_length_`i''")
 
                     if "`fullnames'" == "" {
@@ -1137,12 +1143,16 @@ program dtparquet_describe, rclass
                     if "`c(hasicu)'" == "1" {
                         local name_len = udstrlen(`"`shown_name'"')
                         local type_len = udstrlen(`"`vtype'"')
-                        local ptype_len = udstrlen(`"`ptype'"')
+                        local fmt_len = udstrlen(`"`vfmt'"')
+                        local vallab_len = udstrlen(`"`vallab'"')
+                        local varlab_len = udstrlen(`"`varlab'"')
                     }
                     else {
                         local name_len = strlen(`"`shown_name'"')
                         local type_len = strlen(`"`vtype'"')
-                        local ptype_len = strlen(`"`ptype'"')
+                        local fmt_len = strlen(`"`vfmt'"')
+                        local vallab_len = strlen(`"`vallab'"')
+                        local varlab_len = strlen(`"`varlab'"')
                     }
 
                     if "`numbers'" != "" {
@@ -1151,22 +1161,28 @@ program dtparquet_describe, rclass
 
                     local name_w = max(`name_w', `name_len')
                     local type_w = max(`type_w', `type_len')
-                    local ptype_w = max(`ptype_w', `ptype_len')
+                    local fmt_w = max(`fmt_w', `fmt_len')
+                    local vallab_w = max(`vallab_w', `vallab_len')
+                    local varlab_w = max(`varlab_w', `varlab_len')
                 }
 
                 local name_col = 1
                 local type_col = `name_col' + `name_w' + 2
-                local ptype_col = `type_col' + `type_w' + 2
-                local rule_w = `ptype_col' + `ptype_w' - 1
+                local fmt_col = `type_col' + `type_w' + 2
+                local vallab_col = `fmt_col' + `fmt_w' + 2
+                local varlab_col = `vallab_col' + `vallab_w' + 2
+                local rule_w = `varlab_col' + `varlab_w' - 1
 
                 display as text "{hline `rule_w'}"
-                display as text _column(`name_col') "`name_title'" _column(`type_col') "`type_title'" _column(`ptype_col') "`ptype_title'"
+                display as text _column(`name_col') "`name_title'" _column(`type_col') "`type_title'" _column(`fmt_col') "`fmt_title'" _column(`vallab_col') "`vallab_title'" _column(`varlab_col') "`varlab_title'"
                 display as text "{hline `rule_w'}"
 
                 forvalues i = 1/`n_columns' {
                     local vname `"`name_`i''"'
                     local vtype `"`type_`i''"'
-                    local ptype `"`polars_type_`i''"'
+                    local vfmt `"`dtmeta_varfmt_`i''"'
+                    local vallab `"`dtmeta_vallab_`i''"'
+                    local varlab `"`dtmeta_varlab_`i''"'
                     local slen = real("`string_length_`i''")
 
                     if "`fullnames'" == "" {
@@ -1177,10 +1193,10 @@ program dtparquet_describe, rclass
                     }
 
                     if "`numbers'" != "" {
-                        display as text %`num_w'.0f `i' ". " as result `"`vname'"' _column(`type_col') as result `"`vtype'"' _column(`ptype_col') as result `"`ptype'"'
+                        display as text %`num_w'.0f `i' ". " as result `"`vname'"' _column(`type_col') as result `"`vtype'"' _column(`fmt_col') as result `"`vfmt'"' _column(`vallab_col') as result `"`vallab'"' _column(`varlab_col') as result `"`varlab'"'
                     }
                     else {
-                        display as result _column(`name_col') `"`vname'"' _column(`type_col') `"`vtype'"' _column(`ptype_col') `"`ptype'"'
+                        display as result _column(`name_col') `"`vname'"' _column(`type_col') `"`vtype'"' _column(`fmt_col') `"`vfmt'"' _column(`vallab_col') `"`vallab'"' _column(`varlab_col') `"`varlab'"'
                     }
                 }
 
@@ -1193,8 +1209,8 @@ program dtparquet_describe, rclass
         quietly clear
         
         quietly generate str32 varname = ""
-        quietly generate str8 vartype = ""
-        quietly generate str8 format = ""
+        quietly generate str12 vartype = ""
+        quietly generate str49 format = ""
         quietly generate str32 vallab = ""
         quietly generate strL varlab = ""
         
@@ -1203,39 +1219,15 @@ program dtparquet_describe, rclass
         forvalues i = 1/`n_columns' {
             local varname `"`name_`i''"'
             local vartype `"`type_`i''"'
-            local string_len = real("`string_length_`i''")
-            
-            local fmt "%s"
-            if inlist("`vartype'", "byte", "int", "long") {
-                local fmt "%8.0g"
-            }
-            else if inlist("`vartype'", "float", "double") {
-                local fmt "%9.0g"
-            }
-            else if "`vartype'" == "date" {
-                local fmt "%tdd_m_YY"
-            }
-            else if "`vartype'" == "datetime" {
-                local fmt "%tc"
-            }
-            else if "`vartype'" == "time" {
-                local fmt "%tchh:mm:ss"
-            }
-            else if inlist("`vartype'", "string", "strl") {
-                if `string_len' > 80 {
-                    local fmt "%s"
-                }
-                else if `string_len' > 12 {
-                    local fmt "%-12s"
-                }
-                else {
-                    local fmt "%-9s"
-                }
-            }
+            local fmt `"`dtmeta_varfmt_`i''"'
+            local vallab `"`dtmeta_vallab_`i''"'
+            local varlab `"`dtmeta_varlab_`i''"'
             
             quietly replace varname = `"`varname'"' in `i'
             quietly replace vartype = `"`vartype'"' in `i'
             quietly replace format = `"`fmt'"' in `i'
+            quietly replace vallab = `"`vallab'"' in `i'
+            quietly replace varlab = `"`varlab'"' in `i'
         }
         
         quietly compress
