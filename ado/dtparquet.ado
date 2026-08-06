@@ -1,4 +1,4 @@
-*! version 2.0.7 26mar2026
+*! version 2.0.8 06aug2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -561,14 +561,7 @@ program dtparquet_use, rclass
             local i_original : list posof "`mname'" in vars_in_file
             if (`i_original' > 0 & `"`mtype'"' != "") {
                 if (substr("`mtype'", 1, 3) == "str" | lower("`mtype'") == "strl") {
-                    local resolved_mtype `mtype'
-                    if (lower("`mtype'") == "strl") {
-                        local observed_len = real("`string_length_`i_original''")
-                        if (`observed_len' <= 2045) {
-                            local resolved_mtype string
-                        }
-                    }
-                    local type_`i_original' `resolved_mtype'
+                    local type_`i_original' `mtype'
                     if `"`mfmt'"' != "" local format_`i_original' `mfmt'
                 }
             }
@@ -615,6 +608,7 @@ program dtparquet_use, rclass
 
     local match_vars_non_binary
     local cast_string_vars
+    local strl_vars
     foreach vari in `matched_vars' {
         local var_number: list posof "`vari'" in vars_in_file
         local type `type_`var_number''
@@ -626,6 +620,11 @@ program dtparquet_use, rclass
             local cast_string_vars `cast_string_vars' `vari'
         }
         local load_type_`var_number' `type'
+
+        if (lower("`type'") == "strl") {
+            local strl_vars `strl_vars' `vari'
+            continue
+        }
 
         dtparquet_gen_or_recast,  name(`vari')        ///
                                 type_new(`type')     ///
@@ -725,9 +724,9 @@ program dtparquet_use, rclass
 
     timer clear 98
     timer on 98
-    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'"
+    capture plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "`mapping'" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "`cast_json'" "`batch_size'" "`strl_vars'"
     if _rc != 0 {
-        plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'"
+        plugin call dtparquet_plugin, "read" "`file'" "from_macro" "`row_to_read'" "`plugin_offset'" "`sql_if'" "from_macros" "`parallelize'" "`vertical_relaxed'" "`asterisk_to_variable'" "`sort'" "`order_by_type'" "`order_descending'" "`n_obs_already'" "0" "0" "`batch_size'" "`strl_vars'"
     }
     timer off 98
     quietly timer list 98
@@ -738,6 +737,28 @@ program dtparquet_use, rclass
     if (`n_loaded_rows' < `row_to_read') {
         local keep_to = `n_obs_already' + `n_loaded_rows'
         quietly keep in 1/`keep_to'
+    }
+
+    // strL columns are delivered by the plugin as a temp .dta keyed by row
+    // number (Stata's C plugin API cannot sstore into strL variables).
+    if `"`strl_dta_path'"' != "" {
+        confirm file `"`strl_dta_path'"'
+        gen long _dtparquet_strl_key = _n
+        local merge_assert
+        if (`n_obs_already' == 0) local merge_assert assert(match)
+        capture noisily merge 1:1 _dtparquet_strl_key using `"`strl_dta_path'"', `merge_assert' gen(_dtparquet_merge_flag)
+        if _rc {
+            di as error "dtparquet: failed to merge strL columns from temporary file"
+            exit _rc
+        }
+        quietly count if _dtparquet_merge_flag == 2
+        if r(N) > 0 {
+            di as error "dtparquet: strL row count mismatch while loading `file'"
+            error 459
+        }
+        keep if inlist(_dtparquet_merge_flag, 1, 3)
+        drop _dtparquet_strl_key _dtparquet_merge_flag
+        erase `"`strl_dta_path'"'
     }
 
     if "`dtmeta_loaded'" == "1" {
@@ -880,6 +901,7 @@ program dtparquet_use, rclass
     return scalar loaded_rows = `n_loaded_rows'
     return scalar plugin_timers = `emit_rust_timers'
     return local file `"`file'"'
+    return local strl_vars `"`strl_vars'"'
 
     capture error 0
 end

@@ -6,7 +6,7 @@ members = [
 
 [package]
 name = "dtparquet"
-version = "2.0.7"
+version = "2.0.8"
 authors = ["Hafiz <your.email@example.com>"]
 edition = "2021"
 description = "Fast Stata plugin for Parquet I/O with metadata preservation"
@@ -33,6 +33,7 @@ polars = { version = "0.53.0", default-features = false, features=[
 ] }
 polars-io = { version = "0.53.0", default-features = false, features = ["parquet"] }
 polars-core = { version = "0.53.0", default-features = false }
+polars-readstat-rs = "0.20.1"
 
 stata-sys = { path = "./crates/stata-sys" }
 rayon = "1.8"

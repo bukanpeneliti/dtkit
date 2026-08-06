@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 2.0.7  26mar2026}{...}
+{* *! version 2.0.8  06aug2026}{...}
 {vieweralsosee "dtmeta" "help dtmeta"}{...}
 {vieweralsosee "dtkit" "help dtkit"}{...}
 {vieweralsosee "[D] use" "help use"}{...}

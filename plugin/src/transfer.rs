@@ -917,8 +917,63 @@ pub(crate) fn write_transfer_column_range(
             |dt| matches!(dt, DataType::Datetime(_, _)),
             write_datetime_values,
         ),
-        TransferWriterKind::String | TransferWriterKind::Strl => write_string_column_range(&ctx),
+        TransferWriterKind::String => write_string_column_range(&ctx),
+        // strL values cannot be written via sstore (Stata plugin API limit).
+        // They are delivered to Stata through a temporary .dta file that the
+        // ado merges 1:1 by row key; see write_strl_columns_to_dta_temp.
+        TransferWriterKind::Strl => Ok(()),
     }
+}
+
+pub fn write_strl_columns_to_dta_temp(
+    df: &DataFrame,
+    strl_names: &[String],
+    stata_offset: usize,
+) -> PolarsResult<String> {
+    if df.height() == 0 || strl_names.is_empty() {
+        return Ok(String::new());
+    }
+    let mut columns: Vec<Column> = Vec::with_capacity(strl_names.len() + 1);
+    for name in strl_names {
+        let col = df.column(name)?;
+        let col = match col.dtype() {
+            DataType::String => col.clone(),
+            // All-null columns read back as DataType::Null; the Stata writer
+            // rejects Null, so normalize to an all-missing string column.
+            _ => col.cast(&DataType::String).map_err(|_| {
+                PolarsError::ComputeError(
+                    format!("Cannot convert column '{name}' to string for strL loading").into(),
+                )
+            })?,
+        };
+        columns.push(col);
+    }
+    let n = df.height() as i32;
+    let key = Int32Chunked::from_iter_values(
+        PlSmallStr::from_static("_dtparquet_strl_key"),
+        (stata_offset as i32 + 1)..=(stata_offset as i32 + n),
+    );
+    let mut key_series = key.into_series();
+    key_series.rename(PlSmallStr::from_static("_dtparquet_strl_key"));
+    columns.push(key_series.into_column());
+    let out = DataFrame::new(df.height(), columns)?;
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let path = std::env::temp_dir().join(format!(
+        "dtparquet_strl_{}_{}.dta",
+        std::process::id(),
+        counter
+    ));
+    polars_readstat_rs::stata::writer::StataWriter::new(&path)
+        // Single-threaded: building a nested rayon pool inside polars' own
+        // compute pool can corrupt tokio EnterGuard state and panic.
+        .with_n_threads(1)
+        .write_df(&out)
+        .map_err(|e| {
+            PolarsError::ComputeError(format!("Failed to write strL .dta: {e}").into())
+        })?;
+    Ok(path.to_string_lossy().replace('\\', "/"))
 }
 
 // --- Stata to Polars (Writer Path) ---

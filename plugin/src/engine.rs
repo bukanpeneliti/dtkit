@@ -95,6 +95,7 @@ pub struct ReadArgs {
     pub random_share: f64,
     pub random_seed: u64,
     pub batch_size: usize,
+    pub strl_columns: String,
 }
 
 #[derive(Debug, Clone)]
@@ -175,8 +176,8 @@ pub fn parse_command(name: &str, args: &[&str]) -> ParseResult<CommandArgs> {
 }
 
 fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
-    if args.len() < 16 {
-        return Err(DtparquetError::SubcommandArgCount("read", 16));
+    if args.len() < 17 {
+        return Err(DtparquetError::SubcommandArgCount("read", 17));
     }
     let _ = parse_arg::<usize>("order_by_type", args[10])?;
     let _ = parse_arg::<f64>("order_descending", args[11])?;
@@ -202,6 +203,7 @@ fn parse_read_args(args: &[&str]) -> ParseResult<CommandArgs> {
         random_share: parse_arg("random_share", args[13])?,
         random_seed: parse_arg("random_seed", args[14])?,
         batch_size: parse_arg("batch_size", args[15])?,
+        strl_columns: args[16].to_string(),
     }))
 }
 
@@ -306,6 +308,7 @@ pub fn dispatch_command(cmd: CommandArgs) -> Result<ST_retcode, DtparquetError> 
             random_share: args.random_share,
             random_seed: args.random_seed,
             batch_size: args.batch_size,
+            strl_columns: &args.strl_columns,
         }),
         CommandArgs::Save(args) => export_parquet_request(&WriteRequest {
             path: &args.file_path,
@@ -580,12 +583,22 @@ pub struct ReadRequest<'a> {
     pub random_share: f64,
     pub random_seed: u64,
     pub batch_size: usize,
+    pub strl_columns: &'a str,
 }
 
 pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetError> {
     let start = Instant::now();
     let (mut collects, mut processed) = (0usize, 0usize);
     init_runtime("read");
+
+    let strl_names: Vec<String> = req
+        .strl_columns
+        .split_whitespace()
+        .map(str::to_string)
+        .collect();
+    let has_strl = !strl_names.is_empty();
+    set_state_macro("read_strl_mode", if has_strl { "dta_merge" } else { "none" });
+    set_macro("strl_dta_path", "", false);
 
     let scan_plan_started = Instant::now();
     let boundary = resolve_read_boundary_inputs(req.variables_as_str, req.mapping)?;
@@ -601,11 +614,16 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
     set_elapsed_ms_macro("read_scan_plan_elapsed_ms", scan_plan_started);
     emit_plan_macros("read", plan.schema_handoff_mode);
 
-    let col_list: Vec<&str> = plan
+    let mut col_list: Vec<&str> = plan
         .selected_column_list
         .iter()
         .map(|s| s.as_str())
         .collect();
+    for s in &strl_names {
+        if !col_list.contains(&s.as_str()) {
+            col_list.push(s);
+        }
+    }
     let row_width_bytes = estimate_transfer_row_width_bytes(&plan.transfer_columns);
     let execute_started = Instant::now();
     let (loaded, batches, tuner) = if plan.can_use_eager {
@@ -631,6 +649,12 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         set_elapsed_ms_macro("read_apply_cast_elapsed_ms", read_cast_started);
         set_runtime_macro("read_cast_mode", "eager");
         set_runtime_macro("read_cast_defer_reason", "eager_path");
+        if has_strl {
+            let strl_dta_started = Instant::now();
+            let dta_path = write_strl_columns_to_dta_temp(&df, &strl_names, req.stata_offset)?;
+            set_elapsed_ms_macro("read_strl_dta_elapsed_ms", strl_dta_started);
+            set_macro("strl_dta_path", &dta_path, false);
+        }
         let mut t = AdaptiveBatchTuner::new(row_width_bytes, req.batch_size, 0);
         set_engine_stage("read", EngineStage::StataSink);
         let strategy = req.parallel_strategy.unwrap_or_else(|| {
@@ -708,19 +732,22 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             .parallel_strategy
             .unwrap_or_else(|| determine_parallelization_strategy(columns.len(), req.n_rows, n_t));
         set_engine_stage("read", EngineStage::StataSink);
+        let use_streaming = req.n_rows > 1_000_000 && !has_strl;
+        let batch_mode = use_legacy_batches && !has_strl;
         let (l, b) = run_lazy_pipeline(
             lf_sorted,
             &columns,
             req.n_rows,
             b_off,
-            req.n_rows > 1_000_000,
+            use_streaming,
             &plan.transfer_columns,
             strategy,
             req.stata_offset,
             &mut t,
             &mut processed,
             &mut collects,
-            use_legacy_batches,
+            batch_mode,
+            &strl_names,
         )?;
         (l, b, t)
     };
@@ -972,6 +999,7 @@ fn run_lazy_pipeline(
     proc: &mut usize,
     collects: &mut usize,
     batch_mode: bool,
+    strl_names: &[String],
 ) -> PolarsResult<(usize, usize)> {
     let mut lf = lf.select(cols);
     if src_off > 0 {
@@ -1033,6 +1061,12 @@ fn run_lazy_pipeline(
         *collects += 1;
         let df = lf.collect()?;
         collect_elapsed_ms = collect_started.elapsed().as_millis();
+        if !strl_names.is_empty() {
+            let strl_dta_started = Instant::now();
+            let dta_path = write_strl_columns_to_dta_temp(&df, strl_names, stata_off)?;
+            set_elapsed_ms_macro("read_strl_dta_elapsed_ms", strl_dta_started);
+            set_macro("strl_dta_path", &dta_path, false);
+        }
         let res = sink_dataframe_in_batches(&df, 0, trans_cols, strategy, stata_off, tuner, proc);
         if let Ok((_, _, prep_us, write_us)) = &res {
             sink_prepare_elapsed_us = *prep_us;
@@ -1711,6 +1745,7 @@ mod tests {
             "0.25",
             "42",
             "2500",
+            "long_str",
         ];
         if let CommandArgs::Read(r) = parse_read_args(&args).unwrap() {
             assert_eq!(r.file_path, p_s);
@@ -1722,6 +1757,7 @@ mod tests {
             assert_eq!(r.order_by, "id");
             assert_eq!(r.random_seed, 42);
             assert_eq!(r.batch_size, 2500);
+            assert_eq!(r.strl_columns, "long_str");
         } else {
             panic!("Expected read args");
         }
