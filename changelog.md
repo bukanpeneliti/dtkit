@@ -7,6 +7,25 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.9] - 2026-08-06
+
+- Patch release for quiet `strL` loading and reproducible release builds.
+- Component versions:
+  - **dtkit: v2.0.9 (Updated)**
+  - **dtparquet: v2.0.9 (Updated)**
+
+### Changed
+
+- **Release workflow**:
+  - Pinned the Rust toolchain to 1.93.0 to avoid an `ethnum` 1.5.2 build
+    failure under the floating stable toolchain.
+
+### Fixed
+
+- **dtparquet v2.0.9**:
+  - Suppressed the internal merge table and no-observations-deleted message
+    emitted while loading `strL` columns.
+
 ## Package Release [v2.0.8] - 2026-08-06
 
 - Patch release for reliable `strL` loading and local Parquet inspection.

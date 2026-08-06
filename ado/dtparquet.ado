@@ -1,4 +1,4 @@
-*! version 2.0.8 06aug2026
+*! version 2.0.9 06aug2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -765,7 +765,7 @@ program dtparquet_use, rclass
         gen long _dtparquet_strl_key = _n
         local merge_assert
         if (`n_obs_already' == 0) local merge_assert assert(match)
-        capture noisily merge 1:1 _dtparquet_strl_key using `"`strl_dta_path'"', `merge_assert' gen(_dtparquet_merge_flag)
+        capture merge 1:1 _dtparquet_strl_key using `"`strl_dta_path'"', `merge_assert' gen(_dtparquet_merge_flag)
         if _rc {
             di as error "dtparquet: failed to merge strL columns from temporary file"
             exit _rc
@@ -775,7 +775,7 @@ program dtparquet_use, rclass
             di as error "dtparquet: strL row count mismatch while loading `file'"
             error 459
         }
-        keep if inlist(_dtparquet_merge_flag, 1, 3)
+        quietly keep if inlist(_dtparquet_merge_flag, 1, 3)
         drop _dtparquet_strl_key _dtparquet_merge_flag
         erase `"`strl_dta_path'"'
     }
