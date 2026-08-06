@@ -1062,6 +1062,7 @@ program dtparquet_describe, rclass
     local dtmeta_dta_label ""
     local dtmeta_dta_ts ""
     local dtmeta_dta_note_count 0
+    local dtmeta_var_note_count 0
 
     confirm file `"`using'"'
 

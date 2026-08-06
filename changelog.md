@@ -7,6 +7,43 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.8] - 2026-08-06
+
+- Patch release for reliable `strL` loading and local Parquet inspection.
+- Component versions:
+  - **dtkit: v2.0.8 (Updated)**
+  - **dtparquet: v2.0.8 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.8**:
+  - Loaded `strL` columns through a temporary DTA merge because Stata's plugin
+    API cannot write `strL` values directly.
+  - Preserved `strL` storage for short values and supported selections that
+    contain only `strL` columns.
+  - Read local Parquet schemas and projected string columns eagerly to avoid
+    the Polars lazy Tokio path during `describe, detailed`.
+  - Mapped overlength Parquet column names to unique, valid Stata names while
+    retaining the original names for Parquet column selection.
+  - Initialized variable-note state for foreign Parquet files so
+    `describe, detailed` renders files without embedded `dtmeta` metadata.
+
+## Package Release [v2.0.7] - 2026-03-26
+
+- Patch release to align `dtparquet describe` output with Stata conventions.
+- Component versions:
+  - **dtkit: v2.0.7 (Updated)**
+  - **dtparquet: v2.0.7 (Updated)**
+
+### Fixed
+
+- **dtparquet v2.0.7**:
+  - Added default display formats for foreign Parquet columns.
+  - Displayed variable-note markers and metadata-backed formats, value labels,
+    and variable labels in the aligned schema table.
+  - Updated `describe, replace` to use default formats when embedded `dtmeta`
+    formats are absent.
+
 ## Package Release [v2.0.6] - 2026-03-26
 
 - Patch release to align package/plugin version metadata and complete

@@ -450,8 +450,8 @@ timer off 9
 timer list 9
 display as text "Test 9 finished in" as result %6.2f r(t9) "s"
 
-// Test Case 10: describe timing on large foreign parquet without dtmeta
-display _newline "=== TEST CASE 10: Foreign describe timing smoke test ==="
+// Test Case 10: detailed describe on large foreign parquet without dtmeta
+display _newline "=== TEST CASE 10: Foreign detailed describe smoke test ==="
 timer clear 10
 timer on 10
 local ++total_tests
@@ -462,7 +462,7 @@ capture plugin call dtparquet_plugin, "has_metadata_key" "`foreign_large'" "dtpa
 if _rc != 0 local ++t10_err
 else if "`has_metadata_key'" != "0" local ++t10_err
 
-dtparquet describe using "`foreign_large'", quietly
+dtparquet describe using "`foreign_large'", detailed
 if r(N) <= 0 local ++t10_err
 if r(k) <= 0 local ++t10_err
 display as text "Test 10 schema:" as result " N=" %12.0gc r(N) as result " k=" %12.0gc r(k)
@@ -472,7 +472,7 @@ if `t10_err' == 0 {
     local passed_tests "`passed_tests' 10"
 }
 else {
-    display as error "Test 10 failed: foreign describe timing smoke test"
+    display as error "Test 10 failed: foreign detailed describe smoke test"
     local failed_tests "`failed_tests' 10"
 }
 timer off 10
