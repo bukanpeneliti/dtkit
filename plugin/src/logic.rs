@@ -1031,11 +1031,6 @@ struct DescribeSchemaPayload {
 
 pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
     set_macro("cast_json", "", false);
-    let source = if cfg!(windows) {
-        path.replace('\\', "/")
-    } else {
-        path.to_string()
-    };
     let mut r = match File::open(path).map(ParquetReader::new) {
         Ok(v) => v,
         Err(e) => {
@@ -1044,23 +1039,11 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
         }
     };
 
-    let mut lf = match LazyFrame::scan_parquet(
-        PlRefPath::new(&source),
-        ScanArgsParquet {
-            allow_missing_columns: true,
-            cache: false,
-            ..Default::default()
-        },
-    ) {
-        Ok(v) => v,
-        Err(e) => {
-            display(&format!("Error: {e:?}"));
-            return 198;
-        }
-    };
-
-    let schema = match lf.collect_schema() {
-        Ok(v) => v,
+    let schema = match r.schema() {
+        Ok(v) => Schema::from_iter(
+            v.iter()
+                .map(|(name, field)| (name.clone(), DataType::from_arrow_field(field))),
+        ),
         Err(e) => {
             display(&format!("Error: {e:?}"));
             return 198;
@@ -1082,25 +1065,14 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
             .filter_map(|(n, dt)| dt.is_string().then_some(n.clone()))
             .collect();
         if !string_cols.is_empty() {
-            let lf = match LazyFrame::scan_parquet(
-                PlRefPath::new(&source),
-                ScanArgsParquet {
-                    allow_missing_columns: true,
-                    cache: false,
-                    ..Default::default()
-                },
-            ) {
-                Ok(v) => v,
-                Err(e) => {
-                    display(&format!("Error: {e:?}"));
-                    return 198;
-                }
-            };
-            let mut s_exprs = Vec::with_capacity(string_cols.len());
-            for n in &string_cols {
-                s_exprs.push(col(n.clone()));
-            }
-            let string_df = match lf.select(s_exprs).collect() {
+            let string_df = match File::open(path)
+                .map(ParquetReader::new)
+                .map(|reader| {
+                    reader.with_columns(Some(string_cols.iter().map(ToString::to_string).collect()))
+                })
+                .map_err(PolarsError::from)
+                .and_then(SerReader::finish)
+            {
                 Ok(v) => v,
                 Err(e) => {
                     display(&format!("Error: {e:?}"));
@@ -1122,7 +1094,7 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
             }
         }
     }
-    match set_schema_macros(schema.as_ref(), &lens, det, q) {
+    match set_schema_macros(&schema, &lens, det, q) {
         Ok(c) => {
             set_macro("n_columns", &c.to_string(), false);
             set_macro("n_rows", &n_rows.to_string(), false);
