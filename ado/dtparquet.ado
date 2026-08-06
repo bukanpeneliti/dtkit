@@ -548,8 +548,23 @@ program dtparquet_use, rclass
     local n_rows = real("`n_rows'")
     local n_columns = real("`n_columns'")
     local vars_in_file
+    local stata_names_in_file
     forvalues i = 1/`n_columns' {
         local vars_in_file `vars_in_file' `name_`i''
+
+        local stata_name = substr("`name_`i''", 1, 32)
+        local stata_name_base `stata_name'
+        local suffix 0
+        local name_pos : list posof "`stata_name'" in stata_names_in_file
+        while (`name_pos' > 0) {
+            local ++suffix
+            local suffix_text "_`suffix'"
+            local prefix_length = 32 - strlen("`suffix_text'")
+            local stata_name = substr("`stata_name_base'", 1, `prefix_length') + "`suffix_text'"
+            local name_pos : list posof "`stata_name'" in stata_names_in_file
+        }
+        local stata_name_`i' `stata_name'
+        local stata_names_in_file `stata_names_in_file' `stata_name'
     }
 
     if "`dtmeta_loaded'" == "1" {
@@ -614,6 +629,7 @@ program dtparquet_use, rclass
         local type `type_`var_number''
         local p_type `polars_type_`var_number''
         local string_length `string_length_`var_number''
+        local name_to_create `stata_name_`var_number''
 
         if (`is_int64_as_string' & inlist("`p_type'", "int64", "uint64")) {
             local type strl
@@ -626,18 +642,18 @@ program dtparquet_use, rclass
             continue
         }
 
-        dtparquet_gen_or_recast,  name(`vari')        ///
+        dtparquet_gen_or_recast,  name(`name_to_create') ///
                                 type_new(`type')     ///
                                 str_length(`string_length')
 
         if ("`type'" == "datetime") {
-            format `vari' %tc
+            format `name_to_create' %tc
         }
         else if ("`type'" == "date") {
-            format `vari' %td
+            format `name_to_create' %td
         }
         else if ("`type'" == "time") {
-            format `vari' %tchh:mm:ss
+            format `name_to_create' %tchh:mm:ss
         }
         else if ("`type'" == "binary") {
             continue
@@ -660,15 +676,16 @@ program dtparquet_use, rclass
     if c(k) > 0 {
         foreach vari of varlist * {
             local i = `i' + 1
-            local i_matched : list posof "`vari'" in matched_vars
+            local i_original : list posof "`vari'" in stata_names_in_file
+            local original_name `name_`i_original''
+            local i_matched : list posof "`original_name'" in matched_vars
             if (`i_matched' > 0) {
-                local i_original : list posof "`vari'" in vars_in_file
                 local read_type `load_type_`i_original''
                 if (substr("`read_type'", 1, 3) == "str" & lower("`read_type'") != "strl") {
                     local read_type string
                 }
                 local v_to_read_index_`i_matched' `i'
-                local v_to_read_name_`i_matched' `vari'
+                local v_to_read_name_`i_matched' `original_name'
                 local v_to_read_type_`i_matched' `read_type'
                 local v_to_read_p_type_`i_matched' `polars_type_`i_original''
 
@@ -676,7 +693,7 @@ program dtparquet_use, rclass
                 if (`i_matched' > 1) {
                     local read_fields_json `"`read_fields_json',"'
                 }
-                local read_fields_json `"`read_fields_json'{""i"":`read_index',""n"":""`vari'"",""d"":""`polars_type_`i_original''"",""s"":""`read_type'""}"'
+                local read_fields_json `"`read_fields_json'{""i"":`read_index',""n"":""`original_name'"",""d"":""`polars_type_`i_original''"",""s"":""`read_type'""}"'
             }
         }
     }
