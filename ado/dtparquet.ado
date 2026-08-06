@@ -657,25 +657,27 @@ program dtparquet_use, rclass
     timer on 94
     local i = 0
     local read_fields_json ""
-    foreach vari of varlist * {
-        local i = `i' + 1
-        local i_matched : list posof "`vari'" in matched_vars
-        if (`i_matched' > 0) {
-            local i_original : list posof "`vari'" in vars_in_file
-            local read_type `load_type_`i_original''
-            if (substr("`read_type'", 1, 3) == "str" & lower("`read_type'") != "strl") {
-                local read_type string
-            }
-            local v_to_read_index_`i_matched' `i'
-            local v_to_read_name_`i_matched' `vari'
-            local v_to_read_type_`i_matched' `read_type'
-            local v_to_read_p_type_`i_matched' `polars_type_`i_original''
+    if c(k) > 0 {
+        foreach vari of varlist * {
+            local i = `i' + 1
+            local i_matched : list posof "`vari'" in matched_vars
+            if (`i_matched' > 0) {
+                local i_original : list posof "`vari'" in vars_in_file
+                local read_type `load_type_`i_original''
+                if (substr("`read_type'", 1, 3) == "str" & lower("`read_type'") != "strl") {
+                    local read_type string
+                }
+                local v_to_read_index_`i_matched' `i'
+                local v_to_read_name_`i_matched' `vari'
+                local v_to_read_type_`i_matched' `read_type'
+                local v_to_read_p_type_`i_matched' `polars_type_`i_original''
 
-            local read_index = `i' - 1
-            if (`i_matched' > 1) {
-                local read_fields_json `"`read_fields_json',"'
+                local read_index = `i' - 1
+                if (`i_matched' > 1) {
+                    local read_fields_json `"`read_fields_json',"'
+                }
+                local read_fields_json `"`read_fields_json'{""i"":`read_index',""n"":""`vari'"",""d"":""`polars_type_`i_original''"",""s"":""`read_type'""}"'
             }
-            local read_fields_json `"`read_fields_json'{""i"":`read_index',""n"":""`vari'"",""d"":""`polars_type_`i_original''"",""s"":""`read_type'""}"'
         }
     }
 
@@ -759,6 +761,17 @@ program dtparquet_use, rclass
         keep if inlist(_dtparquet_merge_flag, 1, 3)
         drop _dtparquet_strl_key _dtparquet_merge_flag
         erase `"`strl_dta_path'"'
+    }
+
+    // Normalize strL storage type: the temp .dta holds short values as str#,
+    // but strl columns must load as strL.
+    if `"`strl_vars'"' != "" {
+        foreach vari of local strl_vars {
+            capture confirm variable `vari'
+            if _rc == 0 {
+                capture recast strL `vari'
+            }
+        }
     }
 
     if "`dtmeta_loaded'" == "1" {
