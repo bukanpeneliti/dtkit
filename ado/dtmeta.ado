@@ -32,10 +32,16 @@ program define dtmeta, rclass
     _labelframes, frame(`_dtinfo') source_frame(`source_frame') // dtinfo always has content
 
     // store returned results
+    // describe()'s varlist results are always kept. labelbook() post-processes
+    // value labels through uselabel internally, so it fails with r(111) when
+    // label text contains a line feed or carriage return; the _dtlabel frame
+    // above already holds that metadata.
     quietly describe, varlist
     return add
-    quietly labelbook
-    return add
+    capture quietly labelbook
+    if _rc == 111 capture error 0
+    else if _rc exit _rc
+    else return add
 
     // export to save
     if `"`save'"' != "" _toexcel, fullname("`fullname'") replace(`replace')
@@ -89,22 +95,97 @@ program define _makevarnotes
 end
 
 // * create value labels
+// Reads value labels via Mata (st_vldir/st_vlload) instead of uselabel.
+// uselabel round-trips label text through a temp do-file, so label text
+// containing a line feed or carriage return breaks its line parser
+// ("in not found", r(111)). Mata carries the text as data, never as code.
 program define _makevallab, rclass
     syntax , source_frame(name) target_frame(name)
-    frame copy `source_frame' `target_frame', replace
-    frame `target_frame': uselabel, clear var
-    frame `target_frame' {
-        if _N == 0 exit
+    tempname collector
+    frame create `collector' strL vallab double value strL label ///
+        byte trunc strL varname strL _level
+    local maxlen = c(maxstrvarlen)
+    mata: _dtmeta_vlload("`collector'", "`source_frame'", `maxlen')
+    frame `collector': local _dtmeta_nlbl = _N
+    if `_dtmeta_nlbl' == 0 {
+        frame drop `collector'
+        exit
     }
-    frame `target_frame': ren lname vallab
-    frame `target_frame': quietly generate varname = ""
-    foreach lbl in `r(__labnames__)' {
-        frame `target_frame': quietly replace varname = "`r(`lbl')'" if vallab == "`lbl'"
-    }
+    frame copy `collector' `target_frame', replace
+    frame drop `collector'
+    frame `target_frame': quietly compress
     frame `target_frame': quietly sort vallab value
-    frame `target_frame': quietly generate _level = "value label"
-    frame `target_frame': quietly by vallab: generate index = _n
+    frame `target_frame': quietly generate index = _n, before(vallab)
+    frame `target_frame': quietly by vallab: replace index = _n
     frame `target_frame': order _level varname index vallab
+end
+
+mata:
+void _dtmeta_vlload(string scalar target, string scalar src, real scalar maxlen) {
+    string scalar cur, lbl, v, vl, vv
+    string vector labs, labnames, labvars
+    real scalar li, n, oldN, i, nv, vi, k, f
+    real colvector vals, tr
+    string colvector txt
+
+    cur = st_framecurrent()
+    // Map each value label name to the variables using it (source frame).
+    // Names only; label text never passes through a macro.
+    st_framecurrent(src)
+    nv = st_nvar()
+    labnames = J(1, 0, "")
+    labvars = J(1, 0, "")
+    for (vi = 1; vi <= nv; vi++) {
+        v = st_varname(vi)
+        vl = st_varvaluelabel(v)
+        if (vl == "") continue
+        f = 0
+        for (k = 1; k <= cols(labnames); k++) {
+            if (labnames[k] == vl) {
+                if (labvars[k] == "") labvars[k] = v
+                else labvars[k] = labvars[k] + " " + v
+                f = 1
+                break
+            }
+        }
+        if (f == 0) {
+            labnames = labnames, vl
+            labvars = labvars, v
+        }
+    }
+    labs = st_vldir()
+    st_framecurrent(target)
+    for (li = 1; li <= cols(labs); li++) {
+        lbl = labs[li]
+        if (lbl == "") continue
+        st_framecurrent(src)
+        st_vlload(lbl, vals=., txt="")
+        n = rows(vals)
+        st_framecurrent(target)
+        if (n == 0) continue
+        oldN = st_nobs()
+        st_addobs(n)
+        st_sstore((oldN+1::oldN+n), 1, J(n, 1, lbl))
+        st_store((oldN+1::oldN+n), 2, vals)
+        st_sstore((oldN+1::oldN+n), 3, txt)
+        tr = J(n, 1, 0)
+        for (i = 1; i <= n; i++) {
+            // uselabel sets trunc from strlen() (bytes), not ustrlen().
+            if (strlen(txt[i]) > maxlen) tr[i] = 1
+        }
+        st_store((oldN+1::oldN+n), 4, tr)
+        vv = ""
+        for (k = 1; k <= cols(labnames); k++) {
+            if (labnames[k] == lbl) {
+                vv = labvars[k]
+                break
+            }
+        }
+        st_sstore((oldN+1::oldN+n), 5, J(n, 1, vv))
+        st_sstore((oldN+1::oldN+n), 6, J(n, 1, "value label"))
+    }
+    st_framecurrent(cur)
+}
 end
 
 // * Dataset-level info
