@@ -13,6 +13,17 @@ log using ado/ancillary_files/test/log/dtparquet_test1.log, replace
 discard
 capture program drop dtparquet
 run "ado/dtparquet.ado"
+capture program drop dtmeta
+capture program drop _makevars
+capture program drop _makevarnotes
+capture program drop _makevallab
+capture program drop _makedtainfo
+capture program drop _isempty
+capture program drop _labelframes
+capture program drop _toexcel
+capture program drop _argload
+capture program drop _makereport
+run "ado/dtmeta.ado"
 local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
@@ -479,6 +490,59 @@ timer off 10
 timer list 10
 display as text "Test 10 finished in" as result %6.2f r(t10) "s"
 
+// Test Case 11: save/use roundtrip preserves LF label text
+display _newline "=== TEST CASE 11: LF label save/use roundtrip ==="
+timer clear 12
+timer on 12
+local ++total_tests
+clear
+set obs 2
+generate byte v_lf = _n
+// LF label text broke uselabel's line parser on save ("in not found", r(111)).
+mata: st_vlmodify("pq_lf", (1\2), ("line1" + char(10) + "line2" \ "plain"))
+label values v_lf pq_lf
+local t11_err 0
+capture dtparquet save "test_case11_lf.parquet", replace
+if _rc {
+    display as error "Test 11 Save failed with error " _rc
+    local ++t11_err
+}
+else {
+    clear
+    capture dtparquet use using "test_case11_lf.parquet"
+    if _rc {
+        display as error "Test 11 Use failed with error " _rc
+        local ++t11_err
+    }
+    else {
+        // Byte checks via Mata numerics; LF text never enters a macro.
+        mata: st_vlload("pq_lf", t11v=., t11t="")
+        mata: st_numscalar("t11_n", rows(t11v))
+        mata: st_numscalar("t11_at", strpos(t11t[1], char(10)))
+        mata: st_numscalar("t11_len", strlen(t11t[1]))
+        if t11_n != 2 | t11_at != 6 | t11_len != 11 {
+            display as error "Test 11 failed: LF mapping not preserved (n=" t11_n " at=" t11_at " len=" t11_len ")"
+            local ++t11_err
+        }
+        mata: st_local("t11_plain", t11t[2])
+        if "`t11_plain'" != "plain" {
+            display as error "Test 11 failed: second mapping mismatch"
+            local ++t11_err
+        }
+    }
+}
+if `t11_err' == 0 {
+    display as result "Test 11 completed successfully"
+    local passed_tests "`passed_tests' 11"
+}
+else {
+    display as error "Test 11 failed with `t11_err' error(s)"
+    local failed_tests "`failed_tests' 11"
+}
+timer off 12
+timer list 12
+display as text "Test 11 finished in" as result %6.2f r(t12) "s"
+
 // Cleanup
 capture erase "test_case1.parquet"
 capture erase "test_case2.parquet"
@@ -491,6 +555,7 @@ capture erase "test_case6.parquet"
 capture erase "test_case8_noext.parquet"
 capture erase "test_case8_upper.parquet"
 capture erase "test_case9.parquet"
+capture erase "test_case11_lf.parquet"
 capture erase "test.parquet"
 capture erase "test_orig.dta"
 

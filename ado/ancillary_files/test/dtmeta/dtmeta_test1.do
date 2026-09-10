@@ -291,6 +291,66 @@ else {
     local passed_tests "`passed_tests' 11"
 }
 
+// Test Case 12: Value labels with embedded line breaks (LF/CR)
+di _n "=== TEST CASE 12: Line-break value labels (LF/CR) ==="
+local ++total_tests
+clear
+set obs 1
+gen byte y_lf = 1
+gen byte y_cr = 1
+// uselabel round-trips text through a temp do-file, so LF/CR text broke its
+// line parser ("in not found", r(111)). Build such labels directly in Mata.
+mata: st_vlmodify("dtmeta_lf", 1, "line1" + char(10) + "line2")
+label values y_lf dtmeta_lf
+mata: st_vlmodify("dtmeta_cr", 1, "carriage" + char(13) + "return")
+label values y_cr dtmeta_cr
+local t12_err 0
+capture dtmeta
+if _rc {
+    di as error "Test 12 failed: dtmeta returned error " _rc
+    local ++t12_err
+}
+else {
+    // Label text must survive byte-identical: LF at 6, length 11;
+    // CR at 9, length 15 (carriage + char(13) + return = 8+1+6).
+    // Rows sort by vallab, so find each label's row with a per-row
+    // vallab comparison first. LF/CR text never enters a macro.
+    local t12_lfrow = 0
+    local t12_crrow = 0
+    frame _dtlabel: local t12_N = _N
+    forvalues t12_r = 1/`t12_N' {
+        frame _dtlabel: local t12_vl = vallab[`t12_r']
+        if "`t12_vl'" == "dtmeta_lf" local t12_lfrow `t12_r'
+        if "`t12_vl'" == "dtmeta_cr" local t12_crrow `t12_r'
+    }
+    if `t12_lfrow' == 0 | `t12_crrow' == 0 {
+        di as error "Test 12 failed: label rows not found"
+        local ++t12_err
+    }
+    else {
+        frame _dtlabel: mata: st_numscalar("t12_lf_at", strpos(st_sdata(`t12_lfrow', "label"), char(10)))
+        frame _dtlabel: mata: st_numscalar("t12_lf_len", strlen(st_sdata(`t12_lfrow', "label")))
+        if t12_lf_at != 6 | t12_lf_len != 11 {
+            di as error "Test 12 failed: LF text not preserved (at=" t12_lf_at " len=" t12_lf_len ")"
+            local ++t12_err
+        }
+        frame _dtlabel: mata: st_numscalar("t12_cr_at", strpos(st_sdata(`t12_crrow', "label"), char(13)))
+        frame _dtlabel: mata: st_numscalar("t12_cr_len", strlen(st_sdata(`t12_crrow', "label")))
+        if t12_cr_at != 9 | t12_cr_len != 15 {
+            di as error "Test 12 failed: CR text not preserved (at=" t12_cr_at " len=" t12_cr_len ")"
+            local ++t12_err
+        }
+    }
+}
+if `t12_err' == 0 {
+    di as text "Test 12 completed successfully"
+    local passed_tests "`passed_tests' 12"
+}
+else {
+    di as error "Test 12 failed with `t12_err' error(s)"
+    local failed_tests "`failed_tests' 12"
+}
+
 // Cleanup
 frame change default
 capture frame drop _dtvars _dtnotes _dtlabel _dtinfo _dtsource
