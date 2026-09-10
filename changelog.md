@@ -7,6 +7,28 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.0.10] - 2026-09-10
+
+- Patch release for the `dtmeta` line-break value label fix.
+- Component versions:
+  - **dtkit: v2.0.10 (Updated)**
+  - **dtmeta: v1.0.2 (Updated)**
+  - dtfreq: v1.0.2 (Unchanged)
+  - dtstat: v1.0.2 (Unchanged)
+  - dtparquet: v2.0.9 (Unchanged)
+
+### Fixed
+
+- **dtmeta v1.0.2**:
+  - Read value labels with Mata (`st_vldir`/`st_vlload`) instead of
+    `uselabel`, which round-trips label text through a temp do-file and
+    fails with `in not found` r(111) when label text contains a line feed
+    or carriage return.
+  - Guarded the internal `labelbook` call against the same r(111) failure
+    since `labelbook` uses `uselabel` internally.
+  - Added regression coverage: `dtmeta` Test 12 (LF/CR label preservation)
+    and `dtparquet` Test 11 (LF label save/use roundtrip).
+
 ## Package Release [v2.0.9] - 2026-08-06
 
 - Patch release for quiet `strL` loading and reproducible release builds.
