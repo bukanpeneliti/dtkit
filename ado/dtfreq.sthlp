@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  11mar2026}{...}
+{* *! version 1.1.0  08oct2026}{...}
 {vieweralsosee "[R] contract" "help contract"}{...}
 {vieweralsosee "[R] table" "help table"}{...}
 {vieweralsosee "[R] tabstat" "help tabstat"}{...}
@@ -35,6 +35,10 @@
 {synopt :{opt cross}({varname})}create frequency tables by column groups{p_end}
 {synopt :{opt bin:ary}}reshape binary variables for yes/no analysis{p_end}
 {synopt :{opt c:lear}}clear data from memory when using external file{p_end}
+
+{syntab:Survey}
+{synopt :{opt subpop}([{varname}] [{it:if}])}identify subpopulation for survey estimation{p_end}
+{synopt :{opt l:evel(#)}}set confidence level for Wald confidence intervals; default is {cmd:level(95)}{p_end}
 
 {syntab:Statistics}
 {synopt :{opt stat:s(statlist)}}specify statistics direction: {cmd:row}, {cmd:col}, {cmd:cell}; default is {cmd:col}{p_end}
@@ -114,6 +118,19 @@ When combined with {opt cross}, this creates complex output structures.
 {phang}
 {opt clear} clears data in the current {help frame}.
 This allows {cmd:dtfreq} to load the external file from {cmd:using}.
+
+{dlgtab:Survey}
+
+{phang}
+{opt subpop}([{varname}] [{it:if}]) identifies a subpopulation for survey estimation.
+Like {helpb svy##subpop:svy, subpop()}, out-of-subpopulation observations remain in the survey design for variance
+estimation, preserving degrees of freedom and stratum structure.
+This option requires {opt pweight}s and an active {helpb svyset} design.
+When combined with {opt by()}, each by-level is evaluated as a subpopulation domain.
+
+{phang}
+{opt level(#)} specifies the confidence level for Wald confidence intervals.
+The default is {cmd:level(95)} or as set by {helpb set level}.
 
 {dlgtab:Statistics}
 
@@ -201,10 +218,21 @@ command.  Can only be used with {cmd:save()}.
 
 {pstd}Export examples:{p_end}
 
-{pstd}7. Export to Excel:{p_end}
+{pstd}Survey analysis examples:{p_end}
+
+{pstd}7. Survey tabulation inheriting active svyset:{p_end}
+{phang2}{cmd:. svyset psu [pw=fwt], strata(strata)}{p_end}
+{phang2}{cmd:. dtfreq catvar [pw=fwt]}{p_end}
+{phang2}{cmd:. frame _df: list, clean noobs}{p_end}
+
+{pstd}8. Survey subpopulation estimation:{p_end}
+{phang2}{cmd:. dtfreq catvar [pw=fwt], subpop(if eligible == 1)}{p_end}
+{phang2}{cmd:. frame _df: list, clean noobs}{p_end}
+
+{pstd}9. Export to Excel:{p_end}
 {phang2}{cmd:. dtfreq rep78, save(dtfreq_output.xlsx) replace}{p_end}
 
-{pstd}8. Using external data file:{p_end}
+{pstd}10. Using external data file:{p_end}
 {phang2}{cmd:. dtfreq rep78 using "auto.dta", clear}{p_end}
 {phang2}{cmd:. frame _df: list, clean noobs}{p_end}
 
@@ -220,16 +248,13 @@ command.  Can only be used with {cmd:save()}.
 {synopt :{cmd:varname}}original variable name{p_end}
 {synopt :{cmd:varlab}}variable label{p_end}
 {synopt :{cmd:vallab}}value labels or string representation{p_end}
-{synopt :{cmd:freq*}}frequency counts (with suffixes when using {opt cross}){p_end}
-
-{pstd}Statistics variables (prefixed by direction):{p_end}
-{synopt :{cmd:colprop*}}column proportions (default){p_end}
-{synopt :{cmd:colpct*}}column percentages{p_end}
-{synopt :{cmd:rowprop*}}row proportions{p_end}
-{synopt :{cmd:rowpct*}}row percentages{p_end}
-{synopt :{cmd:cellprop*}}cell proportions{p_end}
-{synopt :{cmd:cellpct*}}cell percentages{p_end}
-{synopt :{cmd:*total*}}total counts for denominators{p_end}
+{synopt :{cmd:freq*}}frequency counts (weighted when using {opt pweight}){p_end}
+{synopt :{cmd:freq_unw*}}unweighted observation counts (when using {opt pweight}){p_end}
+{synopt :{cmd:se*}}linearized standard errors of proportions (survey one-way){p_end}
+{synopt :{cmd:ci_l*}}lower bound of Wald confidence interval (survey one-way){p_end}
+{synopt :{cmd:ci_u*}}upper bound of Wald confidence interval (survey one-way){p_end}
+{synopt :{cmd:*total*}}total counts for denominators (weighted when using {opt pweight}){p_end}
+{synopt :{cmd:*total_unw*}}unweighted total observation counts (when using {opt pweight}){p_end}
 {p2colreset}{...}
 
 {pstd}{bf:prop_all} and {bf:pct_all} show the overall proportion (1) and percentage (100) for the total row when using {opt cross()}.  They help identify the grand total in the results.{p_end}

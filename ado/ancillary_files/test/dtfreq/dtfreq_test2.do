@@ -9,11 +9,14 @@
 version 16
 clear frames
 capture log close
-if c(hostname) == "NUXS" {
-    cd d:/OneDrive/MyWork/00personal/stata/dtkit
-}
-else {
-    cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+capture confirm file "ado/dtfreq.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
 }
 log using ado/ancillary_files/test/log/dtfreq_test2.log, replace
 
