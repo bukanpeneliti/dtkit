@@ -280,7 +280,7 @@ pub fn write_numeric_column_range(ctx: &TransferContext) -> PolarsResult<()> {
         DataType::Boolean => {
             let ca = ctx.col.bool()?;
             if ca.null_count() == 0 {
-                write_bool_iter_no_null(ctx, ca.into_no_null_iter())
+                write_bool_iter_no_null(ctx, ca.no_null_iter())
             } else {
                 write_bool_iter(ctx, ca.iter())
             }
@@ -485,14 +485,12 @@ where
     I: Iterator<Item = Option<bool>>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         if let Some(v) = value {
             unsafe { vstore(col, row, if v { 1.0 } else { 0.0 }) };
         }
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -504,12 +502,10 @@ where
     I: Iterator<Item = bool>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         unsafe { vstore(col, row, if value { 1.0 } else { 0.0 }) };
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -521,14 +517,12 @@ where
     I: Iterator<Item = Option<i32>>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         if let Some(v) = value {
             unsafe { vstore(col, row, (v + STATA_DATE_ORIGIN) as f64) };
         }
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -540,12 +534,10 @@ where
     I: Iterator<Item = i32>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         unsafe { vstore(col, row, (value + STATA_DATE_ORIGIN) as f64) };
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -557,14 +549,12 @@ where
     I: Iterator<Item = Option<i64>>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         if let Some(v) = value {
             unsafe { vstore(col, row, (v / TIME_US) as f64) };
         }
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -576,12 +566,10 @@ where
     I: Iterator<Item = i64>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         unsafe { vstore(col, row, (value / TIME_US) as f64) };
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -598,14 +586,12 @@ where
     I: Iterator<Item = Option<i64>>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         if let Some(v) = value {
             unsafe { vstore(col, row, v as f64 / factor + sec_shift_scaled) };
         }
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -622,12 +608,10 @@ where
     I: Iterator<Item = i64>,
 {
     let write_calls = (ctx.end_row.saturating_sub(ctx.start_row)) as u64;
-    let mut row = (ctx.start_index + 1 + ctx.stata_offset) as i32;
     let col = (ctx.transfer_column.stata_col_index + 1) as i32;
     let vstore = stata_sys::vstore_unchecked_fn();
-    for value in iter {
+    for (row, value) in ((ctx.start_index + 1 + ctx.stata_offset) as i32..).zip(iter) {
         unsafe { vstore(col, row, value as f64 / factor + sec_shift_scaled) };
-        row += 1;
     }
     add_transfer_metric_counts(write_calls, 0, 0, 0, 0);
     Ok(())
@@ -812,7 +796,7 @@ fn write_string_values(ctx: &TransferContext) -> PolarsResult<()> {
     let mut buffer: Vec<u8> = Vec::new();
 
     if str_col.null_count() == 0 {
-        for s in str_col.into_no_null_iter() {
+        for s in str_col.no_null_iter() {
             if !s.is_empty() {
                 buffer.clear();
                 buffer.extend_from_slice(s.as_bytes());

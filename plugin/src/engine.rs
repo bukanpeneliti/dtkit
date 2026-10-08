@@ -955,7 +955,7 @@ fn apply_random_sample(
         .sample_frac(
             &Series::new("frac".into(), vec![share]),
             false,
-            false,
+            Some(false),
             (seed != 0).then_some(seed),
         )?
         .lazy())
@@ -1006,7 +1006,7 @@ fn run_lazy_pipeline(
         lf = lf.slice(src_off as i64, n_rows as u32);
     }
     if use_streaming {
-        lf = lf.with_new_streaming(true);
+        lf = lf.with_streaming(true);
         set_runtime_macro("read_streaming_enabled", "1");
     } else {
         set_runtime_macro("read_streaming_enabled", "0");
