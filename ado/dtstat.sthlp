@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  11mar2026}{...}
+{* *! version 1.1.0  08oct2026}{...}
 {vieweralsosee "[R] summarize" "help summarize"}{...}
 {vieweralsosee "[R] collapse" "help collapse"}{...}
 {vieweralsosee "[R] tabstat" "help tabstat"}{...}
@@ -36,6 +36,9 @@
 {synopt :{opt fo:rmat(%fmt)}}specify number format for numeric variables{p_end}
 {synopt :{opt nomiss}}exclude observations with missing values in variables{p_end}
 {synopt :{opt fa:st}}use {cmd:gtools} commands for faster processing{p_end}
+{synopt :{opt svy}}force design-based statistics with the active survey design{p_end}
+{synopt :{opt legacy}}use weighted {cmd:collapse} even when a survey design is active{p_end}
+{synopt :{opt subpop(subpopulation)}}estimate statistics for a subpopulation and keep the full design{p_end}
 {synopt :{opt clear}}clear data from memory when using external file{p_end}
 
 {syntab:Export}
@@ -45,7 +48,8 @@
 {synoptline}
 {p 4 6 2}
 {opt aweight}s, {opt fweight}s, {opt iweight}s, and {opt pweight}s are allowed;
-see {help weight}.{p_end}
+see {help weight}. With {opt [pw=]} and an active survey design, {cmd:dtstat}
+produces design-based statistics; see {bf:Description}.{p_end}
 
 
 {marker description}{...}
@@ -60,6 +64,34 @@ The command produces a new dataset for further manipulation, merging, or reporti
 {opt by(varlist)} requests statistics for each group.
 The output dataset includes rows for each group and additional rows for overall totals.
 {cmd:dtstat} preserves value labels for grouping variables and labels total rows "Total".
+
+{pstd}
+With {opt [pw=]} and an active {helpb svyset} design, {cmd:dtstat} produces
+design-based statistics. For each variable, {cmd:dtstat} runs the corresponding
+{cmd:svy} estimation command ({cmd:svy: mean}, {cmd:svy: total}, or
+{cmd:svy: ratio}) and stores the estimate, linearized standard error, t-based
+confidence interval from the design degrees of freedom, unweighted N, and
+weighted N. {cmd:dtstat} inherits the active design automatically when
+{opt [pw=]} is specified, and the pweight variable must match the design
+weight. Use {opt legacy} to keep weighted {cmd:collapse} results when a design
+is active, or {opt svy} to request design-based statistics without specifying a
+weight.
+
+{pstd}
+In svy mode, {opt stats()} supports {cmd:mean}, {cmd:total}, {cmd:sum}, and
+{cmd:ratio}. Request a ratio with a {cmd:num/den} term in {it:varlist}, for
+example {cmd:dtstat y/x [pw=fwt], stats(ratio)}. A term of the form
+{cmd:num/den} always produces a ratio row. Other statistics are not available
+in svy mode because Stata's svy estimators do not produce them, and requesting
+one stops the command with an error.
+
+{pstd}
+In svy mode, {opt subpop(if exp)} or {opt subpop(varname)} estimates statistics
+for a subpopulation and retains all strata and PSUs for variance estimation.
+Use {opt subpop()} for domain estimation; {cmd:if} and {cmd:in} restrict the
+survey design itself. With {opt by()} in svy mode, {cmd:dtstat} estimates each
+group as a subpopulation so that the full design drives every group's variance,
+and the total row estimates the whole domain.
 
 {pstd}
 {cmd:dtstat} leverages {helpb frames} for efficient data management.
@@ -86,6 +118,8 @@ The command identifies total rows using a special value and labels them "Total".
 {opt stats(statlist)} specifies the statistics.
 The default list includes {cmd:count mean median min max}.
 {cmd:dtstat} supports any statistic from {help collapse}.
+In svy mode, supported statistics are {cmd:mean}, {cmd:total}, {cmd:sum}, and
+{cmd:ratio}; see {bf:Description}.
 Common statistics include:
 
 {phang2}
@@ -126,6 +160,24 @@ Common statistics include:
 
 {phang2}
 {cmd:lastnm} - last nonmissing observation in group
+
+{phang}
+{opt svy} forces design-based estimation with the active survey design. Specify
+{opt svy} when the command has no {opt [pw=]}, for example with a design that
+has no sampling weight. The option stops with an error when no survey design is
+active.
+
+{phang}
+{opt legacy} uses weighted {cmd:collapse} results even when a survey design is
+active. Use it to keep the descriptive, non-design-based behavior for
+{opt [pw=]} requests.
+
+{phang}
+{opt subpop(if exp)} and {opt subpop(varname)} estimate statistics for the
+subpopulation that satisfies the condition or has a nonzero value in
+{it:varname}. The estimation retains the full survey design. The output
+includes a {cmd:subpop} variable that records the specification.
+Conditions with string literals are not supported.
 
 {phang}
 {opt format(%fmt)} specifies the {help format:display format} for numeric variables in the output dataset.
@@ -185,6 +237,16 @@ This option allows updating files without manual deletion.
 {phang2}{cmd:. dtstat age grade, by(married) save(dtstat_grouped.xlsx) excel(sheet("summary", modify)) replace}{p_end}
 {phang2}{cmd:. frame _df: list, noobs sepby(married)}{p_end}
 
+{pstd}5. Design-based statistics with an active survey design:{p_end}
+{phang2}{cmd:. webuse nhanes2, clear}{p_end}
+{phang2}{cmd:. svyset psu [pw=finalwgt], strata(strata)}{p_end}
+{phang2}{cmd:. dtstat height weight [pw=finalwgt], stats(mean total)}{p_end}
+{phang2}{cmd:. frame _df: list, clean noobs}{p_end}
+
+{pstd}6. Domain estimation that retains the full design:{p_end}
+{phang2}{cmd:. dtstat height [pw=finalwgt], stats(mean) subpop(if age > 40)}{p_end}
+{phang2}{cmd:. frame _df: list, clean noobs}{p_end}
+
 
 {marker results}{...}
 {title:Stored results}
@@ -199,6 +261,25 @@ The dataset contains the following variables:
 {synopt :{cmd:varlab}}labels of input variables{p_end}
 {synopt :{it:by_variables}}group identifiers including "Total" rows{p_end}
 {synopt :{it:stat_names}}calculated statistics{p_end}
+{p2colreset}{...}
+
+{pstd}
+In svy mode, the output dataset contains one observation per variable and
+statistic, with the following variables:
+
+{synoptset 20 tabbed}{...}
+{p2col 5 20 24 2: Variable Name} {it:Description}{p_end}
+{synopt :{cmd:varname}}name of the input variable or ratio term{p_end}
+{synopt :{cmd:varlab}}label of the input variable or ratio term{p_end}
+{synopt :{cmd:subpop}}subpop() specification; empty when not used{p_end}
+{synopt :{cmd:stat}}statistic name: mean, total, sum, or ratio{p_end}
+{synopt :{cmd:estimate}}point estimate{p_end}
+{synopt :{cmd:se}}linearized standard error{p_end}
+{synopt :{cmd:ci_l}}lower confidence limit, t-based{p_end}
+{synopt :{cmd:ci_u}}upper confidence limit, t-based{p_end}
+{synopt :{cmd:df}}design degrees of freedom{p_end}
+{synopt :{cmd:n_unw}}unweighted N ({cmd:e(N)} or {cmd:e(N_sub)}){p_end}
+{synopt :{cmd:n_w}}weighted N ({cmd:e(N_pop)} or {cmd:e(N_subpop)}){p_end}
 {p2colreset}{...}
 
 {pstd}
