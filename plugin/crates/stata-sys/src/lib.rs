@@ -233,6 +233,11 @@ pub fn vstore_unchecked_fn() -> unsafe extern "C" fn(i32, i32, f64) -> i32 {
 }
 
 #[inline]
+pub fn vdata_unchecked_fn() -> unsafe extern "C" fn(i32, i32, *mut f64) -> i32 {
+    unsafe { (*_stata_).vdata.expect("vdata function is not available") }
+}
+
+#[inline]
 pub fn replace_string(value: Option<String>, row: usize, column: usize) -> i32 {
     replace_string_ref(value.as_deref(), row, column)
 }

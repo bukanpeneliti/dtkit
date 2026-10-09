@@ -741,6 +741,10 @@ program dtparquet_use, rclass
     local order_by_type 0
     local order_descending 0
     local plugin_offset = max(0, `offset' - 1)
+    // Opt into narrowed strL temp files (all-missing variables kept under
+    // their own name are omitted). Older plugin builds ignore this flag
+    // and write full temp files, which the merge below still handles.
+    local strl_temp_handshake 1
     timer off 95
     quietly timer list 95
     local t_castjson_ms = round(`=r(t95)' * 1000, 1)
@@ -770,9 +774,67 @@ program dtparquet_use, rclass
     if `"`strl_dta_path'"' != "" {
         confirm file `"`strl_dta_path'"'
         gen long _dtparquet_strl_key = _n
+        // The plugin publishes the temp file's strL variable names because
+        // the .dta writer sanitizes overlength/invalid names, plus one
+        // included flag per variable (all-missing variables kept under
+        // their own name are omitted from the temp file). Pre-created
+        // targets let the merge update strL storage in place, which avoids
+        // a full str#/strL recast copy per variable.
+        local _strl_temp_n = real("`strl_temp_count'")
+        if missing(`_strl_temp_n') local _strl_temp_n = 0
+        local _strl_temp_names
+        if (`_strl_temp_n' > 0) {
+            forvalues _sti = 1/`_strl_temp_n' {
+                local _strl_temp_names `_strl_temp_names' `strl_temp_name_`_sti''
+            }
+        }
+        local _strl_key_name `strl_temp_key'
+        if `"`_strl_key_name'"' == "" local _strl_key_name _dtparquet_strl_key
+        local _strl_pregen 1
+        if (`_strl_temp_n' == 0) local _strl_pregen 0
+        // Exact-name collision check (confirm variable abbreviates, so it
+        // cannot be used here: e.g. IMPORTER would match IMPORTER_ID).
+        quietly ds
+        local _master_vars `r(varlist)' _dtparquet_strl_key `_strl_key_name'
+        foreach _stv of local _strl_temp_names {
+            local _hit: list posof "`_stv'" in _master_vars
+            if (`_hit' > 0) local _strl_pregen 0
+        }
+        if (`_strl_pregen' & `"`_strl_key_name'"' != "_dtparquet_strl_key") {
+            capture rename _dtparquet_strl_key `_strl_key_name'
+            if _rc local _strl_pregen 0
+        }
+        // Pre-create merge targets kept under their own name: in the fast
+        // path every such variable (updated or staying missing), in the
+        // classic path only omitted ones, which are absent from the temp
+        // file. Renamed variables arrive through the merge like before.
+        if (`_strl_temp_n' > 0) {
+            forvalues _sti = 1/`_strl_temp_n' {
+                local _stv `strl_temp_name_`_sti''
+                local _orig: word `_sti' of `strl_vars'
+                local _incl `strl_temp_included_`_sti''
+                if ("`_stv'" == "`_orig'") {
+                    if (`_strl_pregen' | "`_incl'" == "0") {
+                        local _hit: list posof "`_stv'" in _master_vars
+                        if (`_hit' == 0) {
+                            gen strL `_stv' = ""
+                            // Match the temp .dta writer's default string
+                            // format so merged variables carry the same
+                            // display format as the classic merge+recast path.
+                            format `_stv' %-9s
+                        }
+                    }
+                }
+            }
+        }
         local merge_assert
-        if (`n_obs_already' == 0) local merge_assert assert(match)
-        capture merge 1:1 _dtparquet_strl_key using `"`strl_dta_path'"', `merge_assert' gen(_dtparquet_merge_flag)
+        local merge_update
+        if (`n_obs_already' == 0) {
+            if (`_strl_pregen') local merge_assert assert(match match_update)
+            else local merge_assert assert(match)
+        }
+        if (`_strl_pregen') local merge_update update
+        capture merge 1:1 `_strl_key_name' using `"`strl_dta_path'"', `merge_update' `merge_assert' gen(_dtparquet_merge_flag)
         if _rc {
             di as error "dtparquet: failed to merge strL columns from temporary file"
             exit _rc
@@ -782,18 +844,42 @@ program dtparquet_use, rclass
             di as error "dtparquet: strL row count mismatch while loading `file'"
             error 459
         }
-        quietly keep if inlist(_dtparquet_merge_flag, 1, 3)
-        drop _dtparquet_strl_key _dtparquet_merge_flag
+        quietly keep if inlist(_dtparquet_merge_flag, 1, 3, 4, 5)
+        drop `_strl_key_name' _dtparquet_merge_flag
         erase `"`strl_dta_path'"'
+        // Restore baseline variable order: conflict winners keep their
+        // master position while merged and pre-created strL variables sit
+        // at the end in temp-file order.
+        quietly ds
+        local _cur `r(varlist)'
+        local _canon
+        foreach _cv of local _cur {
+            local _ist: list posof "`_cv'" in _strl_temp_names
+            local _was: list posof "`_cv'" in _master_vars
+            if (`_ist' == 0 | `_was' > 0) local _canon `_canon' `_cv'
+        }
+        foreach _stv of local _strl_temp_names {
+            local _hit: list posof "`_stv'" in _cur
+            local _was: list posof "`_stv'" in _master_vars
+            local _dup: list posof "`_stv'" in _canon
+            if (`_hit' > 0 & `_was' == 0 & `_dup' == 0) {
+                local _canon `_canon' `_stv'
+            }
+        }
+        order `_canon'
     }
 
     // Normalize strL storage type: the temp .dta holds short values as str#,
-    // but strl columns must load as strL.
+    // but strl columns must load as strL. Variables already updated in place
+    // above are strL and skip the recast.
     if `"`strl_vars'"' != "" {
         foreach vari of local strl_vars {
             capture confirm variable `vari'
             if _rc == 0 {
-                capture recast strL `vari'
+                local _strl_type: type `vari'
+                if "`_strl_type'" != "strL" {
+                    capture recast strL `vari'
+                }
             }
         }
     }

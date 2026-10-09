@@ -217,6 +217,25 @@ pub fn pull_numeric_cell_unchecked(col: usize, row: usize) -> Option<f64> {
     }
 }
 
+/// Per-cell numeric pull through a hoisted plugin function pointer. Hot
+/// column loops resolve the pointer once per column (mirroring the
+/// `vstore_unchecked_fn` write path) instead of chasing `(*_stata_).vdata`
+/// on every cell.
+pub fn pull_numeric_cell_with(
+    vdata: unsafe extern "C" fn(i32, i32, *mut f64) -> i32,
+    col: usize,
+    row: usize,
+) -> Option<f64> {
+    let mut val: f64 = 0.0;
+    unsafe {
+        if vdata(col as i32, row as i32, &mut val) != 0 || is_stata_missing_fast(val) {
+            None
+        } else {
+            Some(val)
+        }
+    }
+}
+
 pub fn pull_string_cell_as_str_unchecked(
     col: usize,
     row: usize,

@@ -30,8 +30,9 @@ pub struct TransferContext<'a> {
 
 macro_rules! pull_numeric_col {
     ($Chunked:ty, $col:expr, $off:expr, $n:expr, $name:expr, $cast:expr) => {{
+        let vdata = stata_sys::vdata_unchecked_fn();
         let ca: $Chunked = (0..$n)
-            .map(|r| pull_numeric_cell_unchecked($col, $off + r + 1).map($cast))
+            .map(|r| pull_numeric_cell_with(vdata, $col, $off + r + 1).map($cast))
             .collect();
         let mut s = ca.into_series();
         s.rename($name);
@@ -909,6 +910,27 @@ pub(crate) fn write_transfer_column_range(
     }
 }
 
+/// Reports whether a normalized strL staging column carries any value that
+/// survives the temp .dta roundtrip as non-missing. All-missing columns are
+/// omitted from the temp file: the ado layer pre-creates every strL target
+/// as missing, so omission keeps identical output while the temp file,
+/// merge, and update passes stay narrow.
+fn strl_column_has_content(col: &Column, height: usize) -> bool {
+    if height == 0 {
+        return false;
+    }
+    let series = col.as_materialized_series();
+    let Ok(ca) = series.str() else {
+        // Non-string content (e.g. binary): keep the column and let the
+        // writer decide its storage; correctness over narrowing.
+        return true;
+    };
+    if ca.null_count() == ca.len() {
+        return false;
+    }
+    ca.iter().any(|v| v.is_some_and(|s| !s.is_empty()))
+}
+
 pub fn write_strl_columns_to_dta_temp(
     df: &DataFrame,
     strl_names: &[String],
@@ -917,7 +939,7 @@ pub fn write_strl_columns_to_dta_temp(
     if df.height() == 0 || strl_names.is_empty() {
         return Ok(String::new());
     }
-    let mut columns: Vec<Column> = Vec::with_capacity(strl_names.len() + 1);
+    let mut string_columns: Vec<Column> = Vec::with_capacity(strl_names.len());
     for name in strl_names {
         let col = df.column(name)?;
         let col = match col.dtype() {
@@ -930,17 +952,94 @@ pub fn write_strl_columns_to_dta_temp(
                 )
             })?,
         };
-        columns.push(col);
+        string_columns.push(col);
     }
-    let n = df.height() as i32;
+    // The .dta writer renames overlength/invalid columns, so the ado layer
+    // must address strL merge targets under the temp names (not the Parquet
+    // names). The name list covers the strL columns in order plus the
+    // row-key last.
+    let mut raw_names: Vec<String> = strl_names.to_vec();
+    raw_names.push("_dtparquet_strl_key".to_string());
+    let temp_names =
+        polars_readstat_rs::stata::writer::pandas_make_stata_column_names(&raw_names);
+
+    // Omit columns whose values are all missing or empty, but only when the
+    // temp name equals the original name. The recast step addresses columns
+    // by their original names, so a renamed column must still roundtrip
+    // through the temp file for the classic merge+recast path to deliver it
+    // exactly like before. Omitted columns are pre-created as missing by
+    // the ado layer, which keeps identical output while the temp file stays
+    // narrow. The published temp names below still cover every column
+    // (sanitized over the full list) so merge targets keep positions.
+    // Narrowing applies only when the caller opts in via the handshake
+    // macro; without it (older ado code) the temp file stays full so the
+    // classic merge path behaves exactly like before.
+    let height = df.height();
+    let narrow = read_macro("strl_temp_handshake", false, None).trim() == "1";
+    let mut included: Vec<bool> = Vec::with_capacity(string_columns.len());
+    for (col, (original, temp)) in string_columns
+        .iter()
+        .zip(strl_names.iter().zip(temp_names.iter()))
+    {
+        included.push(
+            !narrow || strl_column_has_content(col, height) || temp != original,
+        );
+    }
+
+    // Publish the temp file's post-sanitization variable names plus one
+    // included flag per variable (explicit "0" marks columns omitted from
+    // the temp file; a missing flag means included, matching older callers
+    // that never narrow).
+    for (i, temp_name) in temp_names[..strl_names.len()].iter().enumerate() {
+        set_macro(&format!("strl_temp_name_{}", i + 1), temp_name, false);
+    }
+    set_macro("strl_temp_count", &strl_names.len().to_string(), false);
+    if let Some(temp_key) = temp_names.last() {
+        set_macro("strl_temp_key", temp_key, false);
+    }
+    for (i, keep) in included.iter().enumerate() {
+        set_macro(
+            &format!("strl_temp_included_{}", i + 1),
+            if *keep { "1" } else { "0" },
+            false,
+        );
+    }
+
+    // Build the frame under the original names first so duplicate-name
+    // inputs fail in DataFrame::new exactly like the pre-narrowing code
+    // did. Narrowing and renaming happen after that check.
+    let mut columns: Vec<Column> = Vec::with_capacity(string_columns.len() + 1);
+    columns.extend(string_columns);
+    let n = height as i32;
     let key = Int32Chunked::from_iter_values(
         PlSmallStr::from_static("_dtparquet_strl_key"),
         (stata_offset as i32 + 1)..=(stata_offset as i32 + n),
     );
-    let mut key_series = key.into_series();
-    key_series.rename(PlSmallStr::from_static("_dtparquet_strl_key"));
+    let key_series = key.into_series();
     columns.push(key_series.into_column());
     let out = DataFrame::new(df.height(), columns)?;
+
+    // Narrow to the included columns plus the key, then rename to the
+    // published temp names so the writer's own rename pass is the identity.
+    let mut select_names: Vec<PlSmallStr> = Vec::with_capacity(out.width());
+    let mut narrowed_names: Vec<String> = Vec::with_capacity(out.width());
+    for ((name, temp_name), keep) in strl_names
+        .iter()
+        .zip(temp_names.iter())
+        .zip(included.iter())
+    {
+        if !keep {
+            continue;
+        }
+        select_names.push(PlSmallStr::from(name.as_str()));
+        narrowed_names.push(temp_name.clone());
+    }
+    select_names.push(PlSmallStr::from_static("_dtparquet_strl_key"));
+    if let Some(temp_key) = temp_names.last() {
+        narrowed_names.push(temp_key.clone());
+    }
+    let mut narrowed = out.select(select_names)?;
+    narrowed.set_column_names(&narrowed_names)?;
 
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
@@ -953,7 +1052,7 @@ pub fn write_strl_columns_to_dta_temp(
         // Single-threaded: building a nested rayon pool inside polars' own
         // compute pool can corrupt tokio EnterGuard state and panic.
         .with_n_threads(1)
-        .write_df(&out)
+        .write_df(&narrowed)
         .map_err(|e| {
             PolarsError::ComputeError(format!("Failed to write strL .dta: {e}").into())
         })?;
@@ -1101,9 +1200,10 @@ fn series_from_stata_column_unchecked(
     }
 
     if is_stata_date_format(&info.format) {
+        let vdata = stata_sys::vdata_unchecked_fn();
         let values: Int32Chunked = (0..n_rows)
             .map(|row_idx| {
-                pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
+                pull_numeric_cell_with(vdata, stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i32 - STATA_DATE_ORIGIN)
             })
             .collect();
@@ -1114,9 +1214,10 @@ fn series_from_stata_column_unchecked(
     }
 
     if is_stata_datetime_format(&info.format) {
+        let vdata = stata_sys::vdata_unchecked_fn();
         let values: Int64Chunked = (0..n_rows)
             .map(|row_idx| {
-                pull_numeric_cell_unchecked(stata_col_index, offset + row_idx + 1)
+                pull_numeric_cell_with(vdata, stata_col_index, offset + row_idx + 1)
                     .map(|v| v as i64 - ((STATA_EPOCH_MS as f64) * (TIME_MS as f64)) as i64)
             })
             .collect();

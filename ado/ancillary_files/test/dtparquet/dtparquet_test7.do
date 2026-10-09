@@ -1,19 +1,20 @@
-* Test script for dtparquet plugin
+* Objective: Verify plugin contracts and strL load behavior.
 
 version 16
 clear frames
 discard
 capture log close
-capture confirm file "ado/dtparquet.ado"
-if _rc != 0 {
-    if c(hostname) == "NUXS" {
-        cd d:/OneDrive/MyWork/00personal/stata/dtkit
-    }
-    else {
-        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
-    }
-}
-log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
+// Run this suite from the checkout root.
+confirm file "ado/dtparquet.ado"
+local root = subinstr(c(pwd), "\", "/", .)
+global fnum "7"
+global fmain "dtparquet"
+global ftype "test"
+global vernum "v01"
+global fname "dtparquet_test7"
+global logname "dtparquet_test7"
+log using "`root'/ado/ancillary_files/test/log/${fname}.log", ///
+    replace text name(${logname})
 
 timer clear 99
 timer on 99
@@ -63,25 +64,24 @@ program _cleanup_dir_recursive
 end
 
 * Deterministic pre-clean for generated outputs from prior interrupted runs
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
-capture erase "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
-local stale_partition_dirs : dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data" dirs "rust_partitioned_out*"
+capture erase "`root'/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
+capture erase "`root'/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
+capture erase "`root'/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet"
+capture erase "`root'/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet.tmp"
+capture erase "`root'/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet.tmp"
+local stale_partition_dirs : dir "`root'/ado/ancillary_files/test/dtparquet/data" dirs "rust_partitioned_out*"
 foreach stale_partition_dir of local stale_partition_dirs {
-    capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/`stale_partition_dir'"
+    capture noisily _cleanup_dir_recursive "`root'/ado/ancillary_files/test/dtparquet/data/`stale_partition_dir'"
 }
-capture noisily _cleanup_dir_recursive "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
-local _partition_root "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data"
+capture noisily _cleanup_dir_recursive "`root'/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out"
+local _partition_root "`root'/ado/ancillary_files/test/dtparquet/data"
 local _partition_dirs : dir "`_partition_root'" dirs "rust_partitioned_out_*"
 foreach _d of local _partition_dirs {
     capture noisily _cleanup_dir_recursive "`_partition_root'/`_d'"
 }
 
 * Load the plugin
-local plugin_dll "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
-assert "`plugin_dll'" == "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.dll"
+local plugin_dll "`root'/ado/dtparquet.dll"
 
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
@@ -158,7 +158,7 @@ display _newline "=== TEST CASE 2: Describe contract macros ==="
 timer clear 2
 timer on 2
 local ++total_tests
-plugin call dtparquet_plugin, "describe" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "0" "0" "0" "0" "1" "0"
+plugin call dtparquet_plugin, "describe" "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" "0" "0" "0" "0" "1" "0"
 local t2_err 0
 if real("`n_rows'") <= 0 local ++t2_err
 if real("`n_columns'") <= 0 local ++t2_err
@@ -190,10 +190,10 @@ clear
 set obs 2
 gen long id = _n
 local bad_schema_payload `"{""protocol_version"":999,""fields"":[{""name"":""id"",""dtype"":""long"",""format"":""%12.0g"",""str_length"":0}]}"'
-capture plugin call dtparquet_plugin, "save" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet" "id" "0" "0" "" "`bad_schema_payload'" "" "zstd" "-1" "1" "0" "1" "1000"
+capture plugin call dtparquet_plugin, "save" "`root'/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet" "id" "0" "0" "" "`bad_schema_payload'" "" "zstd" "-1" "1" "0" "1" "1000"
 local t2b_err 0
 if _rc != 198 local ++t2b_err
-if fileexists("D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet") != 0 local ++t2b_err
+if fileexists("`root'/ado/ancillary_files/test/dtparquet/data/rust_bad_protocol.parquet") != 0 local ++t2b_err
 
 if `t2b_err' == 0 {
     display as result "Test 2b completed successfully"
@@ -213,10 +213,10 @@ timer clear 3
 timer on 3
 local ++total_tests
 capture program drop dtparquet
-run "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/dtparquet.ado"
+run "`root'/ado/dtparquet.ado"
 cap program drop dtparquet_plugin
 program dtparquet_plugin, plugin using("`plugin_dll'")
-dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear timer(plugin)
+dtparquet use using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50000, clear timer(plugin)
 local t3_err 0
 if inlist("$read_schema_handoff", "json_v2", "legacy_macros") == 0 local ++t3_err
 count
@@ -241,7 +241,7 @@ timer on 31
 local ++total_tests
 local t3b_err 0
 foreach tmode in off stata plugin all {
-    capture noisily dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50, clear timer(`tmode')
+    capture noisily dtparquet use using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/50, clear timer(`tmode')
     if _rc != 0 local ++t3b_err
     foreach rs in plugin_ms strl_fix_ms meta_ms cat_ms describe_ms loadmeta_ms varprep_ms mapping_ms filevars_ms matchwin_ms genrecast_ms readfields_ms castjson_ms loaded_rows plugin_timers {
         capture scalar __rcheck = r(`rs')
@@ -277,7 +277,7 @@ display _newline "=== TEST CASE 4: Subset varlist path ==="
 timer clear 4
 timer on 4
 local ++total_tests
-dtparquet use ID PRODUCT_ID fetchdate using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear
+dtparquet use ID PRODUCT_ID fetchdate using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear
 local t4_err 0
 if c(k) != 3 local ++t4_err
 count
@@ -300,7 +300,7 @@ display _newline "=== TEST CASE 5: In-range read ==="
 timer clear 5
 timer on 5
 local ++total_tests
-dtparquet use using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/100, clear
+dtparquet use using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/100, clear
 count
 if r(N) == 100 {
     display as result "Test 5 completed successfully"
@@ -319,7 +319,7 @@ display _newline "=== TEST CASE 5b: If-qualifier pushdown ==="
 timer clear 51
 timer on 51
 local ++total_tests
-dtparquet use year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" if year > 2015 in 1/2000, clear
+dtparquet use year using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" if year > 2015 in 1/2000, clear
 local t5b_err 0
 count
 if r(N) <= 0 local ++t5b_err
@@ -345,7 +345,7 @@ display _newline "=== TEST CASE 6: Allstring int64 cast ==="
 timer clear 6
 timer on 6
 local ++total_tests
-dtparquet use ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear allstring
+dtparquet use ID year using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear allstring
 local id_type: type ID
 local year_type: type year
 if "`id_type'" == "strL" & "`year_type'" == "strL" {
@@ -406,7 +406,7 @@ display _newline "=== TEST CASE 6c: Catmode(raw) preserves strings ==="
 timer clear 62
 timer on 62
 local ++total_tests
-dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/500, clear catmode(raw)
+dtparquet use PRODUCT_ID using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/500, clear catmode(raw)
 local product_id_type_raw: type PRODUCT_ID
 local product_id_vallab_raw: value label PRODUCT_ID
 if substr("`product_id_type_raw'", 1, 3) == "str" & "`product_id_vallab_raw'" == "" {
@@ -465,7 +465,7 @@ display _newline "=== TEST CASE 6e: Catmode validation ==="
 timer clear 64
 timer on 64
 local ++total_tests
-capture dtparquet use PRODUCT_ID using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear catmode(invalid)
+capture dtparquet use PRODUCT_ID using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear catmode(invalid)
 if _rc == 198 {
     display as result "Test 6e completed successfully"
     local passed_tests "`passed_tests' 6e"
@@ -483,7 +483,7 @@ display _newline "=== TEST CASE 6f: Pandas categorical encode ==="
 timer clear 65
 timer on 65
 local ++total_tests
-local foreign_pandas "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
+local foreign_pandas "`root'/ado/ancillary_files/test/dtparquet/data/foreign_cat_pandas.parquet"
 dtparquet use cat using "`foreign_pandas'", clear catmode(encode)
 local t6f_err 0
 count
@@ -514,7 +514,7 @@ display _newline "=== TEST CASE 6g: Dictionary raw mode ==="
 timer clear 66
 timer on 66
 local ++total_tests
-local foreign_arrow "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
+local foreign_arrow "`root'/ado/ancillary_files/test/dtparquet/data/foreign_cat_arrow_dict.parquet"
 dtparquet use cat using "`foreign_arrow'", clear catmode(raw)
 local cat_type_raw_fixture: type cat
 local cat_vallab_raw_fixture: value label cat
@@ -580,10 +580,10 @@ display _newline "=== TEST CASE 7: Save and read-back roundtrip ==="
 timer clear 7
 timer on 7
 local ++total_tests
-local roundtrip_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
+local roundtrip_file "`root'/ado/ancillary_files/test/dtparquet/data/rust_roundtrip.parquet"
 capture erase "`roundtrip_file'"
 
-dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
+dtparquet use ID PRODUCT_ID year using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
 local id_first = ID[1]
 local id_last = ID[_N]
 local year_first = year[1]
@@ -620,11 +620,11 @@ timer on 8
 local ++total_tests
 set seed `=mod(clock(c(current_date) + " " + c(current_time), "DMYhms"), 2147483647)'
 local partition_run_id = string(floor(runiform()*1000000000), "%12.0f")
-local partition_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out_`partition_run_id'"
+local partition_dir "`root'/ado/ancillary_files/test/dtparquet/data/rust_partitioned_out_`partition_run_id'"
 capture noisily _cleanup_dir_recursive "`partition_dir'"
 capture error 0
 
-dtparquet use ID PRODUCT_ID year using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
+dtparquet use ID PRODUCT_ID year using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet" in 1/1000, clear
 quietly ds
 local varlist `r(varlist)'
 local var_count: word count `varlist'
@@ -675,7 +675,7 @@ display _newline "=== TEST CASE 9: Save sql_if filtering ==="
 timer clear 9
 timer on 9
 local ++total_tests
-local filtered_file "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
+local filtered_file "`root'/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet"
 capture erase "`filtered_file'"
 capture error 0
 
@@ -709,10 +709,10 @@ display _newline "=== TEST CASE 9b: Compression codec/default semantics ==="
 timer clear 91
 timer on 91
 local ++total_tests
-local compress_zstd "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet"
-local compress_uncompressed "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet"
-local compress_default "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet"
-local compress_level_bad "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet"
+local compress_zstd "`root'/ado/ancillary_files/test/dtparquet/data/rust_compress_zstd.parquet"
+local compress_uncompressed "`root'/ado/ancillary_files/test/dtparquet/data/rust_compress_uncompressed.parquet"
+local compress_default "`root'/ado/ancillary_files/test/dtparquet/data/rust_compress_default.parquet"
+local compress_level_bad "`root'/ado/ancillary_files/test/dtparquet/data/rust_compress_level_bad.parquet"
 
 capture erase "`compress_zstd'"
 capture erase "`compress_uncompressed'"
@@ -788,7 +788,7 @@ display _newline "=== TEST CASE 10: Metadata key scaffold ==="
 timer clear 10
 timer on 10
 local ++total_tests
-plugin call dtparquet_plugin, "has_metadata_key" "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
+plugin call dtparquet_plugin, "has_metadata_key" "`root'/ado/ancillary_files/test/dtparquet/data/rust_filtered_save.parquet" "dtparquet.dtmeta"
 if "`has_metadata_key'" == "1" {
     display as result "Test 10 completed successfully"
     local passed_tests "`passed_tests' 10"
@@ -806,7 +806,7 @@ display _newline "=== TEST CASE 11: Export/import command paths ==="
 timer clear 11
 timer on 11
 local ++total_tests
-local export_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/export import tmp"
+local export_dir "`root'/ado/ancillary_files/test/dtparquet/data/export import tmp"
 capture mkdir "`export_dir'"
 
 local source_dta "`export_dir'/source labels.dta"
@@ -854,7 +854,7 @@ if c(k) != 4 local ++t11_err
 if id[1] != 1 local ++t11_err
 if code[3] != 1234567890123 local ++t11_err
 
-dtparquet import "`import_allstring_dta'" using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
+dtparquet import "`import_allstring_dta'" using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", replace allstring
 local t11_import_read_ms = r(import_read_elapsed_ms)
 local t11_import_save_ms = r(import_save_elapsed_ms)
 local t11_read_cast_ms = real("$read_apply_cast_elapsed_ms")
@@ -921,7 +921,7 @@ display _newline "=== TEST CASE 13: Metadata roundtrip ==="
 timer clear 13
 timer on 13
 local ++total_tests
-local meta_parquet "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/meta_roundtrip.parquet"
+local meta_parquet "`root'/ado/ancillary_files/test/dtparquet/data/meta_roundtrip.parquet"
 capture erase "`meta_parquet'"
 
 clear
@@ -994,7 +994,7 @@ display _newline "=== TEST CASE 13b: Value labels without data label ==="
 timer clear 68
 timer on 68
 local ++total_tests
-local meta_nodlabel_parquet "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/meta_nodlabel_roundtrip.parquet"
+local meta_nodlabel_parquet "`root'/ado/ancillary_files/test/dtparquet/data/meta_nodlabel_roundtrip.parquet"
 capture erase "`meta_nodlabel_parquet'"
 
 clear
@@ -1038,7 +1038,7 @@ display _newline "=== TEST CASE 14: Partitioned metadata embedding ==="
 timer clear 14
 timer on 14
 local ++total_tests
-local partition_meta_dir "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/dtparquet/data/partition_meta"
+local partition_meta_dir "`root'/ado/ancillary_files/test/dtparquet/data/partition_meta"
 capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
 
 clear
@@ -1078,6 +1078,267 @@ timer off 14
 capture timer list 14
 display as text "Test 14 finished in " as result %4.2f r(t14) "s"
 capture noisily _cleanup_dir_shallow "`partition_meta_dir'"
+
+// strL fixtures regenerate deterministically when missing, so these cases
+// also work in a fresh checkout. The generator is an embedded Python block
+// running at top level (Stata feeds python-block lines verbatim, so it
+// cannot sit inside an if-block or program definition). Only missing files
+// are written. Polars imports only when a fixture is missing.
+// The fixture names contain hyphens:
+// Stata cannot create them, and the .dta writer sanitizes hyphens to
+// underscores, which is what the temp collision cases exercise.
+local strl_datadir "`root'/ado/ancillary_files/test/dtparquet/data"
+local strl_collide "`strl_datadir'/strl_collide.parquet"
+local strl_clean "`strl_datadir'/strl_clean.parquet"
+capture noisily python:
+from sfi import Macro
+from pathlib import Path
+outdir = Path(Macro.getLocal("strl_datadir"))
+n = 20
+missing = [p for p in ("strl_collide.parquet", "strl_clean.parquet") if not (outdir / p).exists()]
+if missing:
+    import polars as pl
+    frames = {
+    "strl_collide.parquet": {
+    "id": list(range(1, n + 1)),
+    "A_B": [f"n{i}" for i in range(1, n + 1)],
+    "A-B": pl.Series("A-B", [b"xyz-value-%d" % i for i in range(1, n + 1)], dtype=pl.Binary),
+    "C-D": pl.Series("C-D", [None] * n, dtype=pl.Binary),
+    "E-B": pl.Series("E-B", [b"e-value-%d" % i for i in range(1, n + 1)], dtype=pl.Binary),
+    "G_H": pl.Series("G_H", [None] * n, dtype=pl.Binary),
+    "E_F": [f"e{i}" for i in range(1, n + 1)],
+    },
+    "strl_clean.parquet": {
+    "id": list(range(1, n + 1)),
+    "A-B": pl.Series("A-B", [b"xyz-value-%d" % i for i in range(1, n + 1)], dtype=pl.Binary),
+    "C-D": pl.Series("C-D", [None] * n, dtype=pl.Binary),
+    "E-B": pl.Series("E-B", [b"e-value-%d" % i for i in range(1, n + 1)], dtype=pl.Binary),
+    "G_H": pl.Series("G_H", [None] * n, dtype=pl.Binary),
+    "E_F": [f"e{i}" for i in range(1, n + 1)],
+    },
+    }
+    for _name in missing:
+        pl.DataFrame(frames[_name]).write_parquet(outdir / _name)
+end
+capture confirm file "`strl_collide'"
+if _rc != 0 {
+    display as error "strL fixture strl_collide.parquet missing and regeneration failed (Stata Python needs polars)"
+    log close ${logname}
+    exit 601
+}
+capture confirm file "`strl_clean'"
+if _rc != 0 {
+    display as error "strL fixture strl_clean.parquet missing and regeneration failed (Stata Python needs polars)"
+    log close ${logname}
+    exit 601
+}
+
+// Test Case 15: strL temp collision keeps master values and widens type
+display _newline "=== TEST CASE 15: strL temp name collision ==="
+timer clear 16
+timer on 16
+local ++total_tests
+local t15_err 0
+clear
+capture dtparquet use using "`strl_collide'", clear
+if _rc != 0 {
+    display as error "Test 15 failed: load rc=" _rc
+    local ++t15_err
+}
+else {
+    if c(k) != 6 | c(N) != 20 {
+        display as error "Test 15 failed: expected 6x20, got " c(k) "x" c(N)
+        local ++t15_err
+    }
+    quietly ds
+    if "`r(varlist)'" != "id A_B E_F C_D E_B G_H" {
+        display as error "Test 15 failed: order is `r(varlist)'"
+        local ++t15_err
+    }
+    foreach _c15 in "A_B str12" "C_D str1" "E_B str10" "G_H strL" {
+        gettoken _vn15 _vt15 : _c15
+        local _vt15 = trim("`_vt15'")
+        local _t15: type `_vn15'
+        if "`_t15'" != "`_vt15'" {
+            display as error "Test 15 failed: `_vn15' is `_t15', expected `_vt15'"
+            local ++t15_err
+        }
+    }
+    // Master values win the name collision (documented merge behavior).
+    capture assert A_B == "n" + string(_n)
+    if _rc {
+        display as error "Test 15 failed: collision did not keep master values"
+        local ++t15_err
+    }
+    capture assert E_B == "e-value-" + string(_n)
+    if _rc {
+        display as error "Test 15 failed: merged strL values mismatch"
+        local ++t15_err
+    }
+    quietly count if G_H != ""
+    if r(N) != 0 {
+        display as error "Test 15 failed: omitted strL column not all missing"
+        local ++t15_err
+    }
+    datasignature
+    if "`r(datasignature)'" != "20:6(86203):3986759359:4145686844" {
+        display as error "Test 15 failed: datasignature is `r(datasignature)'"
+        local ++t15_err
+    }
+}
+if `t15_err' == 0 {
+    display as result "Test 15 completed successfully"
+    local passed_tests "`passed_tests' 15"
+}
+else {
+    local failed_tests "`failed_tests' 15"
+}
+timer off 16
+capture timer list 16
+display as text "Test 15 finished in " as result %4.2f r(t16) "s"
+
+// Test Case 15b: clean strL temp names load through merge or pre-creation
+display _newline "=== TEST CASE 15b: clean strL temp names ==="
+timer clear 17
+timer on 17
+local ++total_tests
+local t15b_err 0
+clear
+capture dtparquet use using "`strl_clean'", clear
+if _rc != 0 {
+    display as error "Test 15b failed: load rc=" _rc
+    local ++t15b_err
+}
+else {
+    if c(k) != 6 | c(N) != 20 {
+        display as error "Test 15b failed: expected 6x20, got " c(k) "x" c(N)
+        local ++t15b_err
+    }
+    quietly ds
+    if "`r(varlist)'" != "id E_F A_B C_D E_B G_H" {
+        display as error "Test 15b failed: order is `r(varlist)'"
+        local ++t15b_err
+    }
+    local _t15b_ab: type A_B
+    if "`_t15b_ab'" != "str12" {
+        display as error "Test 15b failed: A_B is `_t15b_ab'"
+        local ++t15b_err
+    }
+    capture assert A_B == "xyz-value-" + string(_n)
+    if _rc {
+        display as error "Test 15b failed: merged strL values mismatch"
+        local ++t15b_err
+    }
+    local _t15b_gh: type G_H
+    if "`_t15b_gh'" != "strL" {
+        display as error "Test 15b failed: G_H is `_t15b_gh'"
+        local ++t15b_err
+    }
+    quietly count if G_H != ""
+    if r(N) != 0 {
+        display as error "Test 15b failed: omitted strL column not all missing"
+        local ++t15b_err
+    }
+    datasignature
+    if "`r(datasignature)'" != "20:6(86233):818548423:4048667132" {
+        display as error "Test 15b failed: datasignature is `r(datasignature)'"
+        local ++t15b_err
+    }
+}
+if `t15b_err' == 0 {
+    display as result "Test 15b completed successfully"
+    local passed_tests "`passed_tests' 15b"
+}
+else {
+    local failed_tests "`failed_tests' 15b"
+}
+timer off 17
+capture timer list 17
+display as text "Test 15b finished in " as result %4.2f r(t17) "s"
+
+// Test Case 15c: strL variable named like the internal row key fails cleanly
+display _newline "=== TEST CASE 15c: row-key name collision ==="
+timer clear 18
+timer on 18
+local ++total_tests
+local t15c_err 0
+clear
+set obs 20
+gen long id = _n
+gen strL _dtparquet_strl_key = "kval" + string(_n)
+gen str20 E_F = "e"
+capture dtparquet save "keyfreak15.parquet", replace
+if _rc != 0 {
+    display as error "Test 15c failed: save rc=" _rc
+    local ++t15c_err
+}
+else {
+    clear
+    capture dtparquet use using "keyfreak15.parquet", clear
+    if _rc != 198 {
+        display as error "Test 15c failed: expected rc=198, got " _rc
+        local ++t15c_err
+    }
+}
+capture erase "keyfreak15.parquet"
+if `t15c_err' == 0 {
+    display as result "Test 15c completed successfully"
+    local passed_tests "`passed_tests' 15c"
+}
+else {
+    local failed_tests "`failed_tests' 15c"
+}
+timer off 18
+capture timer list 18
+display as text "Test 15c finished in " as result %4.2f r(t18) "s"
+
+// Test Case 15d: large foreign file delivers every strL variable
+display _newline "=== TEST CASE 15d: all-missing strL at scale ==="
+timer clear 19
+timer on 19
+local ++total_tests
+local t15d_err 0
+clear
+capture dtparquet use using "`root'/ado/ancillary_files/test/dtparquet/data/bpom_test.parquet", clear
+if _rc != 0 {
+    display as error "Test 15d failed: load rc=" _rc
+    local ++t15d_err
+}
+else {
+    if c(k) != 61 | c(N) != 343788 {
+        display as error "Test 15d failed: expected 61x343788, got " c(k) "x" c(N)
+        local ++t15d_err
+    }
+    quietly ds, has(type strL)
+    if wordcount("`r(varlist)'") != 16 {
+        display as error "Test 15d failed: expected 16 strL vars"
+        local ++t15d_err
+    }
+    quietly ds
+    local _names15d `r(varlist)'
+    local _hit15d: list posof "IMPORTER" in _names15d
+    if `_hit15d' == 0 {
+        display as error "Test 15d failed: omitted strL variable IMPORTER missing"
+        local ++t15d_err
+    }
+    else {
+        local _t15d: type IMPORTER
+        if "`_t15d'" != "strL" {
+            display as error "Test 15d failed: IMPORTER is `_t15d'"
+            local ++t15d_err
+        }
+    }
+}
+if `t15d_err' == 0 {
+    display as result "Test 15d completed successfully"
+    local passed_tests "`passed_tests' 15d"
+}
+else {
+    local failed_tests "`failed_tests' 15d"
+}
+timer off 19
+capture timer list 19
+display as text "Test 15d finished in " as result %4.2f r(t19) "s"
 
 capture erase "`meta_parquet'"
 capture erase "`meta_nodlabel_parquet'"
@@ -1127,11 +1388,11 @@ display "=========================================="
 
 if wordcount("`failed_tests'") > 0 {
     display as error "Failed tests: `failed_tests'"
-    log close
+    log close ${logname}
     exit 1
 }
 else {
     display as result "All tests passed!"
-    log close
-    exit 0
 }
+log close ${logname}
+exit, clear

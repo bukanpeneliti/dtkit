@@ -633,8 +633,14 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             }
         }
         let collect_started = Instant::now();
+        // Project needed columns at scan time so the reader decodes and
+        // decompresses only those columns. The select below is kept to fix
+        // column order; on the projected frame it moves no data.
+        let projection: Option<Vec<String>> = (!col_list.is_empty())
+            .then(|| col_list.iter().map(|s| s.to_string()).collect());
         let mut df = ParquetReader::new(File::open(req.path)?)
             .with_slice(Some((req.offset, req.n_rows)))
+            .with_columns(projection)
             .finish()?;
         df = df.select(
             col_list
