@@ -1,6 +1,8 @@
-* dtfreq_test.do
-* Comprehensive test suite for dtfreq.ado
-* Date: June 1, 2025
+* dtfreq_test1.do
+* Core test suite for dtfreq.ado (non-survey paths)
+* Date: June 1, 2025; consolidated Oct 9, 2026 (unique boundary cases
+* ported from dtfreq_test2.do, which is now removed).
+* Survey/pweight/subpop paths live in dtfreq_test2.do.
 // Objective: Check frequency tables and preserve grouping variables.
 
 version 16
@@ -630,6 +632,224 @@ foreach mode in ordinary binary {
     }
 }
 program drop dtfreq_prefix_check
+
+// * Ported boundary cases from dtfreq_test2.do (removed Oct 2026)
+// Each case below covers behavior not exercised above.
+
+// Test Case 24: High-cardinality one-way (mpg has many distinct values)
+di _n "=== TEST CASE 24: High-cardinality one-way (mpg) ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq mpg
+if _rc {
+    di as error "Test 24 failed with error " _rc
+    local failed_tests "`failed_tests' 24"
+}
+else {
+    di as result "Test 24 completed successfully"
+    local passed_tests "`passed_tests' 24"
+}
+
+// Test Case 25: One-way with if, aweights, and type(prop)
+di _n "=== TEST CASE 25: aweight + if + type(prop) ==="
+local ++total_tests
+sysuse nlsw88, clear
+dtrace dtfreq wage [aweight=south] if wage < 5 & wage > 0, type(prop)
+if _rc {
+    di as error "Test 25 failed with error " _rc
+    local failed_tests "`failed_tests' 25"
+}
+else {
+    di as result "Test 25 completed successfully"
+    local passed_tests "`passed_tests' 25"
+}
+
+// Test Case 26: cross() with string variable must fail (rc 109)
+di _n "=== TEST CASE 26: cross() with string var ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(make)
+if _rc == 109 {
+    di as result "Test 26 passed: proper error for string cross() (rc 109)"
+    local passed_tests "`passed_tests' 26"
+}
+else if _rc {
+    di as error "Test 26 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 26"
+}
+else {
+    di as error "Test 26 failed: string cross() should have failed"
+    local failed_tests "`failed_tests' 26"
+}
+
+// Test Case 27: binary on multi-valued variable must fail
+di _n "=== TEST CASE 27: binary on non-binary var ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, binary
+if inlist(_rc, 111, 198) {
+    di as result "Test 27 passed: proper error for binary on rep78 (rc " _rc ")"
+    local passed_tests "`passed_tests' 27"
+}
+else if _rc {
+    di as error "Test 27 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 27"
+}
+else {
+    di as error "Test 27 failed: binary on rep78 should have failed"
+    local failed_tests "`failed_tests' 27"
+}
+
+// Test Case 28: using + clear + binary on temp dataset
+di _n "=== TEST CASE 28: using with clear and binary ==="
+local ++total_tests
+clear
+set obs 10
+generate var1 = cond(_n <= 5, 0, 1)
+generate var2 = cond(_n <= 3, 1, cond(_n <= 7, 2, 3))
+tempfile temp_dtfreq
+save `temp_dtfreq', replace
+sysuse auto, clear
+dtrace dtfreq var1 using `temp_dtfreq', clear binary
+if _rc {
+    di as error "Test 28 failed with error " _rc
+    local failed_tests "`failed_tests' 28"
+}
+else {
+    di as result "Test 28 completed successfully"
+    local passed_tests "`passed_tests' 28"
+}
+
+// Test Case 29: Excel export with default excel() options
+di _n "=== TEST CASE 29: Excel export with default options ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(foreign) ///
+    save("ado/ancillary_files/test/dtfreq/excel_default.xlsx") replace excel("")
+if _rc {
+    di as error "Test 29 failed with error " _rc
+    local failed_tests "`failed_tests' 29"
+}
+else {
+    capture confirm file "ado/ancillary_files/test/dtfreq/excel_default.xlsx"
+    if _rc {
+        di as error "Test 29 failed: Excel file not created"
+        local failed_tests "`failed_tests' 29"
+    }
+    else {
+        di as result "Test 29 completed successfully"
+        local passed_tests "`passed_tests' 29"
+    }
+}
+
+// Test Case 30: Excel export with custom sheet name
+di _n "=== TEST CASE 30: Excel export with custom sheet ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(foreign) ///
+    save("ado/ancillary_files/test/dtfreq/excel_sheet.xlsx") replace ///
+    excel(sheet("CustomSheet", replace) firstrow(varlabels))
+if _rc {
+    di as error "Test 30 failed with error " _rc
+    local failed_tests "`failed_tests' 30"
+}
+else {
+    capture confirm file "ado/ancillary_files/test/dtfreq/excel_sheet.xlsx"
+    if _rc {
+        di as error "Test 30 failed: Excel file not created"
+        local failed_tests "`failed_tests' 30"
+    }
+    else {
+        di as result "Test 30 completed successfully"
+        local passed_tests "`passed_tests' 30"
+    }
+}
+
+// Test Case 31: Invalid type() must fail (rc 198)
+di _n "=== TEST CASE 31: Invalid type() ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, type(invalid)
+if _rc == 198 {
+    di as result "Test 31 passed: proper error for type(invalid) (rc 198)"
+    local passed_tests "`passed_tests' 31"
+}
+else if _rc {
+    di as error "Test 31 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 31"
+}
+else {
+    di as error "Test 31 failed: type(invalid) should have failed"
+    local failed_tests "`failed_tests' 31"
+}
+
+// Test Case 32: Duplicate stats() must fail (rc 198)
+di _n "=== TEST CASE 32: Duplicate stats() ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(foreign) stats(row row)
+if _rc == 198 {
+    di as result "Test 32 passed: proper error for duplicate stats() (rc 198)"
+    local passed_tests "`passed_tests' 32"
+}
+else if _rc {
+    di as error "Test 32 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 32"
+}
+else {
+    di as error "Test 32 failed: duplicate stats() should have failed"
+    local failed_tests "`failed_tests' 32"
+}
+
+// Test Case 33: Duplicate type() must fail (rc 198)
+di _n "=== TEST CASE 33: Duplicate type() ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(foreign) stats(row) type(prop prop)
+if _rc == 198 {
+    di as result "Test 33 passed: proper error for duplicate type() (rc 198)"
+    local passed_tests "`passed_tests' 33"
+}
+else if _rc {
+    di as error "Test 33 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 33"
+}
+else {
+    di as error "Test 33 failed: duplicate type() should have failed"
+    local failed_tests "`failed_tests' 33"
+}
+
+// Test Case 34: by() and cross() on same variable must fail (rc 198)
+di _n "=== TEST CASE 34: by() == cross() ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, by(rep78) cross(rep78)
+if _rc == 198 {
+    di as result "Test 34 passed: proper error for by()==cross() (rc 198)"
+    local passed_tests "`passed_tests' 34"
+}
+else if _rc {
+    di as error "Test 34 failed: unexpected error code " _rc
+    local failed_tests "`failed_tests' 34"
+}
+else {
+    di as error "Test 34 failed: by()==cross() should have failed"
+    local failed_tests "`failed_tests' 34"
+}
+
+// Test Case 35: Combined stats(row col) and type(prop pct)
+di _n "=== TEST CASE 35: Combined stats() and type() ==="
+local ++total_tests
+sysuse auto, clear
+dtrace dtfreq rep78, cross(foreign) stats(row col) type(prop pct)
+if _rc {
+    di as error "Test 35 failed with error " _rc
+    local failed_tests "`failed_tests' 35"
+}
+else {
+    di as result "Test 35 completed successfully"
+    local passed_tests "`passed_tests' 35"
+}
 
 // Cleanup
 frame change default

@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Guards mirroring `svy` behavior: data not svyset (r119), design without
     sampling weights (r119), weight mismatch against the design (r198),
     `subpop()` without pweights (r198), empty subpopulation domain (r461).
-  - New regression suite `dtfreq_test3.do` with 13 cases benchmarked against
+  - New regression suite `dtfreq_test2.do` with 13 cases benchmarked against
     `svy: tabulate`, including a designed-in singleton stratum, zero weights,
     and missing weights.
 

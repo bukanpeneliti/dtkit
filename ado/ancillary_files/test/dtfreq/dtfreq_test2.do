@@ -1,14 +1,12 @@
-*******************************************************
-* dtfreq_test.do
-* Comprehensive testing of dtfreq.ado
-* Author: Hafiz
-* Date: 01jun2025
-* Location: test/dtfreq/
-*******************************************************
+*! dtfreq_test2.do
+*! Survey test suite for dtfreq with pweight and subpop() support
+*! (Non-survey core paths live in dtfreq_test1.do.)
+*! Date: October 2026
 
 version 16
 clear frames
 capture log close
+
 capture confirm file "ado/dtfreq.ado"
 if _rc != 0 {
     if c(hostname) == "NUXS" {
@@ -20,10 +18,11 @@ if _rc != 0 {
 }
 log using ado/ancillary_files/test/log/dtfreq_test2.log, replace
 
-// manually drop main program and subroutines
+// Manually drop main program and subroutines
 capture program drop dtfreq
 capture program drop _xtab
 capture program drop _xtab_core
+capture program drop _combine_subpop
 capture program drop _binreshape
 capture program drop _crosstotal
 capture program drop _labelvars
@@ -32,6 +31,7 @@ capture program drop _formatvars
 capture program drop _argcheck
 capture program drop _argload
 capture mata: mata drop _xtab_core_calc()
+capture mata: mata drop _xtab_core_calc_svy()
 run ado/dtfreq.ado
 
 // Initialize test tracking
@@ -41,367 +41,372 @@ local total_tests 0
 
 capture program drop dtrace
 program define dtrace
-    set trace on        // Enable tracing
-    set tracedepth 2    // Set trace depth to 2 levels
-    capture noisily `0' // Execute user's command (with error handling)
-    set trace off       // Always disable tracing afterward
+    set trace on
+    set tracedepth 2
+    capture noisily `0'
+    set trace off
 end
 
-* 2.1 Basic one-way frequency on a numeric variable (mpg)
+di _n(2) "=========================================="
+di "Starting dtfreq Survey & Subpop Test Suite"
+di "Timestamp: " c(current_date) " " c(current_time)
+di "==========================================" _n
+
+// * Generate synthetic survey dataset
+// Designed-in features:
+// - 3 strata: stratum 1 (PSUs 1,2), stratum 2 (PSUs 3,4), stratum 3 (PSU 5: singleton stratum)
+// - singleunit(centered)
+// - fwt: positive sampling weights
+// - catvar: 3 categories (Low, Medium, High)
+// - binvar: binary 0/1 variable
+// - subvar: subpopulation indicator
+// - groupvar: by/cross grouping variable
+
+clear
+set seed 98765
+set obs 60
+
+generate strata = 1 in 1/25
+replace strata = 2 in 26/50
+replace strata = 3 in 51/60
+
+generate psu = .
+replace psu = cond(_n <= 12, 1, 2) if strata == 1
+replace psu = cond(_n <= 38, 3, 4) if strata == 2
+replace psu = 5 if strata == 3
+
+generate double fwt = 10 + runiform() * 5
+
+label define catlbl 1 "Low" 2 "Medium" 3 "High"
+generate catvar = 1 + floor(runiform() * 3)
+label values catvar catlbl
+
+label define binlbl 0 "No" 1 "Yes"
+generate binvar = (catvar >= 2)
+label values binvar binlbl
+
+generate subvar = (_n <= 45)
+generate groupvar = cond(_n <= 30, 0, 1)
+
+tempfile synthdata
+save `synthdata'
+
+// * Test Case 1: One-way survey frequency with [pw=fwt]
+di _n "=== TEST CASE 1: Basic one-way survey frequency ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq mpg
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+// Stata svy benchmark
+svy: tabulate catvar
+matrix b_svy = e(b)
+matrix V_svy = e(V)
+scalar df_svy = e(df_r)
+scalar total_svy = e(total)
+scalar n_svy = e(N)
+
+dtrace dtfreq catvar [pw=fwt]
 if _rc {
-    di as error "[Test 1] FAIL: dtfreq mpg failed."
+    di as error "Test 1 failed with error " _rc
     local failed_tests "`failed_tests' 1"
 }
 else {
-    di as result "[Test 1] PASS: One-way frequency on mpg"
+    // Assert results match svy benchmark
+    frame _df {
+        quietly count
+        assert r(N) == 3
+        quietly summarize total, meanonly
+        assert reldif(r(mean), scalar(total_svy)) < 1e-6
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_svy)
+        quietly summarize prop, meanonly
+        assert abs(r(sum) - 1.0) < 1e-6
+        quietly summarize freq, meanonly
+        assert reldif(r(sum), scalar(total_svy)) < 1e-6
+        quietly summarize freq_unw, meanonly
+        assert r(sum) == scalar(n_svy)
+    }
+    di as result "Test 1 completed successfully"
     local passed_tests "`passed_tests' 1"
 }
 
-* 2.2 One-way frequency with "binary" on a binary variable (foreign)
+// * Test Case 2: Subpopulation estimation with subpop(if ...)
+di _n "=== TEST CASE 2: Subpopulation with subpop(if subvar == 1) ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq foreign, binary
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+svy, subpop(if subvar == 1): tabulate catvar
+scalar total_sub_svy = e(N_subpop)
+scalar n_sub_svy = e(N_sub)
+scalar df_sub_svy = e(df_r)
+
+dtrace dtfreq catvar [pw=fwt], subpop(if subvar == 1)
 if _rc {
-    di as error "[Test 2] FAIL: dtfreq foreign, binary failed."
+    di as error "Test 2 failed with error " _rc
     local failed_tests "`failed_tests' 2"
 }
 else {
-    di as result "[Test 2] PASS: One-way binary frequency on foreign"
+    frame _df {
+        quietly count
+        assert r(N) == 3
+        quietly summarize total, meanonly
+        assert reldif(r(mean), scalar(total_sub_svy)) < 1e-6
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_sub_svy)
+        quietly summarize prop, meanonly
+        assert abs(r(sum) - 1.0) < 1e-6
+        quietly summarize freq, meanonly
+        assert reldif(r(sum), scalar(total_sub_svy)) < 1e-6
+        quietly summarize freq_unw, meanonly
+        assert r(sum) == scalar(n_sub_svy)
+    }
+    di as result "Test 2 completed successfully"
     local passed_tests "`passed_tests' 2"
 }
 
-* 2.3 One-way frequency with if/in and weights
+// * Test Case 3: Subpopulation with subpop(varname) syntax
+di _n "=== TEST CASE 3: Subpopulation with subpop(subvar) ==="
 local ++total_tests
-sysuse nlsw88, clear
-dtrace dtfreq wage [aweight=south] if wage < 5 & wage > 0, type(prop)
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw=fwt], subpop(subvar)
 if _rc {
-    di as error "[Test 3] FAIL: dtfreq wage with if/weight failed."
+    di as error "Test 3 failed with error " _rc
     local failed_tests "`failed_tests' 3"
 }
 else {
-    di as result "[Test 3] PASS: One-way frequency on wage with if and weights"
+    frame _df {
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_sub_svy)
+        quietly summarize total, meanonly
+        assert reldif(r(mean), scalar(total_sub_svy)) < 1e-6
+    }
+    di as result "Test 3 completed successfully"
     local passed_tests "`passed_tests' 3"
 }
 
-*------------------------------------------------------------------------
-* 3.  Two-way (cross-tab) tests
-*------------------------------------------------------------------------
-
-* 3.1 Two-way frequency: rep78 x foreign
+// * Test Case 4: Bare [pw] inherits active svyset weight
+di _n "=== TEST CASE 4: Bare [pw] inherits svyset weight ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign)
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw]
 if _rc {
-    di as error "[Test 4] FAIL: dtfreq rep78, cross(foreign) failed."
+    di as error "Test 4 failed with error " _rc
     local failed_tests "`failed_tests' 4"
 }
 else {
-    di as result "[Test 4] PASS: Two-way frequency rep78 x foreign"
+    frame _df {
+        quietly summarize total, meanonly
+        assert reldif(r(mean), scalar(total_svy)) < 1e-6
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_svy)
+    }
+    di as result "Test 4 completed successfully"
     local passed_tests "`passed_tests' 4"
 }
 
-* 3.2 Two-way with by(): rep78 by foreign (one-way per foreign level + total)
+// * Test Case 5: Survey tabulation with by(groupvar)
+di _n "=== TEST CASE 5: Survey tabulation by(groupvar) ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, by(foreign)
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw=fwt], by(groupvar)
 if _rc {
-    di as error "[Test 5] FAIL: dtfreq rep78, by(foreign) failed."
+    di as error "Test 5 failed with error " _rc
     local failed_tests "`failed_tests' 5"
 }
 else {
-    di as result "[Test 5] PASS: One-way frequency of rep78 by foreign levels + total"
+    frame _df {
+        // Must contain groups 0, 1, and -1 (Total)
+        quietly levelsof groupvar, local(g_levels)
+        assert "`g_levels'" == "-1 0 1"
+        // Total group (-1) must match overall population
+        quietly summarize total if groupvar == -1, meanonly
+        assert reldif(r(mean), scalar(total_svy)) < 1e-6
+        quietly summarize total_unw if groupvar == -1, meanonly
+        assert r(mean) == scalar(n_svy)
+    }
+    di as result "Test 5 completed successfully"
     local passed_tests "`passed_tests' 5"
 }
 
-* 3.3 Full by() + cross(): rep78 by foreign cross mpg
+// * Test Case 6: Two-way cross tabulation with cross(groupvar)
+di _n "=== TEST CASE 6: Survey cross-tabulation cross(groupvar) ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, by(foreign) cross(mpg)
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw=fwt], cross(groupvar)
 if _rc {
-    di as error "[Test 6] FAIL (or WARNING): rep78 by(foreign) cross(mpg) produced error."
+    di as error "Test 6 failed with error " _rc
     local failed_tests "`failed_tests' 6"
 }
 else {
-    di as result "[Test 6] PASS (or WARNING): rep78 by(foreign) cross(mpg)"
+    frame _df {
+        // Assert presence of unweighted and weighted columns
+        confirm variable freq0 freq1 freq_unw0 freq_unw1 total0 total1 total_unw0 total_unw1 total_all total_all_unw
+        quietly summarize total_all, meanonly
+        assert reldif(r(mean), scalar(total_svy)) < 1e-6
+        quietly summarize total_all_unw, meanonly
+        assert r(mean) == scalar(n_svy)
+    }
+    di as result "Test 6 completed successfully"
     local passed_tests "`passed_tests' 6"
 }
 
-* 3.4 Two-way with STATs and TYpe: rep78 x foreign, request row & col stats and prop & pct
+// * Test Case 7: Binary reshaping with [pw=fwt]
+di _n "=== TEST CASE 7: Binary reshaping under [pw=fwt] ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign) stats(row col) type(prop pct)
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq binvar [pw=fwt], binary
 if _rc {
-    di as error "[Test 7] FAIL: dtfreq rep78, cross(foreign) STATs(row col) TYpe(prop pct)"
+    di as error "Test 7 failed with error " _rc
     local failed_tests "`failed_tests' 7"
 }
 else {
-    di as result "[Test 7] PASS: Two-way with STATs(row col) and TYpe(prop pct)"
+    frame _df {
+        quietly count
+        assert r(N) == 1
+        confirm variable freq_no freq_yes freq_unw_no freq_unw_yes prop_no prop_yes se_no se_yes ci_l_no ci_u_no total total_unw
+        assert total_unw == scalar(n_svy)
+        assert reldif(total, scalar(total_svy)) < 1e-6
+        assert (freq_unw_no + freq_unw_yes) == scalar(n_svy)
+    }
+    di as result "Test 7 completed successfully"
     local passed_tests "`passed_tests' 7"
 }
 
-* 3.5 Error condition: cross() without numeric var
+// * Test Case 8: Zero weights handled correctly
+di _n "=== TEST CASE 8: Zero-weight observation ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(make)
-if _rc == 109 {
-    di as result "[Test 8] PASS: Proper error when cross(make) (non-numeric)."
-    local passed_tests "`passed_tests' 8"
-}
-else if _rc {
-    di as error "[Test 8] FAIL: dtfreq rep78, cross(make) gave unexpected code =`=_rc'"
+use `synthdata', clear
+replace fwt = 0 in 1
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+svy: tabulate catvar
+scalar n_svy8 = e(N)
+scalar total_svy8 = e(total)
+
+dtrace dtfreq catvar [pw=fwt]
+if _rc {
+    di as error "Test 8 failed with error " _rc
     local failed_tests "`failed_tests' 8"
 }
 else {
-    di as error "[Test 8] FAIL: dtfreq rep78, cross(make) should have failed."
-    local failed_tests "`failed_tests' 8"
+    frame _df {
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_svy8)
+        quietly summarize total, meanonly
+        assert reldif(r(mean), scalar(total_svy8)) < 1e-6
+    }
+    di as result "Test 8 completed successfully"
+    local passed_tests "`passed_tests' 8"
 }
 
-*------------------------------------------------------------------------
-* 4.  Binary option domain tests
-*------------------------------------------------------------------------
-
-* 4.1 Binary on binary variable (foreign) - should pass
+// * Test Case 9: Missing weights excluded correctly
+di _n "=== TEST CASE 9: Missing weight observation ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq foreign, binary
+use `synthdata', clear
+replace fwt = . in 1
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+svy: tabulate catvar
+scalar n_svy9 = e(N)
+
+dtrace dtfreq catvar [pw=fwt]
 if _rc {
-    di as error "[Test 9] FAIL: dtfreq foreign, binary (should pass)."
+    di as error "Test 9 failed with error " _rc
     local failed_tests "`failed_tests' 9"
 }
 else {
-    di as result "[Test 9] PASS: dtfreq foreign, binary"
+    frame _df {
+        quietly summarize total_unw, meanonly
+        assert r(mean) == scalar(n_svy9)
+        assert r(mean) == 59
+    }
+    di as result "Test 9 completed successfully"
     local passed_tests "`passed_tests' 9"
 }
 
-* 4.2 Binary on non-binary variable (rep78) - should return error
+// * Test Case 10: Error handling - not svyset
+di _n "=== TEST CASE 10: Error when data not svyset ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, binary
-if _rc == 111 {
-    di as result "[Test 10] PASS: Proper error when binary on rep78 (non-binary)."
+use `synthdata', clear
+svyset, clear
+
+dtrace dtfreq catvar [pw=fwt]
+if _rc == 119 {
+    di as result "Test 10 passed: caught not-svyset error (rc 119)"
     local passed_tests "`passed_tests' 10"
-}
-else if _rc == 198 {
-    di as result "[Test 10] PASS: Proper error when binary on rep78 (non-binary) (Stata 16+)"
-    local passed_tests "`passed_tests' 10"
-}
-else if _rc {
-    di as error "[Test 10] FAIL: dtfreq rep78, binary returned unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 10"
 }
 else {
-    di as error "[Test 10] FAIL: dtfreq rep78, binary should have failed."
+    di as error "Test 10 failed: expected rc 119, got " _rc
     local failed_tests "`failed_tests' 10"
 }
 
-*------------------------------------------------------------------------
-* 5.  "using" and "clear" tests with a temp dataset
-*------------------------------------------------------------------------
-
-* 5.1 Create and save a small temp dataset
-clear
-set obs 10
-generate var1 = cond(_n <= 5, 0, 1)
-generate var2 = cond(_n <= 3, 1, cond(_n <= 7, 2, 3))
-save temp_dtfreq, replace
-
-* 5.2 Test dtfreq using "using" on var1 (binary) with clear
+// * Test Case 11: Error handling - subpop() without pw
+di _n "=== TEST CASE 11: Error when subpop() specified without pweights ==="
 local ++total_tests
-sysuse auto, clear
-dtrace dtfreq var1 using temp_dtfreq.dta, clear binary
-if _rc {
-    di as error "[Test 11] FAIL: dtfreq var1 using temp_dtfreq.dta, clear, binary"
-    local failed_tests "`failed_tests' 11"
-}
-else {
-    di as result "[Test 11] PASS: dtfreq var1 using temp_dtfreq.dta, clear, binary"
+use `synthdata', clear
+
+dtrace dtfreq catvar, subpop(if subvar == 1)
+if _rc == 198 {
+    di as result "Test 11 passed: caught subpop without pw (rc 198)"
     local passed_tests "`passed_tests' 11"
 }
-
-* 5.3 Test dtfreq using temp_dtfreq (without clear) - should use in-memory data
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq var1 using temp_dtfreq.dta
-if _rc {
-    di as error "[Test 12] FAIL: dtfreq var1 using temp_dtfreq.dta (no clear)"
-    local failed_tests "`failed_tests' 12"
-}
 else {
-    di as result "[Test 12] PASS: dtfreq var1 using temp_dtfreq.dta (no clear)"
+    di as error "Test 11 failed: expected rc 198, got " _rc
+    local failed_tests "`failed_tests' 11"
+}
+
+// * Test Case 12: Error handling - weight variable mismatch
+di _n "=== TEST CASE 12: Error when weight variable does not match svyset ==="
+local ++total_tests
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw=groupvar]
+if _rc == 198 {
+    di as result "Test 12 passed: caught weight mismatch (rc 198)"
     local passed_tests "`passed_tests' 12"
 }
-
-*------------------------------------------------------------------------
-* 6.  save() and REPlace tests
-*------------------------------------------------------------------------
-
-* 6.1 Test save() without REPlace (new file)
-local ++total_tests
-sysuse nlsw88, clear
-dtrace dtfreq married, save("ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx")
-if _rc {
-    di as error "[Test 13] FAIL: dtfreq make, save(dtflux_output.xlsx) failed"
-    local failed_tests "`failed_tests' 13"
-}
 else {
-    di as result "[Test 13] PASS: dtfreq make saved to ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx"
+    di as error "Test 12 failed: expected rc 198, got " _rc
+    local failed_tests "`failed_tests' 12"
+}
+
+// * Test Case 13: Error handling - empty subpop domain
+di _n "=== TEST CASE 13: Empty subpop domain raises rc 461 ==="
+local ++total_tests
+use `synthdata', clear
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+dtrace dtfreq catvar [pw=fwt], subpop(if strata == 999)
+if _rc == 461 {
+    di as result "Test 13 passed: caught empty subpop (rc 461)"
     local passed_tests "`passed_tests' 13"
 }
-
-* 6.2 Test save() with REPlace
-local ++total_tests
-sysuse nlsw88, clear
-    dtrace dtfreq married, save("ado/ancillary_files/test/dtfreq/dtfreq_output.xlsx") replace
-if _rc {
-    di as error "[Test 14] FAIL: dtfreq make, save(dtflux_output.dta) replace failed"
-    local failed_tests "`failed_tests' 14"
-}
 else {
-    di as result "[Test 14] PASS: dtfreq make, save(... ) replace"
-    local passed_tests "`passed_tests' 14"
+    di as error "Test 13 failed: expected rc 461, got " _rc
+    local failed_tests "`failed_tests' 13"
 }
 
-*------------------------------------------------------------------------
-* 7.  Excel export tests (_toexcel)
-*------------------------------------------------------------------------
-
-* 7.1 Basic Excel export without custom options
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign) save("dtfreq_excel_test.dta") excel("")
-if _rc {
-    di as error "[Test 15] FAIL: dtfreq rep78, cross(foreign) save(... ) excel(\"\")"
-    local failed_tests "`failed_tests' 15"
-}
-else {
-    di as result "[Test 15] PASS: Exported to Excel default sheet"
-    local passed_tests "`passed_tests' 15"
-}
-
-* 7.2 Excel export with custom sheet name
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign) save("dtfreq_excel_sheet.dta") ///
-    excel(sheet("CustomSheet", replace) firstrow(varlabels))
-if _rc {
-    di as error "[Test 16] FAIL: dtfreq rep78, cross(foreign) with custom sheet name"
-    local failed_tests "`failed_tests' 16"
-}
-else {
-    di as result "[Test 16] PASS: Exported to Excel with CustomSheet"
-    local passed_tests "`passed_tests' 16"
-}
-
-*------------------------------------------------------------------------
-* 8.  STATS / TYPE boundary checks
-*------------------------------------------------------------------------
-
-* 8.1 STATS() without cross() should error
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, STATs(cell)
-if _rc == 198 {
-    di as result "[Test 17] PASS: Proper error when STATs(cell) without cross()"
-    local passed_tests "`passed_tests' 17"
-}
-else if _rc {
-    di as error "[Test 17] FAIL: dtfreq rep78, STATs(cell) gave unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 17"
-}
-else {
-    di as error "[Test 17] FAIL: dtfreq rep78, STATs(cell) should have failed"
-    local failed_tests "`failed_tests' 17"
-}
-
-* 8.2 TYPE() without valid values should error
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, TYPE(invalid)
-if _rc == 198 {
-    di as result "[Test 18] PASS: Proper error when TYPE(invalid)"
-    local passed_tests "`passed_tests' 18"
-}
-else if _rc {
-    di as error "[Test 18] FAIL: dtfreq rep78, TYPE(invalid) gave unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 18"
-}
-else {
-    di as error "[Test 18] FAIL: dtfreq rep78, TYPE(invalid) should have failed"
-    local failed_tests "`failed_tests' 18"
-}
-
-* 8.3 Duplication in STATS() should error
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign) STATs(row row)
-if _rc == 198 {
-    di as result "[Test 19] PASS: Proper error for duplicate STATS(row row)"
-    local passed_tests "`passed_tests' 19"
-}
-else if _rc {
-    di as error "[Test 19] FAIL: dtfreq rep78, cross(foreign) STATs(row row) gave unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 19"
-}
-else {
-    di as error "[Test 19] FAIL: dtfreq rep78, cross(foreign) STATs(row row) should have failed"
-    local failed_tests "`failed_tests' 19"
-}
-
-* 8.4 Duplication in TYPE() should error
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, cross(foreign) STATs(row) TYPE(prop prop)
-if _rc == 198 {
-    di as result "[Test 20] PASS: Proper error for duplicate TYPE(prop prop)"
-    local passed_tests "`passed_tests' 20"
-}
-else if _rc {
-    di as error "[Test 20] FAIL: dtfreq rep78, cross(foreign) TYPE(prop prop) gave unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 20"
-}
-else {
-    di as error "[Test 20] FAIL: dtfreq rep78, cross(foreign) TYPE(prop prop) should have failed"
-    local failed_tests "`failed_tests' 20"
-}
-
-*------------------------------------------------------------------------
-* 9.  CROSS-validation: ensure by() != cross()
-*------------------------------------------------------------------------
-
-local ++total_tests
-sysuse auto, clear
-dtrace dtfreq rep78, by(rep78) cross(rep78)
-if _rc == 198 {
-    di as result "[Test 21] PASS: Proper error when by(rep78) co-specified with cross(rep78)"
-    local passed_tests "`passed_tests' 21"
-}
-else if _rc {
-    di as error "[Test 21] FAIL: dtfreq rep78, by(rep78) cross(rep78) gave unexpected code =`=_rc'"
-    local failed_tests "`failed_tests' 21"
-}
-else {
-    di as error "[Test 21] FAIL: dtfreq rep78, by(rep78) cross(rep78) should have failed"
-    local failed_tests "`failed_tests' 21"
-}
-
-*------------------------------------------------------------------------
-* 10.  Clean up temporary files
-*------------------------------------------------------------------------
-
-capture dtrace erase temp_dtfreq.dta
-capture dtrace erase dtfreq_output.dta
-capture dtrace erase dtfreq_excel_test.dta
-capture dtrace erase dtfreq_excel_sheet.dta
+// Cleanup
+frame change default
+capture frame drop _df
 
 // Test Summary
 di _n(2) "=========================================="
 di "TEST SUMMARY"
 di "=========================================="
 
-// Count passed and failed tests
 local num_passed: word count `passed_tests'
 local num_failed: word count `failed_tests'
 
@@ -412,23 +417,22 @@ di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f 
 if `num_passed' > 0 {
     di _n as text "PASSED TESTS:"
     foreach test in `passed_tests' {
-        di as result "Test `test'"
+        di as result "  PASS Test `test'"
     }
 }
 
 if `num_failed' > 0 {
     di _n as error "FAILED TESTS:"
     foreach test in `failed_tests' {
-        di as error "Test `test'"
+        di as error "  FAIL Test `test'"
     }
 }
 else {
     di _n as result "ALL TESTS PASSED!"
 }
 
-// Final summary
 di _n(2) "=========================================="
-di "dtfreq Test Suite 2 Completed"
+di "dtfreq Survey & Subpop Test Suite Completed"
 di "Timestamp: " c(current_date) " " c(current_time)
 if `num_failed' == 0 {
     di as result "Status: ALL TESTS PASSED"
@@ -439,4 +443,4 @@ else {
 di "=========================================="
 
 log close
-exit
+exit, clear
