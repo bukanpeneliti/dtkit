@@ -1,8 +1,15 @@
 * dtfreq_test.do
 * Comprehensive test suite for dtfreq.ado
 * Date: June 1, 2025
+// Objective: Check frequency tables and preserve grouping variables.
 
 version 16
+global fnum "01"
+global fmain "dtfreq"
+global ftype "test"
+global vernum "v01"
+global fname "${fnum}_${fmain}_${ftype}_${vernum}"
+global logname "${ftype}_${vernum}"
 clear frames
 capture log close
 capture confirm file "ado/dtfreq.ado"
@@ -559,6 +566,71 @@ else {
     local passed_tests "`passed_tests' 23"
 }
 
+// * grouping variable prefix regression
+capture program drop dtfreq_prefix_check
+program define dtfreq_prefix_check
+    syntax [, binary]
+    clear
+    set obs 8
+    generate groupvar = floor((_n - 1) / 4)
+    generate crossvar = mod(floor((_n - 1) / 2), 2)
+    generate binvar = mod(_n - 1, 2)
+    label define prefix_binary 0 "No" 1 "Yes", replace
+    label values binvar prefix_binary
+    label variable groupvar "Group label"
+
+    foreach group in groupvar collgrad row_group cell_group freq_group ///
+        prop_group pct_group colprop_group rowfreq_group {
+        rename groupvar `group'
+        dtfreq binvar, by(`group') cross(crossvar) `binary' ///
+            stats(row) type(pct) df(prefix_result)
+        frame prefix_result {
+            local group_label : variable label `group'
+            assert "`group_label'" == "Group label"
+            if "`binary'" != "" {
+                assert inlist(`group', -1, 0, 1)
+                assert _N == 3
+                assert freq0_no == cond(`group' == -1, 2, 1)
+                assert freq1_yes == cond(`group' == -1, 2, 1)
+                assert rowpct0_no == 50
+                assert total_all == cond(`group' == -1, 8, 4)
+            }
+            else {
+                assert inlist(`group', -1, 0, 1) if vallab != "Total"
+                assert _N == 7
+                assert freq0 == cond(`group' == -1, 2, 1) ///
+                    if vallab != "Total"
+                assert rowpct0 == 50
+                assert total_all == cond(`group' == -1, 8, 4) ///
+                    if vallab != "Total"
+            }
+            foreach pattern in colprop* colpct* *prop* {
+                local remaining_metrics ""
+                capture ds `pattern'
+                if _rc == 0 local remaining_metrics `r(varlist)'
+                local remaining_metrics : list remaining_metrics - group
+                assert "`remaining_metrics'" == ""
+            }
+        }
+        frame drop prefix_result
+        rename `group' groupvar
+    }
+end
+
+foreach mode in ordinary binary {
+    local ++total_tests
+    local binary_option ""
+    if "`mode'" == "binary" local binary_option "binary"
+    capture noisily dtfreq_prefix_check, `binary_option'
+    if _rc {
+        local failed_tests "`failed_tests' prefix_`mode'"
+    }
+    else {
+        local passed_tests "`passed_tests' prefix_`mode'"
+    }
+}
+program drop dtfreq_prefix_check
+
 // Cleanup
 frame change default
 capture frame drop _df myfreq complex_test _dtsource
@@ -606,3 +678,4 @@ else {
 di "=========================================="
 
 log close
+exit, clear

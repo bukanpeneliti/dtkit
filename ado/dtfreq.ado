@@ -21,7 +21,6 @@ program define dtfreq
     _argload, clear(`clear') using(`using')
     // Define frames
     local source_frame `r(source_frame)'
-    local _defaultframe `r(_defaultframe)'
 
     // Now validate the varlist as numeric with loaded data
     local varlist `anything'
@@ -93,7 +92,7 @@ program define dtfreq
     // add total
     if "`cross'" != "" & "`binary'" == "" {
         frame `df': rename (colprop_ colpct_) (prop_all pct_all)
-        frame `df': _crosstotal, is_svy(`is_svy')
+        frame `df': _crosstotal, is_svy(`is_svy') by(`by')
     }
         
     // drop variables
@@ -107,11 +106,24 @@ program define dtfreq
         if "`cross'" != "" frame `df': order `core_vars' *prop* *pct* freq* rowfreq* total* 
         else frame `df': order `core_vars' *prop* *pct* freq* total* 
     }
-    if strpos("`stats'", "row") == 0 frame `df': capture drop row*
-    if strpos("`stats'", "col") == 0 frame `df': capture drop col*
-    if strpos("`stats'", "cell") == 0 frame `df': capture drop cell*
-    if strpos("`type'", "prop") == 0 frame `df': capture drop *prop*
-    if strpos("`type'", "pct") == 0 frame `df': capture drop *pct*
+    frame `df' {
+        foreach metric in row col cell prop pct {
+            local selected "`stats'"
+            local pattern "`metric'*"
+            if inlist("`metric'", "prop", "pct") {
+                local selected "`type'"
+                local pattern "*`metric'*"
+            }
+            if strpos("`selected'", "`metric'") == 0 {
+                capture ds `pattern'
+                if _rc == 0 {
+                    local dropvars `r(varlist)'
+                    local dropvars : list dropvars - by
+                    if "`dropvars'" != "" drop `dropvars'
+                }
+            }
+        }
+    }
 
     // sort results (freq always exists)
     frame `df': sort `by' varname freq*
@@ -140,10 +152,6 @@ program define _xtab
             frame `source_frame': quietly levelsof `by' `ifcmd', local(by_levels)
             
             foreach level in `by_levels' {
-                // Get by label from main frame
-                frame `source_frame': local by_label: label (`by') `level'
-                if "`by_label'" == "" local by_label "`level'"
-                
                 // Run analysis for this level
                 local has_res = 0
                 frame `temp_frame' {
@@ -275,7 +283,9 @@ program define _xtab_core
 
         // calculate percentage
         quietly ds *prop*, has(type numeric)
-        foreach v in `r(varlist)' {
+        local propvars `r(varlist)'
+        local propvars : list propvars - by
+        foreach v in `propvars' {
             local pctname: subinstr local v "prop" "pct"
             quietly generate `pctname' = `v' * 100
         }
@@ -285,7 +295,10 @@ program define _xtab_core
             foreach val in `colval' {
                 capture egen total`val' = total(freq`val')
             }
-            egen rowfreq = rowtotal(freq*), missing
+            quietly ds freq*
+            local freqvars `r(varlist)'
+            local freqvars : list freqvars - by
+            egen rowfreq = rowtotal(`freqvars'), missing
             egen total_all = total(rowfreq)
             generate colprop_ = rowfreq / total_all
             generate colpct_ = colprop_ * 100
@@ -386,7 +399,9 @@ program define _xtab_core
 
         // Calculate percentage
         quietly ds *prop*, has(type numeric)
-        foreach v in `r(varlist)' {
+        local propvars `r(varlist)'
+        local propvars : list propvars - by
+        foreach v in `propvars' {
             local pctname: subinstr local v "prop" "pct"
             quietly generate `pctname' = `v' * 100
         }
@@ -418,7 +433,7 @@ program define _xtab_core
     }
 end
 
-// * reshape binary data (formerly yesno)
+// * reshape binary data
 program define _binreshape
     syntax, [by(name) cross(name) is_svy(integer 0)]
     
@@ -435,18 +450,18 @@ program define _binreshape
         }
     }
     if "`cross'" != "" {
-        quietly ds *, has(type numeric)
-        foreach numvar in `r(varlist)' {
-            local `numvar'_varlab: variable label `numvar'
-        }
-        quietly reshape wide freq* col* row* cell*, i(`by' varname varlab) j(vallab) string
+        quietly ds freq* col* row* cell*, has(type numeric)
+        local reshape_vars `r(varlist)'
+        local reshape_vars : list reshape_vars - by
+        quietly reshape wide `reshape_vars', ///
+            i(`by' varname varlab) j(vallab) string
     }
 
 end
 
 // * adds total row for cross option
 program define _crosstotal
-    syntax, [vallabname(name) is_svy(integer 0)] // Optional vallab variable name
+    syntax, [vallabname(name) is_svy(integer 0) by(name)] // Optional vallab variable name
 
     // Handle optional vallab (default to 'vallab' if not specified)
     if "`vallabname'" == "" {
@@ -461,6 +476,8 @@ program define _crosstotal
     // Identify key variables
     unab freqvars: freq*          // Frequency variables (freq1, freq2, ...)
     unab totalvars: total*        // Total variables (total1, ..., total_all)
+    local freqvars : list freqvars - by
+    local totalvars : list totalvars - by
     local rowfreq rowfreq         // Row frequency variable
     local rowfrequnw ""
     if `is_svy' == 1 {
@@ -584,7 +601,9 @@ program define _labelvars
     else if "`binary'" != "" & "`cross'" == "" {
         if `is_svy' == 1 frame `df': quietly ds freq* prop* pct* se* ci_*
         else frame `df': quietly ds freq* prop* pct*
-        foreach reshapevars in `r(varlist)' {
+        local reshape_list `r(varlist)'
+        local reshape_list : list reshape_list - by
+        foreach reshapevars in `reshape_list' {
             local lbl ""
             if substr("`reshapevars'", 1, 9) == "freq_unw_" {
                 local cat = substr("`reshapevars'", 10, .)
@@ -621,7 +640,9 @@ program define _labelvars
         // get value and variable label from cross
         frame `source_frame': quietly levelsof `cross', local(cross_values)
         frame `df': quietly ds freq* col* row* cell*
-        foreach reshapevars in `r(varlist)' {
+        local reshape_list `r(varlist)'
+        local reshape_list : list reshape_list - by
+        foreach reshapevars in `reshape_list' {
             frame `df': local `reshapevars'_varlab: variable label `reshapevars'
             local `reshapevars'_varlab: subinstr local `reshapevars'_varlab "_" "["
             local `reshapevars'_varlab: subinstr local `reshapevars'_varlab " " "] "
@@ -896,9 +917,6 @@ program define _argcheck, rclass
                         label define `tmplbl' `val' "`lbltxt'", add
                     }
                     label values `var' `tmplbl'
-                    if "`debug'" == "1" {
-                        di as text "Temporary label applied: `var'"
-                    }
                 }
             }
 
@@ -999,7 +1017,6 @@ program define _argload, rclass
     // define dataset
     if "`using'" != "" {
         if `_inmemory' == 1 & "`clear'" == "" {
-            return local _defaultframe = c(frame)
             capture frame drop _dtsource
             frame create _dtsource
             cwf _dtsource
@@ -1065,7 +1082,7 @@ void _xtab_core_calc_svy(real scalar level_ci)
     total_w = st_numscalar("e(total)")
     
     total_unw = st_numscalar("e(N_sub)")
-    if (rows(total_unw) == 0 | total_unw == .) {
+    if (total_unw == .) {
         total_unw = st_numscalar("e(N)")
     }
     

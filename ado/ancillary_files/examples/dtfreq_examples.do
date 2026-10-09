@@ -1,40 +1,44 @@
-// * examples:
-// Setup using a standard Stata dataset:
+// Objective: Show frequency tables, binary output, and numeric formats.
+version 16
 
-    . capture frame create nlsw88
-    . frame nlsw88: sysuse nlsw88.dta, clear
+global fnum "01"
+global fmain "dtfreq"
+global ftype "examples"
+global vernum "v01"
+global fname "${fnum}_${fmain}_${ftype}_${vernum}"
+global logname "${ftype}_${vernum}"
 
-// 1. One-way frequency table for race, results in frame tf1:
+// * source data
+capture frame create nlsw88
+frame nlsw88: sysuse nlsw88.dta, clear
 
-    . frame nlsw88: dtfreq race, df(tf1)
-    . frame tf1: list, clean noobs
+// * one-way table
+frame nlsw88: dtfreq race, df(tf1)
+frame tf1: list, clean noobs
 
-// 2. Frequency table for race stratified by married (rows), results in frame tf2:
+// * table by marital status
+frame nlsw88: dtfreq race, df(tf2) by(married)
+frame tf2: list, noobs sepby(varname)
 
-    . frame nlsw88: dtfreq race, df(tf2) rowby(married)
-    . frame tf2: list, noobs sepby(varname)
+// * table across marital status
+frame nlsw88: dtfreq race, df(tf3) cross(married)
+frame tf3: list, clean noobs
 
-// 3. Frequency table for race cross-tabulated by married (columns), results in frame tf3:
+// * table by college graduation and across marital status
+frame nlsw88: dtfreq race, df(tf4) by(collgrad) cross(married)
+frame tf4: describe
 
-    . frame nlsw88: dtfreq race, df(tf3) colby(married)
-    . frame tf3: list, clean noobs
+// * binary output
+frame nlsw88: dtfreq union, df(tf5) binary
+frame tf5: list, clean noobs
 
-// 4. Two-way table for race, rows by collgrad, columns by married, results in frame tf4:
+// * binary output with missing values excluded from the analysis sample
+frame nlsw88: dtfreq union, df(tf6) binary nomiss
+frame tf6: list, clean noobs
 
-    . frame nlsw88: dtfreq race, df(tf4) rowby(collgrad) colby(married)
-    . frame tf4: describe
+// * binary output by college graduation and across race
+frame nlsw88: dtfreq union, df(tf7) by(collgrad) cross(race) ///
+    binary format(%8.2f)
+frame tf7: describe
 
-// 5. Using yesno for the binary variable union. Results in frame tf5. This will produce incorrect proportions/percentages, because union has missing values:
-
-    . frame nlsw88: dtfreq union, df(tf5) yesno
-    . frame tf5: list, clean noobs
-
-// 6. Using yesno with nomiss. Results in frame tf6:
-
-    . frame nlsw88: dtfreq union, df(tf6) yesno nomiss
-    . frame tf6: list, clean noobs
-
-// 7. Using yesno with colby and formatting option. Results in frame tf7:
-
-    . frame nlsw88: dtfreq union, df(tf7) rowby(collgrad) colby(race) yesno format(%8.2f)
-    . frame tf7: describe
+exit, clear
