@@ -7,6 +7,50 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.1.0] - 2026-10-09
+
+- Feature release for survey-weighted estimation in `dtfreq` and `dtstat`.
+- Component versions:
+  - **dtkit: v2.1.0 (Updated)**
+  - **dtfreq: v1.1.0 (Updated)**
+  - **dtstat: v1.1.0 (Updated)**
+  - dtmeta: v1.0.2 (Unchanged)
+  - dtparquet: v2.0.9 (Unchanged)
+
+### Added
+
+- **dtfreq v1.1.0**:
+  - Survey tabulation: with `[pw=]` and an active `svyset` design, `dtfreq`
+    estimates through `svy: tabulate` semantics and reports weighted
+    frequencies and proportions alongside unweighted counts, with linearized
+    standard errors and t-based Wald confidence intervals controlled by the
+    new `level()` option.
+  - `subpop(varname | if)` option for domain estimation that retains the full
+    survey design for variance, including per-level combination with `by()`.
+  - Bare `[pw]` inherits the sampling weight from the active `svyset`.
+  - Guards mirroring `svy` behavior: data not svyset (r119), design without
+    sampling weights (r119), weight mismatch against the design (r198),
+    `subpop()` without pweights (r198), empty subpopulation domain (r461).
+  - New regression suite `dtfreq_test3.do` with 13 cases benchmarked against
+    `svy: tabulate`, including a designed-in singleton stratum, zero weights,
+    and missing weights.
+
+- **dtstat v1.1.0**:
+  - Design-based statistics: with `[pw=]` and an active `svyset` design,
+    `dtstat` delegates to `svy: mean`, `svy: total`, and `svy: ratio` and
+    reports `estimate`, `se`, `ci_l`, `ci_u`, `df`, `n_unw`, and `n_w` for
+    each variable and statistic.
+  - `subpop(varname | if)` domain estimation; `by()` groups are estimated as
+    subpopulations so the full design drives every group's variance, with the
+    overall row estimated on the whole domain.
+  - New `svy` option for design-based estimation without specifying a weight,
+    and `legacy` option to keep weighted `collapse` behavior when a design is
+    active.
+  - Ratio statistics via `num/den` varlist terms in svy mode.
+  - New regression suite `dtstat_test3.do` with 10 cases benchmarked against
+    `svy: mean`, `svy: total`, and `svy: ratio`, including singleton strata,
+    empty subpopulation domains, and by-group subpopulation estimation.
+
 ## Package Release [v2.0.10] - 2026-09-10
 
 - Patch release for the `dtmeta` line-break value label fix.
