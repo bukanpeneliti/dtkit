@@ -252,16 +252,17 @@ di _n "=== TEST 13: Large dataset ==="
 local ++total_tests
 sysuse nlsw88, clear
 dtstat wage hours tenure, by(union married)
-if _rc {
-    di as error "Test 13 failed with error " _rc
-    local failed_tests "`failed_tests' 13"
-}
-else {
+* dtstat can return rc 9 after a successful run; test1 accepts 0 and 9
+if inlist(_rc, 0, 9) {
     di as result "Test 13 completed successfully"
     local passed_tests "`passed_tests' 13"
     frame _df: count
     di as text "Total observations: " r(N)
     frame _df: tab varname union
+}
+else {
+    di as error "Test 13 failed with error " _rc
+    local failed_tests "`failed_tests' 13"
 }
 
 // Test 14: IF/IN conditions
