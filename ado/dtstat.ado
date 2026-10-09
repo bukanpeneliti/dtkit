@@ -1,9 +1,9 @@
-*! Version 1.1.0 08oct2026
+*! Version 1.1.1 09oct2026
 program define dtstat
     * Module to produce descriptive statistics dataset
 
     version 16
-    syntax anything(id="varlist") [if] [in] [aweight fweight iweight pweight] [using/] [, df(string) by(varlist) stats(string asis) FOrmat(string) noMISS FAst save(string asis) excel(string) REPlace Clear SVY LEGACY subpop(string asis)]
+    syntax anything(id="varlist") [if] [in] [aweight fweight iweight pweight] [using/] [, df(string) by(varlist) stats(string asis) FOrmat(string) noMISS FAst save(string asis) excel(string) REPlace Clear SVY subpop(string asis)]
 
     // Validate arguments and get returned parameters
     _argload, clear(`clear') using(`using')
@@ -45,19 +45,12 @@ program define dtstat
 
     // * Decide whether to produce design-based (svy) statistics
     local svymode ""
-    local svyauto ""
-    if "`legacy'" == "" {
-        if "`svy'" != "" {
-            if "`design'" == "" {
-                display as error "option svy requires an active survey design; set it with svyset"
-                exit 198
-            }
-            local svymode "1"
+    if "`svy'" != "" {
+        if "`design'" == "" {
+            display as error "option svy requires an active survey design; set it with svyset"
+            exit 198
         }
-        else if "`weight'" == "pweight" & "`design'" != "" {
-            local svymode "1"
-            local svyauto "1"
-        }
+        local svymode "1"
     }
 
     // * Validate the weight against the survey design
@@ -82,7 +75,7 @@ program define dtstat
     local subpop_cond ""
     if `"`subpop'"' != "" {
         if "`svymode'" == "" {
-            display as error "option subpop requires svy mode: specify [pw=] with an active svyset, or option svy"
+            display as error "option subpop requires option svy"
             exit 198
         }
         if `"`subpop'"' != subinstr(`"`subpop'"', char(34), "", .) {
@@ -104,7 +97,6 @@ program define dtstat
 
     // * Notes on the estimation mode
     if "`svymode'" != "" {
-        if "`svyauto'" != "" display as text "note: active survey design found; producing design-based statistics"
         if "`fast'" != "" display as text "note: option fast is ignored in svy mode"
         if "`if'" != "" | "`in'" != "" {
             display as text "note: if/in restrict the survey design; use subpop() for domain estimation"
@@ -179,7 +171,7 @@ program define dtstat
         local stats_list "`r(stats_list)'"
         local total_id "`r(total_id)'"
         if "`ratio_list'" != "" | `: list posof "ratio" in stats_list' > 0 {
-            display as error "ratio statistics require svy mode: specify [pw=] with an active svyset"
+            display as error "ratio statistics require option svy"
             exit 198
         }
     }

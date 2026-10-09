@@ -80,7 +80,7 @@ capture noisily {
     local npop_tot = e(N_pop)
     local df_tot = e(df_r)
 
-    dtstat y [pw=fwt], stats(mean total) df(svyt1)
+    dtstat y [pw=fwt], svy stats(mean total) df(svyt1)
     frame svyt1 {
         quietly count
         assert r(N) == 2
@@ -129,7 +129,7 @@ capture noisily {
     local npop_sub = e(N_subpop)
     local df_sub = e(df_r)
 
-    dtstat y [pw=fwt], stats(mean) subpop(if sub) df(svyt2)
+    dtstat y [pw=fwt], svy stats(mean) subpop(if sub) df(svyt2)
     frame svyt2 {
         quietly count
         assert r(N) == 1
@@ -146,7 +146,7 @@ capture noisily {
         assert r(mean) == `df_sub'
     }
 
-    dtstat y [pw=fwt], stats(mean) subpop(sub) df(svyt2b)
+    dtstat y [pw=fwt], svy stats(mean) subpop(sub) df(svyt2b)
     frame svyt2b {
         assert subpop == "sub"
         quietly summarize estimate
@@ -174,7 +174,7 @@ capture noisily {
     local n_ratio = e(N)
     local npop_ratio = e(N_pop)
 
-    dtstat y/x [pw=fwt], stats(ratio) df(svyt3)
+    dtstat y/x [pw=fwt], svy stats(ratio) df(svyt3)
     frame svyt3 {
         quietly count
         assert r(N) == 1
@@ -214,7 +214,7 @@ capture noisily {
     local b_all = e(b)[1,1]
     local se_all = sqrt(e(V)[1,1])
 
-    dtstat y [pw=fwt], stats(mean) by(grp) df(svyt4)
+    dtstat y [pw=fwt], svy stats(mean) by(grp) df(svyt4)
     frame svyt4 {
         quietly count
         assert r(N) == 3
@@ -258,7 +258,7 @@ capture noisily {
     local se_tiny = sqrt(e(V)[1,1])
     local n_tiny = e(N_sub)
 
-    dtstat y [pw=fwt], stats(mean) subpop(if _n <= 2) df(svyt5)
+    dtstat y [pw=fwt], svy stats(mean) subpop(if _n <= 2) df(svyt5)
     frame svyt5 {
         quietly summarize estimate
         assert reldif(r(mean), `b_tiny') < 1e-10
@@ -281,7 +281,7 @@ else {
 di _n "=== TEST 6: empty subpop() domain ==="
 local ++total_tests
 capture noisily {
-    dtstat y [pw=fwt], stats(mean) subpop(if y > 100) df(svyt6)
+    dtstat y [pw=fwt], svy stats(mean) subpop(if y > 100) df(svyt6)
     frame svyt6 {
         quietly count
         assert r(N) == 1
@@ -336,7 +336,7 @@ capture noisily {
     local b_sum = e(b)[1,1]
     local se_sum = sqrt(e(V)[1,1])
 
-    dtstat y [pw=fwt], stats(sum) df(svyt8)
+    dtstat y [pw=fwt], svy stats(sum) df(svyt8)
     frame svyt8 {
         assert stat == "sum"
         quietly summarize estimate
@@ -354,11 +354,11 @@ else {
     local passed_tests "`passed_tests' 8"
 }
 
-// Test 9: legacy option keeps the weighted-collapse output
-di _n "=== TEST 9: legacy option ==="
+// Test 9: default collapse behavior without svy option
+di _n "=== TEST 9: default collapse behavior on svyset data ==="
 local ++total_tests
 capture noisily {
-    dtstat y [pw=fwt], stats(mean) legacy df(svyt9)
+    dtstat y [pw=fwt], stats(mean) df(svyt9)
     frame svyt9 {
         capture confirm variable mean
         local c_mean = _rc
@@ -381,7 +381,7 @@ else {
 di _n "=== TEST 10: svy-mode error handling ==="
 local ++total_tests
 local test10_errors 0
-capture noisily dtstat y [pw=fwt], stats(median) df(svyt10a)
+capture noisily dtstat y [pw=fwt], svy stats(median) df(svyt10a)
 if _rc != 198 {
     di as error "Test 10a failed: unsupported statistic not caught (error " _rc ")"
     local ++test10_errors
@@ -396,16 +396,27 @@ if _rc != 198 {
     di as error "Test 10c failed: subpop outside svy mode not caught (error " _rc ")"
     local ++test10_errors
 }
-capture noisily dtstat y [pw=x], stats(mean) df(svyt10d)
+capture noisily dtstat y [pw=x], svy stats(mean) df(svyt10d)
 if _rc != 198 {
     di as error "Test 10d failed: weight mismatch not caught (error " _rc ")"
     local ++test10_errors
 }
-capture noisily dtstat y [pw=fwt], stats(mean) subpop(if grp == "0") df(svyt10e)
+capture noisily dtstat y [pw=fwt], svy stats(mean) subpop(if grp == "0") df(svyt10e)
 if _rc != 198 {
     di as error "Test 10e failed: string subpop condition not caught (error " _rc ")"
     local ++test10_errors
 }
+frame create nosvydesign
+frame nosvydesign {
+    quietly set obs 10
+    quietly gen y = _n
+    capture noisily dtstat y, svy df(svyt10f)
+    if _rc != 198 {
+        di as error "Test 10f failed: svy without svyset not caught (error " _rc ")"
+        local ++test10_errors
+    }
+}
+frame drop nosvydesign
 if `test10_errors' > 0 {
     local failed_tests "`failed_tests' 10"
 }

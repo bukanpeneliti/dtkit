@@ -44,9 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `subpop(varname | if)` domain estimation; `by()` groups are estimated as
     subpopulations so the full design drives every group's variance, with the
     overall row estimated on the whole domain.
-  - New `svy` option for design-based estimation without specifying a weight,
-    and `legacy` option to keep weighted `collapse` behavior when a design is
-    active.
+  - Explicit `svy` option for design-based estimation; omitting `svy` defaults
+    to standard `collapse` behavior even when a survey design is active.
   - Ratio statistics via `num/den` varlist terms in svy mode.
   - New regression suite `dtstat_test3.do` with 10 cases benchmarked against
     `svy: mean`, `svy: total`, and `svy: ratio`, including singleton strata,

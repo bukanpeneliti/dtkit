@@ -36,8 +36,7 @@
 {synopt :{opt fo:rmat(%fmt)}}specify number format for numeric variables{p_end}
 {synopt :{opt nomiss}}exclude observations with missing values in variables{p_end}
 {synopt :{opt fa:st}}use {cmd:gtools} commands for faster processing{p_end}
-{synopt :{opt svy}}force design-based statistics with the active survey design{p_end}
-{synopt :{opt legacy}}use weighted {cmd:collapse} even when a survey design is active{p_end}
+{synopt :{opt svy}}produce design-based statistics using the active survey design{p_end}
 {synopt :{opt subpop(subpopulation)}}estimate statistics for a subpopulation and keep the full design{p_end}
 {synopt :{opt clear}}clear data from memory when using external file{p_end}
 
@@ -48,8 +47,8 @@
 {synoptline}
 {p 4 6 2}
 {opt aweight}s, {opt fweight}s, {opt iweight}s, and {opt pweight}s are allowed;
-see {help weight}. With {opt [pw=]} and an active survey design, {cmd:dtstat}
-produces design-based statistics; see {bf:Description}.{p_end}
+see {help weight}. Specify {opt svy} to produce design-based statistics;
+see {bf:Description}.{p_end}
 
 
 {marker description}{...}
@@ -66,16 +65,15 @@ The output dataset includes rows for each group and additional rows for overall 
 {cmd:dtstat} preserves value labels for grouping variables and labels total rows "Total".
 
 {pstd}
-With {opt [pw=]} and an active {helpb svyset} design, {cmd:dtstat} produces
-design-based statistics. For each variable, {cmd:dtstat} runs the corresponding
+Specify {opt svy} to produce design-based statistics using the active
+{helpb svyset} design. For each variable, {cmd:dtstat} runs the corresponding
 {cmd:svy} estimation command ({cmd:svy: mean}, {cmd:svy: total}, or
 {cmd:svy: ratio}) and stores the estimate, linearized standard error, t-based
 confidence interval from the design degrees of freedom, unweighted N, and
-weighted N. {cmd:dtstat} inherits the active design automatically when
-{opt [pw=]} is specified, and the pweight variable must match the design
-weight. Use {opt legacy} to keep weighted {cmd:collapse} results when a design
-is active, or {opt svy} to request design-based statistics without specifying a
-weight.
+weighted N. In svy mode, the sampling weight is inherited from the active
+design, or can be specified with {opt [pw=]} matching the design weight.
+When {opt svy} is omitted, {cmd:dtstat} always uses standard {help collapse}
+behavior.
 
 {pstd}
 In svy mode, {opt stats()} supports {cmd:mean}, {cmd:total}, {cmd:sum}, and
@@ -162,15 +160,10 @@ Common statistics include:
 {cmd:lastnm} - last nonmissing observation in group
 
 {phang}
-{opt svy} forces design-based estimation with the active survey design. Specify
-{opt svy} when the command has no {opt [pw=]}, for example with a design that
-has no sampling weight. The option stops with an error when no survey design is
-active.
-
-{phang}
-{opt legacy} uses weighted {cmd:collapse} results even when a survey design is
-active. Use it to keep the descriptive, non-design-based behavior for
-{opt [pw=]} requests.
+{opt svy} produces design-based estimation with the active survey design. The
+option stops with an error when no survey design is active. In svy mode,
+supported statistics are restricted to {cmd:mean}, {cmd:total}, {cmd:sum},
+and {cmd:ratio}.
 
 {phang}
 {opt subpop(if exp)} and {opt subpop(varname)} estimate statistics for the
