@@ -1,6 +1,7 @@
-* dtstat_test.do
-* Comprehensive test suite for dtstat.ado
-* Date: June 1, 2025
+* dtstat_test1.do
+* Functional test suite for dtstat.ado
+* Consolidates the former dtstat_test1.do and dtstat_test2.do suites
+* Date: October 9, 2026
 
 version 16
 clear frames
@@ -34,22 +35,13 @@ local passed_tests ""
 local failed_tests ""
 local total_tests 0
 
-capture program drop dtrace
-program define dtrace
-    set trace on        // Enable tracing
-    set tracedepth 2    // Set trace depth to 2 levels
-    capture noisily `0' // Execute user's command (with error handling)
-    set trace off       // Always disable tracing afterward
-end
-
-// Display test header
 di _n(2) "=========================================="
-di "Starting dtstat Test Suite"
+di "Starting dtstat Test Suite 1 (functional)"
 di "Timestamp: " c(current_date) " " c(current_time)
 di "==========================================" _n
 
-// Test Case 1: Basic functionality with auto dataset
-di _n "=== TEST CASE 1: Basic descriptive statistics (auto dataset) ==="
+// Test 1: Basic stats, auto dataset
+di _n "=== TEST 1: Basic stats ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price mpg weight
@@ -60,20 +52,11 @@ if _rc {
 else {
     di as result "Test 1 completed successfully"
     local passed_tests "`passed_tests' 1"
-    
-    // Check if frame was created
-    capture frame _df: describe
-    if _rc {
-        di as error "Frame _df not created"
-    }
-    else {
-        di as result "Frame _df created successfully"
-        frame _df: list, clean noobs
-    }
+    frame _df: list, clean noobs
 }
 
-// Test Case 2: Single variable with default stats
-di _n "=== TEST CASE 2: Single variable ==="
+// Test 2: Single variable
+di _n "=== TEST 2: Single variable ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price
@@ -84,13 +67,11 @@ if _rc {
 else {
     di as result "Test 2 completed successfully"
     local passed_tests "`passed_tests' 2"
-    frame _df: count
-    di as text "Number of observations in _df: " r(N)
-    frame _df: list varname varlab, clean
+    frame _df: list, clean
 }
 
-// Test Case 3: With BY option
-di _n "=== TEST CASE 3: BY option ==="
+// Test 3: BY option
+di _n "=== TEST 3: BY option ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price mpg, by(foreign)
@@ -101,14 +82,14 @@ if _rc {
 else {
     di as result "Test 3 completed successfully"
     local passed_tests "`passed_tests' 3"
-    frame _df: list foreign varname mean count, clean sepby(varname)
+    frame _df: list foreign varname mean, clean sepby(varname)
 }
 
-// Test Case 4: Custom statistics
-di _n "=== TEST CASE 4: Custom statistics ==="
+// Test 4: Custom stats
+di _n "=== TEST 4: Custom stats ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg weight, stats(mean sd min max p25 p75)
+dtstat price mpg, stats(mean sd min max)
 if _rc {
     di as error "Test 4 failed with error " _rc
     local failed_tests "`failed_tests' 4"
@@ -116,12 +97,11 @@ if _rc {
 else {
     di as result "Test 4 completed successfully"
     local passed_tests "`passed_tests' 4"
-    frame _df: describe, simple
-    frame _df: list in 1/3, clean
+    frame _df: list, clean
 }
 
-// Test Case 5: Multiple BY variables
-di _n "=== TEST CASE 5: Multiple BY variables ==="
+// Test 5: Multiple BY variables
+di _n "=== TEST 5: Multiple BY variables ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price mpg, by(foreign rep78)
@@ -132,12 +112,11 @@ if _rc {
 else {
     di as result "Test 5 completed successfully"
     local passed_tests "`passed_tests' 5"
-    frame _df: tab foreign rep78
-    frame _df: list foreign rep78 varname mean in 1/10, clean
+    frame _df: list foreign rep78 varname mean, clean
 }
 
-// Test Case 6: Weight support
-di _n "=== TEST CASE 6: Weight support ==="
+// Test 6: Frequency weights
+di _n "=== TEST 6: Frequency weights ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price mpg [fw=rep78]
@@ -146,13 +125,13 @@ if _rc {
     local failed_tests "`failed_tests' 6"
 }
 else {
-    di as result "Test 6 completed successfully (frequency weights)"
+    di as result "Test 6 completed successfully"
     local passed_tests "`passed_tests' 6"
     frame _df: list varname mean count, clean
 }
 
-// Test Case 7: Analytical weights
-di _n "=== TEST CASE 7: Analytical weights ==="
+// Test 7: Analytical weights
+di _n "=== TEST 7: Analytical weights ==="
 local ++total_tests
 sysuse auto, clear
 dtstat price mpg [aw=weight]
@@ -161,49 +140,33 @@ if _rc {
     local failed_tests "`failed_tests' 7"
 }
 else {
-    di as result "Test 7 completed successfully (analytical weights)"
+    di as result "Test 7 completed successfully"
     local passed_tests "`passed_tests' 7"
     frame _df: list varname mean count, clean
 }
 
-// Test Case 8a: Missing values handling (default)
-di _n "=== TEST CASE 8a: Missing values (default) ==="
+// Test 8: Missing values (default)
+di _n "=== TEST 8: Missing values (default) ==="
 local ++total_tests
 sysuse auto, clear
-// Create some missing values
 replace rep78 = . in 1/10
 dtstat price mpg rep78
 if _rc {
-    di as error "Test 8a failed with error " _rc
-    local failed_tests "`failed_tests' 8a"
+    di as error "Test 8 failed with error " _rc
+    local failed_tests "`failed_tests' 8"
 }
 else {
-    di as result "Test 8a completed (missing included by default)"
-    local passed_tests "`passed_tests' 8a"
+    di as result "Test 8 completed successfully"
+    local passed_tests "`passed_tests' 8"
     frame _df: list varname count, clean
 }
 
-// Test Case 8b: NOMISS option
-di _n "=== TEST CASE 8b: NOMISS option ==="
+// Test 9: NOMISS option
+di _n "=== TEST 9: NOMISS option ==="
 local ++total_tests
 sysuse auto, clear
 replace rep78 = . in 1/10
 dtstat price mpg rep78, nomiss
-if _rc {
-    di as error "Test 8b failed with error " _rc
-    local failed_tests "`failed_tests' 8b"
-}
-else {
-    di as result "Test 8b completed (missing excluded)"
-    local passed_tests "`passed_tests' 8b"
-    frame _df: list varname count, clean
-}
-
-// Test Case 9: Custom frame name
-di _n "=== TEST CASE 9: Custom frame name ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price mpg, df(mystat)
 if _rc {
     di as error "Test 9 failed with error " _rc
     local failed_tests "`failed_tests' 9"
@@ -211,6 +174,21 @@ if _rc {
 else {
     di as result "Test 9 completed successfully"
     local passed_tests "`passed_tests' 9"
+    frame _df: list varname count, clean
+}
+
+// Test 10: Custom frame name
+di _n "=== TEST 10: Custom frame name ==="
+local ++total_tests
+sysuse auto, clear
+dtstat price mpg, df(mystat)
+if _rc {
+    di as error "Test 10 failed with error " _rc
+    local failed_tests "`failed_tests' 10"
+}
+else {
+    di as result "Test 10 completed successfully"
+    local passed_tests "`passed_tests' 10"
     capture frame mystat: describe
     if _rc {
         di as error "Custom frame 'mystat' not created"
@@ -222,30 +200,14 @@ else {
     }
 }
 
-// Test Case 10: USING option
-di _n "=== TEST CASE 10: USING option ==="
+// Test 11: USING option
+di _n "=== TEST 11: USING option ==="
 local ++total_tests
 sysuse auto, clear
 tempfile autodata
 save `autodata'
 clear
-
 capture noisily dtstat price mpg weight using `autodata'
-if _rc {
-    di as error "Test 10 failed with error " _rc
-    local failed_tests "`failed_tests' 10"
-}
-else {
-    di as result "Test 10 completed successfully"
-    local passed_tests "`passed_tests' 10"
-    frame _df: list in 1/3, clean
-}
-
-// Test Case 11: Excel export
-di _n "=== TEST CASE 11: Excel export ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price mpg weight, save("ado/ancillary_files/test/dtstat/dtstat_output.xlsx") replace
 if _rc {
     di as error "Test 11 failed with error " _rc
     local failed_tests "`failed_tests' 11"
@@ -253,7 +215,23 @@ if _rc {
 else {
     di as result "Test 11 completed successfully"
     local passed_tests "`passed_tests' 11"
-    capture confirm file "test/dtstat/dtstat_output.xlsx"
+    frame _df: list in 1/3, clean
+}
+
+// Test 12: Excel export
+di _n "=== TEST 12: Excel export ==="
+local ++total_tests
+sysuse auto, clear
+tempfile xlsfile
+dtstat price mpg weight, save("`xlsfile'.xlsx")
+if _rc {
+    di as error "Test 12 failed with error " _rc
+    local failed_tests "`failed_tests' 12"
+}
+else {
+    di as result "Test 12 completed successfully"
+    local passed_tests "`passed_tests' 12"
+    capture confirm file "`xlsfile'.xlsx"
     if _rc {
         di as error "Excel file not created"
     }
@@ -262,74 +240,58 @@ else {
     }
 }
 
-// Test Case 12: Excel export with tempfile
-di _n "=== TEST CASE 12: Excel export with tempfile ==="
+// Test 13: Excel export with sheet options
+di _n "=== TEST 13: Excel export with sheet options ==="
 local ++total_tests
 sysuse auto, clear
 tempfile xlsfile2
-capture dtstat price mpg, save("`xlsfile2'.xlsx") excel(sheet("MyStats", replace) firstrow(varlabels))
-
+capture dtstat price mpg, save("`xlsfile2'.xlsx") ///
+    excel(sheet("MyStats", replace) firstrow(varlabels))
 if _rc == 0 {
     capture confirm file "`xlsfile2'.xlsx"
     if _rc == 0 {
-        di as result "Test 12 completed successfully"
-        local passed_tests "`passed_tests' 12"
+        di as result "Test 13 completed successfully"
+        local passed_tests "`passed_tests' 13"
     }
     else {
-        di as error "Test 12 failed: Excel file not created"
-        local failed_tests "`failed_tests' 12"
+        di as error "Test 13 failed: Excel file not created"
+        local failed_tests "`failed_tests' 13"
     }
-}
-else {
-    di as error "Test 12 failed with error " _rc
-    local failed_tests "`failed_tests' 12"
-}
-
-// Test Case 13: Large dataset (nlsw88)
-di _n "=== TEST CASE 13: Large dataset test ==="
-local ++total_tests
-sysuse nlsw88, clear
-* expand 1000
-dtstat wage hours tenure, by(union married)
-if inlist(_rc, 0, 9) {
-    di as result "Test 13 completed successfully"
-    local passed_tests "`passed_tests' 13"
-    frame _df: count
-    di as text "Total observations: " r(N)
-    frame _df: tab varname union
 }
 else {
     di as error "Test 13 failed with error " _rc
     local failed_tests "`failed_tests' 13"
 }
 
-// Test Case 14: IF/IN conditions
-di _n "=== TEST CASE 14: IF/IN conditions ==="
+// Test 14: Excel export to sample output file
+di _n "=== TEST 14: Excel export to sample output file ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg if price > 5000, by(foreign)
+dtstat price mpg weight, ///
+    save("ado/ancillary_files/test/dtstat/dtstat_output.xlsx") replace
 if _rc {
-    di as error "Test 14a failed with error " _rc
+    di as error "Test 14 failed with error " _rc
     local failed_tests "`failed_tests' 14"
 }
 else {
-    di as result "Test 14a completed (IF condition)"
-    local passed_tests "`passed_tests' 14"
+    capture confirm file "ado/ancillary_files/test/dtstat/dtstat_output.xlsx"
+    if _rc {
+        di as error "Test 14 failed: Excel file not created"
+        local failed_tests "`failed_tests' 14"
+    }
+    else {
+        di as result "Test 14 completed successfully"
+        local passed_tests "`passed_tests' 14"
+    }
 }
 
-dtstat price mpg in 1/50
-if _rc {
-    di as error "Test 14b failed with error " _rc
-}
-else {
-    di as result "Test 14b completed (IN condition)"
-}
-
-// Test Case 15: Percentiles
-di _n "=== TEST CASE 15: Percentiles ==="
+// Test 15: Excel export with custom filename
+di _n "=== TEST 15: Excel export with custom filename ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg weight, stats(p1 p5 p10 p25 p50 p75 p90 p95 p99)
+dtstat price mpg, ///
+    save("ado/ancillary_files/test/dtstat/no-space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtstat/no-space.xlsx"
 if _rc {
     di as error "Test 15 failed with error " _rc
     local failed_tests "`failed_tests' 15"
@@ -337,15 +299,15 @@ if _rc {
 else {
     di as result "Test 15 completed successfully"
     local passed_tests "`passed_tests' 15"
-    frame _df: describe, simple
-    frame _df: list varname p25 p50 p75 in 1/3, clean
 }
 
-// Test Case 16: All available statistics
-di _n "=== TEST CASE 16: All available statistics ==="
+// Test 16: Excel export with spaces in filename
+di _n "=== TEST 16: Excel export with spaces in filename ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price, stats(count mean median sd min max sum iqr first last)
+dtstat price mpg, ///
+    save("ado/ancillary_files/test/dtstat/file with space.xlsx") replace
+capture confirm file "ado/ancillary_files/test/dtstat/file with space.xlsx"
 if _rc {
     di as error "Test 16 failed with error " _rc
     local failed_tests "`failed_tests' 16"
@@ -353,38 +315,30 @@ if _rc {
 else {
     di as result "Test 16 completed successfully"
     local passed_tests "`passed_tests' 16"
-    frame _df: describe, simple
-    frame _df: list, clean
 }
 
-// Test Case 17: FAST option (if gtools available)
-di _n "=== TEST CASE 17: FAST option ==="
+// Test 17: Excel export to non-existent directory
+di _n "=== TEST 17: Excel export to non-existent directory ==="
 local ++total_tests
 sysuse auto, clear
-capture which gtools
-if _rc {
-    di as text "gtools not available, skipping fast option test"
+capture dtstat price mpg, ///
+    save("ado/ancillary_files/test/non-existent/file.xlsx") replace
+if _rc == 601 {
+    di as result "Test 17 completed successfully"
     local passed_tests "`passed_tests' 17"
 }
 else {
-    dtstat price mpg weight, by(foreign rep78) fast
-    if _rc {
-        di as error "Test 17 failed with error " _rc
-        local failed_tests "`failed_tests' 17"
-    }
-    else {
-        di as result "Test 17 completed successfully (fast option)"
-        local passed_tests "`passed_tests' 17"
-        frame _df: count
-        di as text "Fast option observations: " r(N)
-    }
+    di as error "Test 17 failed with error " _rc
+    local failed_tests "`failed_tests' 17"
 }
 
-// Test Case 18: Format option
-di _n "=== TEST CASE 18: Format option ==="
+// Test 18: Excel export without extension
+di _n "=== TEST 18: Excel export without extension ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg weight, format(%12.2f)
+dtstat price mpg, ///
+    save("ado/ancillary_files/test/dtstat/no-extension") replace
+capture confirm file "ado/ancillary_files/test/dtstat/no-extension.xlsx"
 if _rc {
     di as error "Test 18 failed with error " _rc
     local failed_tests "`failed_tests' 18"
@@ -392,95 +346,59 @@ if _rc {
 else {
     di as result "Test 18 completed successfully"
     local passed_tests "`passed_tests' 18"
-    frame _df: describe mean, simple
-    frame _df: list varname mean in 1/3, clean
 }
 
-// Test Case 19: Error handling tests
-di _n "=== TEST CASE 19: Error handling ==="
-local ++total_tests
-local test19_errors 0
-
-// Test no variables specified
-capture noisily dtstat using `autodata'
-if _rc == 0 {
-    di as error "Test 19a failed: no variables not caught"
-    local ++test19_errors
-}
-else {
-    di as result "Test 19a passed: no variables handled (error " _rc ")"
-}
-
-// Test non-numeric variable
-sysuse auto, clear
-capture noisily dtstat make
-if _rc == 0 {
-    di as error "Test 19b failed: string variable not caught"
-    local ++test19_errors
-}
-else {
-    di as result "Test 19b passed: string variable handled (error " _rc ")"
-}
-
-// Test fast without gtools (if not installed)
-capture which gtools
-if _rc {
-    capture dtstat price, fast
-    if _rc == 0 {
-        di as error "Test 19c failed: fast without gtools not caught"
-        local ++test19_errors
-    }
-    else {
-        di as result "Test 19c passed: fast without gtools handled (error " _rc ")"
-    }
-}
-
-// Test excel without save
-sysuse auto, clear
-capture dtstat price, excel(sheet("test"))
-if _rc == 0 {
-    di as error "Test 19d failed: excel without save not caught"
-    local ++test19_errors
-}
-else {
-    di as result "Test 19d passed: excel without save handled (error " _rc ")"
-}
-
-// Overall Test 19 result
-if `test19_errors' > 0 {
-    local failed_tests "`failed_tests' 19"
-}
-else {
-    local passed_tests "`passed_tests' 19"
-}
-
-// Test Case 20: Complex scenario
-di _n "=== TEST CASE 20: Complex scenario ==="
+// Test 19: Large dataset (nlsw88)
+di _n "=== TEST 19: Large dataset ==="
 local ++total_tests
 sysuse nlsw88, clear
-dtstat wage hours tenure grade if age >= 30 & !missing(industry) [aw=hours], ///
-    by(union married) stats(count mean median sd min max p25 p75) df(complex_test)
+dtstat wage hours tenure, by(union married)
+* dtstat can return rc 9 after a successful run; accept 0 and 9
 if inlist(_rc, 0, 9) {
-    di as result "Test 20 completed successfully"
-    local passed_tests "`passed_tests' 20"
-    frame complex_test: describe, simple
-    frame complex_test: count
-    di as text "Complex test observations: " r(N)
-    frame complex_test: list varname union married mean in 1/10, clean
+    di as result "Test 19 completed successfully"
+    local passed_tests "`passed_tests' 19"
+    frame _df: count
+    di as text "Total observations: " r(N)
+    frame _df: tab varname union
 }
 else {
-    di as error "Test 20 failed with error " _rc
-    local failed_tests "`failed_tests' 20"
+    di as error "Test 19 failed with error " _rc
+    local failed_tests "`failed_tests' 19"
 }
 
-// Test Case 21: Variable labels preservation
-di _n "=== TEST CASE 21: Variable labels preservation ==="
+// Test 20: IF/IN conditions
+di _n "=== TEST 20: IF/IN conditions ==="
 local ++total_tests
 sysuse auto, clear
-label variable price "Price (USD)"
-label variable mpg "Miles per gallon"
-label variable weight "Weight (lbs)"
-dtstat price mpg weight
+local test20_errors 0
+dtstat price mpg if price > 5000, by(foreign)
+if _rc {
+    di as error "Test 20a failed with error " _rc
+    local ++test20_errors
+}
+else {
+    di as result "Test 20a completed successfully"
+}
+dtstat price mpg in 1/50
+if _rc {
+    di as error "Test 20b failed with error " _rc
+    local ++test20_errors
+}
+else {
+    di as result "Test 20b completed successfully"
+}
+if `test20_errors' > 0 {
+    local failed_tests "`failed_tests' 20"
+}
+else {
+    local passed_tests "`passed_tests' 20"
+}
+
+// Test 21: Percentiles
+di _n "=== TEST 21: Percentiles ==="
+local ++total_tests
+sysuse auto, clear
+dtstat price mpg weight, stats(p1 p5 p10 p25 p50 p75 p90 p95 p99)
 if _rc {
     di as error "Test 21 failed with error " _rc
     local failed_tests "`failed_tests' 21"
@@ -488,14 +406,14 @@ if _rc {
 else {
     di as result "Test 21 completed successfully"
     local passed_tests "`passed_tests' 21"
-    frame _df: list varname varlab, clean
+    frame _df: list varname p25 p50 p75 in 1/3, clean
 }
 
-// Test Case 22: BY with totals
-di _n "=== TEST CASE 22: BY with totals ==="
+// Test 22: All available statistics
+di _n "=== TEST 22: All available statistics ==="
 local ++total_tests
 sysuse auto, clear
-dtstat price mpg, by(foreign)
+dtstat price, stats(count mean median sd min max sum iqr first last)
 if _rc {
     di as error "Test 22 failed with error " _rc
     local failed_tests "`failed_tests' 22"
@@ -503,6 +421,96 @@ if _rc {
 else {
     di as result "Test 22 completed successfully"
     local passed_tests "`passed_tests' 22"
+    frame _df: list, clean
+}
+
+// Test 23: FAST option (if gtools available)
+di _n "=== TEST 23: FAST option ==="
+local ++total_tests
+sysuse auto, clear
+capture which gtools
+if _rc {
+    di as text "gtools not available, skipping fast option test"
+    local passed_tests "`passed_tests' 23"
+}
+else {
+    dtstat price mpg weight, by(foreign rep78) fast
+    if _rc {
+        di as error "Test 23 failed with error " _rc
+        local failed_tests "`failed_tests' 23"
+    }
+    else {
+        di as result "Test 23 completed successfully (fast option)"
+        local passed_tests "`passed_tests' 23"
+        frame _df: count
+        di as text "Fast option observations: " r(N)
+    }
+}
+
+// Test 24: Format option
+di _n "=== TEST 24: Format option ==="
+local ++total_tests
+sysuse auto, clear
+dtstat price mpg weight, format(%12.2f)
+if _rc {
+    di as error "Test 24 failed with error " _rc
+    local failed_tests "`failed_tests' 24"
+}
+else {
+    di as result "Test 24 completed successfully"
+    local passed_tests "`passed_tests' 24"
+    frame _df: list varname mean in 1/3, clean
+}
+
+// Test 25: Complex scenario
+di _n "=== TEST 25: Complex scenario ==="
+local ++total_tests
+sysuse nlsw88, clear
+dtstat wage hours tenure grade if age >= 30 & !missing(industry) [aw=hours], ///
+    by(union married) stats(count mean median sd min max p25 p75) df(complex_test)
+if inlist(_rc, 0, 9) {
+    di as result "Test 25 completed successfully"
+    local passed_tests "`passed_tests' 25"
+    frame complex_test: describe, simple
+    frame complex_test: count
+    di as text "Complex test observations: " r(N)
+    frame complex_test: list varname union married mean in 1/10, clean
+}
+else {
+    di as error "Test 25 failed with error " _rc
+    local failed_tests "`failed_tests' 25"
+}
+
+// Test 26: Variable labels preservation
+di _n "=== TEST 26: Variable labels preservation ==="
+local ++total_tests
+sysuse auto, clear
+label variable price "Price (USD)"
+label variable mpg "Miles per gallon"
+label variable weight "Weight (lbs)"
+dtstat price mpg weight
+if _rc {
+    di as error "Test 26 failed with error " _rc
+    local failed_tests "`failed_tests' 26"
+}
+else {
+    di as result "Test 26 completed successfully"
+    local passed_tests "`passed_tests' 26"
+    frame _df: list varname varlab, clean
+}
+
+// Test 27: BY with totals
+di _n "=== TEST 27: BY with totals ==="
+local ++total_tests
+sysuse auto, clear
+dtstat price mpg, by(foreign)
+if _rc {
+    di as error "Test 27 failed with error " _rc
+    local failed_tests "`failed_tests' 27"
+}
+else {
+    di as result "Test 27 completed successfully"
+    local passed_tests "`passed_tests' 27"
     frame _df: list foreign varname mean, clean sepby(varname)
     // Check if total rows exist
     frame _df: count if foreign == -1
@@ -514,65 +522,53 @@ else {
     }
 }
 
-// Test Case 23: Excel export with custom filename
-di _n "=== TEST CASE 23: Excel export with custom filename ==="
+// Test 28: Error handling
+di _n "=== TEST 28: Error handling ==="
 local ++total_tests
+local test28_errors 0
+capture noisily dtstat using `autodata'
+if _rc == 0 {
+    di as error "Test 28a failed: no variables not caught"
+    local ++test28_errors
+}
+else {
+    di as result "Test 28a passed: no variables handled (error " _rc ")"
+}
 sysuse auto, clear
-dtstat price mpg, save("ado/ancillary_files/test/dtstat/no-space.xlsx") replace
-capture confirm file "ado/ancillary_files/test/dtstat/no-space.xlsx"
+capture noisily dtstat make
+if _rc == 0 {
+    di as error "Test 28b failed: string variable not caught"
+    local ++test28_errors
+}
+else {
+    di as result "Test 28b passed: string variable handled (error " _rc ")"
+}
+capture which gtools
 if _rc {
-    di as error "Test 23 failed with error " _rc
-    local failed_tests "`failed_tests' 23"
+    dtstat price, fast
+    if _rc == 0 {
+        di as error "Test 28c failed: fast without gtools not caught"
+        local ++test28_errors
+    }
+    else {
+        di as result "Test 28c passed: fast without gtools handled (error " _rc ")"
+    }
 }
-else {
-    di as result "Test 23 completed successfully"
-    local passed_tests "`passed_tests' 23"
-}
-
-// Test Case 24: Excel export with custom filename and space
-di _n "=== TEST CASE 24: Excel export with custom filename and space ==="
-local ++total_tests
 sysuse auto, clear
-dtstat price mpg, save("ado/ancillary_files/test/dtstat/file with space.xlsx") replace
-capture confirm file "ado/ancillary_files/test/dtstat/file with space.xlsx"
-
-if _rc {
-    di as error "Test 24 failed with error " _rc
-    local failed_tests "`failed_tests' 24"
+capture dtstat price, excel(sheet("test"))
+if _rc == 198 {
+    di as result "Test 28d passed: excel without save handled (error 198)"
 }
 else {
-    di as result "Test 24 completed successfully"
-    local passed_tests "`passed_tests' 24"
+    di as error "Test 28d failed: excel without save not caught (error " _rc ")"
+    local ++test28_errors
 }
-
-// Test Case 25: Excel export to non-existent directory
-di _n "=== TEST CASE 25: Excel export to non-existent directory ==="
-local ++total_tests
-sysuse auto, clear
-capture dtstat price mpg, save("ado/ancillary_files/test/non-existent/file.xlsx") replace
-
-if _rc == 601 {
-    di as result "Test 25 completed successfully"
-    local passed_tests "`passed_tests' 25"
+// Overall Test 28 result
+if `test28_errors' > 0 {
+    local failed_tests "`failed_tests' 28"
 }
 else {
-    di as error "Test 25 failed with error " _rc
-    local failed_tests "`failed_tests' 25"
-}
-
-// Test Case 26: Excel export without extension
-di _n "=== TEST CASE 26: Excel export without extension ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price mpg, save("ado/ancillary_files/test/dtstat/no-extension") replace
-capture confirm file "ado/ancillary_files/test/dtstat/no-extension.xlsx"
-if _rc {
-    di as error "Test 26 failed with error " _rc
-    local failed_tests "`failed_tests' 26"
-}
-else {
-    di as result "Test 26 completed successfully"
-    local passed_tests "`passed_tests' 26"
+    local passed_tests "`passed_tests' 28"
 }
 
 // Cleanup
@@ -614,9 +610,8 @@ else {
     di as error "`num_failed' TEST(S) FAILED"
 }
 
-// Final summary
 di _n(2) "=========================================="
-di "dtstat Test Suite Completed"
+di "dtstat Test Suite 1 Completed"
 di "Timestamp: " c(current_date) " " c(current_time)
 di "Check output above for any errors"
 di "=========================================="

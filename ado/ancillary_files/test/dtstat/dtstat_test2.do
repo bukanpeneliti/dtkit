@@ -1,6 +1,6 @@
 * dtstat_test2.do
-* Comprehensive test suite for dtstat.ado (structure mirrors test/dtfreq/_test2.do)
-* Date: June 1, 2025
+* Regression tests for dtstat svy mode ([pw=] with an active svyset)
+* Date: October 8, 2026
 
 version 16
 clear frames
@@ -19,6 +19,10 @@ log using ado/ancillary_files/test/log/dtstat_test2.log, replace
 // manually drop main program and subroutines
 capture program drop dtstat
 capture program drop _stats
+capture program drop _svyest
+capture program drop _svycells
+capture program drop _svyunit
+capture program drop _formatsvy
 capture program drop _collapsevars
 capture program drop _byprocess
 capture program drop _format
@@ -34,39 +38,123 @@ local passed_tests ""
 local failed_tests ""
 local total_tests 0
 
-capture program drop dtrace
-program define dtrace
-    set trace on
-    set tracedepth 2
-    capture noisily `0'
-    set trace off
-end
-
 di _n(2) "=========================================="
-di "Starting dtstat Test Suite 2"
+di "Starting dtstat Test Suite 2 (svy mode)"
 di "Timestamp: " c(current_date) " " c(current_time)
 di "==========================================" _n
 
-// Test 1: Basic stats, auto dataset
-di _n "=== TEST 1: Basic stats ==="
+// Synthetic survey sample with a designed-in singleton stratum
+clear
+set obs 60
+gen psu = ceil(_n/5)
+gen strata = ceil(psu/3)
+replace strata = 5 if psu == 12
+gen fwt = 1 + mod(_n, 4)
+replace fwt = 0 if _n == 7
+replace fwt = . if _n == 13
+gen y = mod(_n, 7) + 1
+gen x = mod(_n, 5) + 1
+gen grp = mod(_n, 2)
+gen sub = mod(_n, 3) != 0
+label variable y "Outcome Y"
+svyset psu [pw=fwt], strata(strata) singleunit(centered)
+
+// Test 1: svy mean and total, singleton strata, zero and missing weights
+di _n "=== TEST 1: svy mean and total ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg weight
+capture noisily {
+    quietly svy: mean y
+    local b_mean = e(b)[1,1]
+    local se_mean = sqrt(e(V)[1,1])
+    local n_mean = e(N)
+    local npop_mean = e(N_pop)
+    local df_mean = e(df_r)
+    assert e(N_strata) == 5
+    assert e(N_psu) == 12
+    assert e(df_r) == e(N_psu) - e(N_strata)
+    assert `npop_mean' == 144
+    quietly svy: total y
+    local b_tot = e(b)[1,1]
+    local se_tot = sqrt(e(V)[1,1])
+    local n_tot = e(N)
+    local npop_tot = e(N_pop)
+    local df_tot = e(df_r)
+
+    dtstat y [pw=fwt], svy stats(mean total) df(svyt1)
+    frame svyt1 {
+        quietly count
+        assert r(N) == 2
+        quietly summarize estimate if stat == "mean"
+        assert reldif(r(mean), `b_mean') < 1e-10
+        quietly summarize se if stat == "mean"
+        assert reldif(r(mean), `se_mean') < 1e-10
+        quietly summarize n_unw if stat == "mean"
+        assert r(mean) == `n_mean'
+        quietly summarize n_w if stat == "mean"
+        assert reldif(r(mean), `npop_mean') < 1e-10
+        quietly summarize df if stat == "mean"
+        assert r(mean) == `df_mean'
+        quietly summarize estimate if stat == "total"
+        assert reldif(r(mean), `b_tot') < 1e-10
+        quietly summarize se if stat == "total"
+        assert reldif(r(mean), `se_tot') < 1e-10
+        quietly summarize n_unw if stat == "total"
+        assert r(mean) == `n_tot'
+        quietly summarize n_w if stat == "total"
+        assert reldif(r(mean), `npop_tot') < 1e-10
+        quietly summarize df if stat == "total"
+        assert r(mean) == `df_tot'
+        assert varname == "y"
+        assert varlab == "Outcome Y"
+        assert subpop == ""
+    }
+}
 if _rc {
     di as error "Test 1 failed with error " _rc
     local failed_tests "`failed_tests' 1"
-} 
+}
 else {
     di as result "Test 1 completed successfully"
     local passed_tests "`passed_tests' 1"
-    frame _df: list, clean noobs
 }
 
-// Test 2: Single variable
-di _n "=== TEST 2: Single variable ==="
+// Test 2: subpop() with if-expression and with variable name
+di _n "=== TEST 2: subpop() domain estimation ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price
+capture noisily {
+    quietly svy, subpop(if sub): mean y
+    local b_sub = e(b)[1,1]
+    local se_sub = sqrt(e(V)[1,1])
+    local n_sub = e(N_sub)
+    local npop_sub = e(N_subpop)
+    local df_sub = e(df_r)
+
+    dtstat y [pw=fwt], svy stats(mean) subpop(if sub) df(svyt2)
+    frame svyt2 {
+        quietly count
+        assert r(N) == 1
+        assert subpop == "if sub"
+        quietly summarize estimate
+        assert reldif(r(mean), `b_sub') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_sub') < 1e-10
+        quietly summarize n_unw
+        assert r(mean) == `n_sub'
+        quietly summarize n_w
+        assert reldif(r(mean), `npop_sub') < 1e-10
+        quietly summarize df
+        assert r(mean) == `df_sub'
+    }
+
+    dtstat y [pw=fwt], svy stats(mean) subpop(sub) df(svyt2b)
+    frame svyt2b {
+        assert subpop == "sub"
+        quietly summarize estimate
+        assert reldif(r(mean), `b_sub') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_sub') < 1e-10
+    }
+}
 if _rc {
     di as error "Test 2 failed with error " _rc
     local failed_tests "`failed_tests' 2"
@@ -74,14 +162,34 @@ if _rc {
 else {
     di as result "Test 2 completed successfully"
     local passed_tests "`passed_tests' 2"
-    frame _df: list, clean
 }
 
-// Test 3: BY option
-di _n "=== TEST 3: BY option ==="
+// Test 3: ratio term y/x
+di _n "=== TEST 3: svy ratio ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg, by(foreign)
+capture noisily {
+    quietly svy: ratio y/x
+    local b_ratio = e(b)[1,1]
+    local se_ratio = sqrt(e(V)[1,1])
+    local n_ratio = e(N)
+    local npop_ratio = e(N_pop)
+
+    dtstat y/x [pw=fwt], svy stats(ratio) df(svyt3)
+    frame svyt3 {
+        quietly count
+        assert r(N) == 1
+        assert varname == "y/x"
+        assert stat == "ratio"
+        quietly summarize estimate
+        assert reldif(r(mean), `b_ratio') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_ratio') < 1e-10
+        quietly summarize n_unw
+        assert r(mean) == `n_ratio'
+        quietly summarize n_w
+        assert reldif(r(mean), `npop_ratio') < 1e-10
+    }
+}
 if _rc {
     di as error "Test 3 failed with error " _rc
     local failed_tests "`failed_tests' 3"
@@ -89,14 +197,49 @@ if _rc {
 else {
     di as result "Test 3 completed successfully"
     local passed_tests "`passed_tests' 3"
-    frame _df: list foreign varname mean, clean sepby(varname)
 }
 
-// Test 4: Custom stats
-di _n "=== TEST 4: Custom stats ==="
+// Test 4: by() groups keep the full design, total row included
+di _n "=== TEST 4: by() with [pw=] ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg, stats(mean sd min max)
+capture noisily {
+    foreach g in 0 1 {
+        quietly svy, subpop(if grp == `g'): mean y
+        local b_grp`g' = e(b)[1,1]
+        local se_grp`g' = sqrt(e(V)[1,1])
+        local n_grp`g' = e(N_sub)
+        local npop_grp`g' = e(N_subpop)
+    }
+    quietly svy: mean y
+    local b_all = e(b)[1,1]
+    local se_all = sqrt(e(V)[1,1])
+
+    dtstat y [pw=fwt], svy stats(mean) by(grp) df(svyt4)
+    frame svyt4 {
+        quietly count
+        assert r(N) == 3
+        quietly summarize estimate if grp == 0
+        assert reldif(r(mean), `b_grp0') < 1e-10
+        quietly summarize se if grp == 0
+        assert reldif(r(mean), `se_grp0') < 1e-10
+        quietly summarize n_unw if grp == 0
+        assert r(mean) == `n_grp0'
+        quietly summarize n_w if grp == 0
+        assert reldif(r(mean), `npop_grp0') < 1e-10
+        quietly summarize estimate if grp == 1
+        assert reldif(r(mean), `b_grp1') < 1e-10
+        quietly summarize se if grp == 1
+        assert reldif(r(mean), `se_grp1') < 1e-10
+        quietly summarize estimate if grp == -1
+        assert reldif(r(mean), `b_all') < 1e-10
+        quietly summarize se if grp == -1
+        assert reldif(r(mean), `se_all') < 1e-10
+        local glbl : value label grp
+        assert "`glbl'" != ""
+        local tot : label `glbl' -1
+        assert "`tot'" == "Total"
+    }
+}
 if _rc {
     di as error "Test 4 failed with error " _rc
     local failed_tests "`failed_tests' 4"
@@ -104,14 +247,27 @@ if _rc {
 else {
     di as result "Test 4 completed successfully"
     local passed_tests "`passed_tests' 4"
-    frame _df: list, clean
 }
 
-// Test 5: Multiple BY variables
-di _n "=== TEST 5: Multiple BY variables ==="
+// Test 5: tiny subpop() domain
+di _n "=== TEST 5: tiny subpop() domain ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg, by(foreign rep78)
+capture noisily {
+    quietly svy, subpop(if _n <= 2): mean y
+    local b_tiny = e(b)[1,1]
+    local se_tiny = sqrt(e(V)[1,1])
+    local n_tiny = e(N_sub)
+
+    dtstat y [pw=fwt], svy stats(mean) subpop(if _n <= 2) df(svyt5)
+    frame svyt5 {
+        quietly summarize estimate
+        assert reldif(r(mean), `b_tiny') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_tiny') < 1e-10
+        quietly summarize n_unw
+        assert r(mean) == `n_tiny'
+    }
+}
 if _rc {
     di as error "Test 5 failed with error " _rc
     local failed_tests "`failed_tests' 5"
@@ -119,14 +275,25 @@ if _rc {
 else {
     di as result "Test 5 completed successfully"
     local passed_tests "`passed_tests' 5"
-    frame _df: list foreign rep78 varname mean, clean
 }
 
-// Test 6: Frequency weights
-di _n "=== TEST 6: Frequency weights ==="
+// Test 6: empty subpop() domain returns a missing row, not an error
+di _n "=== TEST 6: empty subpop() domain ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg [fw=rep78]
+capture noisily {
+    dtstat y [pw=fwt], svy stats(mean) subpop(if y > 100) df(svyt6)
+    frame svyt6 {
+        quietly count
+        assert r(N) == 1
+        assert missing(estimate)
+        assert missing(se)
+        assert missing(ci_l)
+        assert missing(ci_u)
+        assert missing(df)
+        assert n_unw == 0
+        assert n_w == 0
+    }
+}
 if _rc {
     di as error "Test 6 failed with error " _rc
     local failed_tests "`failed_tests' 6"
@@ -134,14 +301,24 @@ if _rc {
 else {
     di as result "Test 6 completed successfully"
     local passed_tests "`passed_tests' 6"
-    frame _df: list varname mean count, clean
 }
 
-// Test 7: Analytical weights
-di _n "=== TEST 7: Analytical weights ==="
+// Test 7: explicit svy option uses the design weight
+di _n "=== TEST 7: explicit svy option ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg [aw=weight]
+capture noisily {
+    quietly svy: mean y
+    local b_exp = e(b)[1,1]
+    local se_exp = sqrt(e(V)[1,1])
+
+    dtstat y, svy stats(mean) df(svyt7)
+    frame svyt7 {
+        quietly summarize estimate
+        assert reldif(r(mean), `b_exp') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_exp') < 1e-10
+    }
+}
 if _rc {
     di as error "Test 7 failed with error " _rc
     local failed_tests "`failed_tests' 7"
@@ -149,15 +326,25 @@ if _rc {
 else {
     di as result "Test 7 completed successfully"
     local passed_tests "`passed_tests' 7"
-    frame _df: list varname mean count, clean
 }
 
-// Test 8: Missing values (default)
-di _n "=== TEST 8: Missing values (default) ==="
+// Test 8: sum maps to the svy total estimator
+di _n "=== TEST 8: sum uses the total estimator ==="
 local ++total_tests
-sysuse auto, clear
-replace rep78 = . in 1/10
-dtstat price mpg rep78
+capture noisily {
+    quietly svy: total y
+    local b_sum = e(b)[1,1]
+    local se_sum = sqrt(e(V)[1,1])
+
+    dtstat y [pw=fwt], svy stats(sum) df(svyt8)
+    frame svyt8 {
+        assert stat == "sum"
+        quietly summarize estimate
+        assert reldif(r(mean), `b_sum') < 1e-10
+        quietly summarize se
+        assert reldif(r(mean), `se_sum') < 1e-10
+    }
+}
 if _rc {
     di as error "Test 8 failed with error " _rc
     local failed_tests "`failed_tests' 8"
@@ -165,15 +352,22 @@ if _rc {
 else {
     di as result "Test 8 completed successfully"
     local passed_tests "`passed_tests' 8"
-    frame _df: list varname count, clean
 }
 
-// Test 9: NOMISS option
-di _n "=== TEST 9: NOMISS option ==="
+// Test 9: default collapse behavior without svy option
+di _n "=== TEST 9: default collapse behavior on svyset data ==="
 local ++total_tests
-sysuse auto, clear
-replace rep78 = . in 1/10
-dtstat price mpg rep78, nomiss
+capture noisily {
+    dtstat y [pw=fwt], stats(mean) df(svyt9)
+    frame svyt9 {
+        capture confirm variable mean
+        local c_mean = _rc
+        capture confirm variable estimate
+        local c_est = _rc
+        assert `c_mean' == 0
+        assert `c_est' != 0
+    }
+}
 if _rc {
     di as error "Test 9 failed with error " _rc
     local failed_tests "`failed_tests' 9"
@@ -181,258 +375,72 @@ if _rc {
 else {
     di as result "Test 9 completed successfully"
     local passed_tests "`passed_tests' 9"
-    frame _df: list varname count, clean
 }
 
-// Test 10: Custom frame name
-di _n "=== TEST 10: Custom frame name ==="
+// Test 10: option validation errors
+di _n "=== TEST 10: svy-mode error handling ==="
 local ++total_tests
-sysuse auto, clear
-dtstat price mpg, df(mystat)
-if _rc {
-    di as error "Test 10 failed with error " _rc
+local test10_errors 0
+capture noisily dtstat y [pw=fwt], svy stats(median) df(svyt10a)
+if _rc != 198 {
+    di as error "Test 10a failed: unsupported statistic not caught (error " _rc ")"
+    local ++test10_errors
+}
+capture noisily dtstat y/x, stats(ratio) df(svyt10b)
+if _rc != 198 {
+    di as error "Test 10b failed: ratio outside svy mode not caught (error " _rc ")"
+    local ++test10_errors
+}
+capture noisily dtstat y, stats(mean) subpop(if sub) df(svyt10c)
+if _rc != 198 {
+    di as error "Test 10c failed: subpop outside svy mode not caught (error " _rc ")"
+    local ++test10_errors
+}
+capture noisily dtstat y [pw=x], svy stats(mean) df(svyt10d)
+if _rc != 198 {
+    di as error "Test 10d failed: weight mismatch not caught (error " _rc ")"
+    local ++test10_errors
+}
+capture noisily dtstat y [pw=fwt], svy stats(mean) subpop(if grp == "0") df(svyt10e)
+if _rc != 198 {
+    di as error "Test 10e failed: string subpop condition not caught (error " _rc ")"
+    local ++test10_errors
+}
+frame create nosvydesign
+frame nosvydesign {
+    quietly set obs 10
+    quietly gen y = _n
+    capture noisily dtstat y, svy df(svyt10f)
+    if _rc != 198 {
+        di as error "Test 10f failed: svy without svyset not caught (error " _rc ")"
+        local ++test10_errors
+    }
+}
+frame drop nosvydesign
+if `test10_errors' > 0 {
     local failed_tests "`failed_tests' 10"
 }
 else {
     di as result "Test 10 completed successfully"
     local passed_tests "`passed_tests' 10"
-    capture frame mystat: describe
-    if _rc {
-        di as error "Custom frame 'mystat' not created"
-    }
-    else {
-        di as result "Custom frame 'mystat' created successfully"
-        frame mystat: count
-        di as text "Observations in mystat: " r(N)
-    }
-}
-
-// Test 11: USING option
-di _n "=== TEST 11: USING option ==="
-local ++total_tests
-sysuse auto, clear
-tempfile autodata
-save `autodata'
-clear
-capture noisily dtstat price mpg weight using `autodata'
-if _rc {
-    di as error "Test 11 failed with error " _rc
-    local failed_tests "`failed_tests' 11"
-}
-else {
-    di as result "Test 11 completed successfully"
-    local passed_tests "`passed_tests' 11"
-    frame _df: list in 1/3, clean
-}
-
-// Test 12: Excel export
-di _n "=== TEST 12: Excel export ==="
-local ++total_tests
-sysuse auto, clear
-tempfile xlsfile
-dtstat price mpg weight, save("`xlsfile'.xlsx")
-if _rc {
-    di as error "Test 12 failed with error " _rc
-    local failed_tests "`failed_tests' 12"
-}
-else {
-    di as result "Test 12 completed successfully"
-    local passed_tests "`passed_tests' 12"
-    capture confirm file "`xlsfile'.xlsx"
-    if _rc {
-        di as error "Excel file not created"
-    }
-    else {
-        di as result "Excel file created successfully"
-    }
-}
-
-// Test 13: Large dataset (nlsw88)
-di _n "=== TEST 13: Large dataset ==="
-local ++total_tests
-sysuse nlsw88, clear
-dtstat wage hours tenure, by(union married)
-* dtstat can return rc 9 after a successful run; test1 accepts 0 and 9
-if inlist(_rc, 0, 9) {
-    di as result "Test 13 completed successfully"
-    local passed_tests "`passed_tests' 13"
-    frame _df: count
-    di as text "Total observations: " r(N)
-    frame _df: tab varname union
-}
-else {
-    di as error "Test 13 failed with error " _rc
-    local failed_tests "`failed_tests' 13"
-}
-
-// Test 14: IF/IN conditions
-di _n "=== TEST 14: IF/IN conditions ==="
-local ++total_tests
-sysuse auto, clear
-local test14_errors 0
-dtstat price mpg if price > 5000, by(foreign)
-if _rc {
-    di as error "Test 14a failed with error " _rc
-    local ++test14_errors
-}
-else {
-    di as result "Test 14a completed successfully"
-}
-dtstat price mpg in 1/50
-if _rc {
-    di as error "Test 14b failed with error " _rc
-    local ++test14_errors
-}
-else {
-    di as result "Test 14b completed successfully"
-}
-if `test14_errors' > 0 {
-    local failed_tests "`failed_tests' 14"
-}
-else {
-    local passed_tests "`passed_tests' 14"
-}
-
-// Test 15: Percentiles
-di _n "=== TEST 15: Percentiles ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price mpg weight, stats(p1 p5 p10 p25 p50 p75 p90 p95 p99)
-if _rc {
-    di as error "Test 15 failed with error " _rc
-    local failed_tests "`failed_tests' 15"
-}
-else {
-    di as result "Test 15 completed successfully"
-    local passed_tests "`passed_tests' 15"
-    frame _df: list varname p25 p50 p75 in 1/3, clean
-}
-
-// Test 16: All available statistics
-di _n "=== TEST 16: All available statistics ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price, stats(count mean median sd min max sum iqr first last)
-if _rc {
-    di as error "Test 16 failed with error " _rc
-    local failed_tests "`failed_tests' 16"
-}
-else {
-    di as result "Test 16 completed successfully"
-    local passed_tests "`passed_tests' 16"
-    frame _df: list, clean
-}
-
-// Test 17: FAST option (if gtools available)
-di _n "=== TEST 17: FAST option ==="
-local ++total_tests
-sysuse auto, clear
-capture which gtools
-if _rc {
-    di as text "gtools not available, skipping fast option test"
-    local passed_tests "`passed_tests' 17"
-}
-else {
-    dtstat price mpg weight, by(foreign rep78) fast
-    if _rc {
-        di as error "Test 17 failed with error " _rc
-        local failed_tests "`failed_tests' 17"
-    }
-    else {
-        di as result "Test 17 completed successfully (fast option)"
-        local passed_tests "`passed_tests' 17"
-        frame _df: count
-        di as text "Fast option observations: " r(N)
-    }
-}
-
-// Test 18: Format option
-di _n "=== TEST 18: Format option ==="
-local ++total_tests
-sysuse auto, clear
-dtstat price mpg weight, format(%12.2f)
-if _rc {
-    di as error "Test 18 failed with error " _rc
-    local failed_tests "`failed_tests' 18"
-}
-else {
-    di as result "Test 18 completed successfully"
-    local passed_tests "`passed_tests' 18"
-    frame _df: list varname mean in 1/3, clean
-}
-
-// Test 19: Error handling
-di _n "=== TEST 19: Error handling ==="
-local ++total_tests
-local test19_errors 0
-capture noisily dtstat using `autodata'
-if _rc == 0 {
-    di as error "Test 19a failed: no variables not caught"
-    local ++test19_errors
-}
-else {
-    di as result "Test 19a passed: no variables handled (error " _rc ")"
-}
-sysuse auto, clear
-capture noisily dtstat make
-if _rc == 0 {
-    di as error "Test 19b failed: string variable not caught"
-    local ++test19_errors
-}
-else {
-    di as result "Test 19b passed: string variable handled (error " _rc ")"
-}
-capture which gtools
-if _rc {
-    dtstat price, fast
-    if _rc == 0 {
-        di as error "Test 19c failed: fast without gtools not caught"
-        local ++test19_errors
-    }
-    else {
-        di as result "Test 19c passed: fast without gtools handled (error " _rc ")"
-    }
-}
-sysuse auto, clear
-capture dtstat price, excel(sheet("test"))
-if _rc == 198 {
-    di as result "Test 19d passed: excel without save handled (error 198)"
-}
-else {
-    di as error "Test 19d failed: excel without save not caught (error " _rc ")"
-    local ++test19_errors
-}
-// Overall Test 19 result
-if `test19_errors' > 0 {
-    local failed_tests "`failed_tests' 19"
-}
-else {
-    local passed_tests "`passed_tests' 19"
 }
 
 // Cleanup
 frame change default
-capture frame drop _df mystat complex_test _dtsource
+capture frame drop svyt1 svyt2 svyt2b svyt3 svyt4 svyt5 svyt6 svyt7 svyt8 svyt9
+capture frame drop _df
 
-// Test Summary
+// Test summary
 di _n(2) "=========================================="
 di "TEST SUMMARY"
 di "=========================================="
 
-// Count passed and failed tests
 local num_passed: word count `passed_tests'
 local num_failed: word count `failed_tests'
 
 di as text "Total tests run: " as result `total_tests'
-di as text "Tests passed: " as result `num_passed' as text " (" as result %4.1f (`num_passed'/`total_tests'*100) as text "%)"
-di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f (`num_failed'/`total_tests'*100) as text "%)"
-
-if `num_passed' > 0 {
-    di _n as text "PASSED TESTS:"
-    foreach test in `passed_tests' {
-        di as result "  PASSED: Test `test'"
-    }
-}
+di as text "Tests passed: " as result `num_passed'
+di as text "Tests failed: " as result `num_failed'
 
 if `num_failed' > 0 {
     di _n as text "FAILED TESTS:"
