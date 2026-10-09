@@ -393,13 +393,13 @@ if _rc {
     }
 }
 sysuse auto, clear
-dtstat price, excel(sheet("test"))
-if _rc == 0 {
-    di as error "Test 19d failed: excel without save not caught"
-    local ++test19_errors
+capture dtstat price, excel(sheet("test"))
+if _rc == 198 {
+    di as result "Test 19d passed: excel without save handled (error 198)"
 }
 else {
-    di as result "Test 19d passed: excel without save handled (error " _rc ")"
+    di as error "Test 19d failed: excel without save not caught (error " _rc ")"
+    local ++test19_errors
 }
 // Overall Test 19 result
 if `test19_errors' > 0 {
