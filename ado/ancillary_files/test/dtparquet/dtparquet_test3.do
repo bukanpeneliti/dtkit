@@ -8,7 +8,15 @@ macro drop _all
 discard
 capture log close
 
-cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
+capture confirm file "ado/dtparquet.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
+}
 
 log using ado/ancillary_files/test/log/dtparquet_test3.log, replace
 

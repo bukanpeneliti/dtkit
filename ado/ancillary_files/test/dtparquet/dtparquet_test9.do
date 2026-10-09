@@ -7,7 +7,15 @@ set more off
 discard
 
 local initial_pwd = c(pwd)
-cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
+capture confirm file "ado/dtparquet.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
+}
 adopath ++ "ado"
 
 local data_dir "D:/OneDrive/MyData/pihps/output"
