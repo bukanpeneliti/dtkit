@@ -177,7 +177,10 @@ program dtparquet
     exit `rc'
 end
 
-cap program drop dtparquet_plugin
+* Define the plugin program only when it is not already loaded. Dropping and
+* re-loading here on every execution of this file unloads the DLL under the
+* plugin's worker threads (the image is pinned in pginit, but the churn is
+* unnecessary and leaks a fresh pool on every reload without the pin).
 local __dtparquet_plugin_path "dtparquet.dll"
 capture confirm file "ado/dtparquet.dll"
 if _rc == 0 {
@@ -189,7 +192,11 @@ else {
         local __dtparquet_plugin_path `"`r(fn)'"'
     }
 }
-program dtparquet_plugin, plugin using(`"`__dtparquet_plugin_path'"')
+capture program dtparquet_plugin, plugin using(`"`__dtparquet_plugin_path'"')
+if _rc != 0 & _rc != 110 {
+    display as error "dtparquet: failed to load plugin from `__dtparquet_plugin_path'"
+    exit 601
+}
 
 capture program drop dtparquet__verify_plugin_version
 program dtparquet__verify_plugin_version
