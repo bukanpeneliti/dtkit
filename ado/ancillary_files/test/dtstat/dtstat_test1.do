@@ -5,11 +5,14 @@
 version 16
 clear frames
 capture log close
-if c(hostname) == "NUXS" {
-    cd d:/OneDrive/MyWork/00personal/stata/dtkit
-}
-else {
-    cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+capture confirm file "ado/dtstat.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
 }
 log using ado/ancillary_files/test/log/dtstat_test1.log, replace
 
@@ -259,16 +262,23 @@ else {
     }
 }
 
-// Test Case 12: Excel export with tempfile (expected to fail like dtfreq)
-di _n "=== TEST CASE 12: Excel export with tempfile (expected to fail) ==="
+// Test Case 12: Excel export with tempfile
+di _n "=== TEST CASE 12: Excel export with tempfile ==="
 local ++total_tests
 sysuse auto, clear
 tempfile xlsfile2
 capture dtstat price mpg, save("`xlsfile2'.xlsx") excel(sheet("MyStats", replace) firstrow(varlabels))
 
-if _rc == 601 {
-    di as result "Test 12 completed successfully (expected failure)"
-    local passed_tests "`passed_tests' 12"
+if _rc == 0 {
+    capture confirm file "`xlsfile2'.xlsx"
+    if _rc == 0 {
+        di as result "Test 12 completed successfully"
+        local passed_tests "`passed_tests' 12"
+    }
+    else {
+        di as error "Test 12 failed: Excel file not created"
+        local failed_tests "`failed_tests' 12"
+    }
 }
 else {
     di as error "Test 12 failed with error " _rc
