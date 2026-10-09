@@ -1084,7 +1084,7 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
                     if let Ok(ca) = col.str() {
                         lens.insert(
                             n.to_string(),
-                            ca.into_iter()
+                            ca.iter()
                                 .map(|v| v.map(|x| x.len()).unwrap_or(0))
                                 .max()
                                 .unwrap_or(0),

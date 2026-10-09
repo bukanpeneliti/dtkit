@@ -6,7 +6,7 @@ members = [
 
 [package]
 name = "dtparquet"
-version = "2.0.9"
+version = "2.0.10"
 authors = ["Hafiz <your.email@example.com>"]
 edition = "2021"
 description = "Fast Stata plugin for Parquet I/O with metadata preservation"
@@ -21,7 +21,7 @@ name = "dtparquet"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-polars = { version = "0.53.0", default-features = false, features=[
+polars = { version = "0.55.2", default-features = false, features=[
     "lazy",
     "parquet",
     "dtype-categorical",
@@ -30,10 +30,11 @@ polars = { version = "0.53.0", default-features = false, features=[
     "dtype-u8",
     "dtype-u16",
     "fmt",
+    "streaming",
 ] }
-polars-io = { version = "0.53.0", default-features = false, features = ["parquet"] }
-polars-core = { version = "0.53.0", default-features = false }
-polars-readstat-rs = "0.20.1"
+polars-io = { version = "0.55.2", default-features = false, features = ["parquet"] }
+polars-core = { version = "0.55.2", default-features = false }
+polars-readstat-rs = "0.24.2"
 
 stata-sys = { path = "./crates/stata-sys" }
 rayon = "1.8"

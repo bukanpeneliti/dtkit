@@ -31,7 +31,50 @@ pub extern "C" fn pginit(p: *mut stata_sys::ST_plugin) -> stata_sys::ST_retcode 
     unsafe {
         _stata_ = p;
     }
+    pin_plugin_image();
     stata_sys::SD_PLUGINVER
+}
+
+/// Pins this DLL in the process address space for its lifetime.
+///
+/// Stata unloads a plugin when its program is dropped (`program drop`). Our
+/// rayon worker threads are never terminated and execute code that lives in
+/// this DLL, so an unload under a parked or running worker crashes Stata
+/// (observed as 0xC0000005 with the faulting IP in unmapped VCRUNTIME140 and
+/// dtparquet code; see the 2026-10-09 crash dump analysis). Pinning makes
+/// `program drop` a program-table operation only: the image stays mapped, the
+/// OnceLock thread pools stay valid, and a re-`plugin using` reuses the same
+/// image instead of leaking a fresh set of worker threads.
+fn pin_plugin_image() {
+    use std::os::raw::c_void;
+
+    // kernel32!GetModuleHandleExW flags (libloaderapi.h).
+    const GET_MODULE_HANDLE_EX_FLAG_PIN: u32 = 0x0000_0001;
+    const GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS: u32 = 0x0000_0004;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetModuleHandleExW(
+            dwflags: u32,
+            lpmodulename: *const u16,
+            phmodule: *mut *mut c_void,
+        ) -> i32;
+    }
+
+    unsafe {
+        let mut module: *mut c_void = std::ptr::null_mut();
+        // An address inside this image (this function) identifies the DLL.
+        let address_in_image = pin_plugin_image as *const () as *const u16;
+        let ok = GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_PIN | GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            address_in_image,
+            &mut module,
+        );
+        if ok == 0 {
+            display("dtparquet: warning: could not pin the plugin image; \
+                     avoid `program drop dtparquet_plugin` after plugin I/O");
+        }
+    }
 }
 
 #[no_mangle]

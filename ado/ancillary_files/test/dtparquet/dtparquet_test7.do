@@ -4,7 +4,15 @@ version 16
 clear frames
 discard
 capture log close
-cd "D:/OneDrive/MyWork/00personal/stata/dtkit"
+capture confirm file "ado/dtparquet.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
+}
 log using "D:/OneDrive/MyWork/00personal/stata/dtkit/ado/ancillary_files/test/log/dtparquet_test7.log", replace text
 
 timer clear 99
