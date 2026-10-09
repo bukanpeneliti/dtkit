@@ -1,4 +1,4 @@
-*! Version 1.1.0 08oct2026
+*! Version 1.1.1 09oct2026
 program define dtfreq
     * Module to produce frequency dataset
 
@@ -1082,7 +1082,7 @@ void _xtab_core_calc_svy(real scalar level_ci)
     total_w = st_numscalar("e(total)")
     
     total_unw = st_numscalar("e(N_sub)")
-    if (total_unw == .) {
+    if (rows(total_unw) == 0 || total_unw == .) {
         total_unw = st_numscalar("e(N)")
     }
     

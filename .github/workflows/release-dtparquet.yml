@@ -23,11 +23,11 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@1.93.0
+        uses: dtolnay/rust-toolchain@1.98.1
 
       - name: Build dtparquet plugin (release)
         working-directory: plugin
-        run: cargo build --release
+        run: cargo build --release --locked
 
       - name: Collect release artifacts
         run: |

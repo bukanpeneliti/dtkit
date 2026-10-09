@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.1.0  08oct2026}{...}
+{* *! version 1.1.1  09oct2026}{...}
 {vieweralsosee "[R] summarize" "help summarize"}{...}
 {vieweralsosee "[R] collapse" "help collapse"}{...}
 {vieweralsosee "[R] tabstat" "help tabstat"}{...}
@@ -233,11 +233,11 @@ This option allows updating files without manual deletion.
 {pstd}5. Design-based statistics with an active survey design:{p_end}
 {phang2}{cmd:. webuse nhanes2, clear}{p_end}
 {phang2}{cmd:. svyset psu [pw=finalwgt], strata(strata)}{p_end}
-{phang2}{cmd:. dtstat height weight [pw=finalwgt], stats(mean total)}{p_end}
+{phang2}{cmd:. dtstat height weight [pw=finalwgt], svy stats(mean total)}{p_end}
 {phang2}{cmd:. frame _df: list, clean noobs}{p_end}
 
 {pstd}6. Domain estimation that retains the full design:{p_end}
-{phang2}{cmd:. dtstat height [pw=finalwgt], stats(mean) subpop(if age > 40)}{p_end}
+{phang2}{cmd:. dtstat height [pw=finalwgt], svy stats(mean) subpop(if age > 40)}{p_end}
 {phang2}{cmd:. frame _df: list, clean noobs}{p_end}
 
 

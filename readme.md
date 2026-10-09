@@ -89,6 +89,18 @@ dtstat price mpg weight
 dtstat price mpg, by(foreign)
 ```
 
+For design-based means and totals, declare the survey design and specify
+`svy`. Use `subpop()` for domain estimation:
+
+```stata
+svyset psu [pw=finalwgt], strata(strata)
+dtstat height weight, svy stats(mean total)
+dtstat height, svy stats(mean) subpop(if age > 40)
+```
+
+Omitting `svy` keeps standard aggregation behavior, including when the
+data have an active survey design.
+
 ### dtfreq - Frequency Analysis
 
 Produces frequency tables as datasets:
@@ -96,6 +108,15 @@ Produces frequency tables as datasets:
 ```stata
 dtfreq rep78
 dtfreq rep78, by(foreign)
+```
+
+For survey tabulation, declare the survey design and supply pweights.
+Bare `[pw]` uses the design's sampling weight:
+
+```stata
+svyset psu [pw=finalwgt], strata(strata)
+dtfreq category [pw], level(95)
+dtfreq category [pw], subpop(if eligible == 1)
 ```
 
 ### dtmeta - Dataset Information

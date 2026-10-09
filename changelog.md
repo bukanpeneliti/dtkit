@@ -13,14 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a polars upgrade with a plugin unload-crash fix in `dtparquet`.
 - Component versions:
   - **dtkit: v2.1.0 (Updated)**
-  - **dtfreq: v1.1.0 (Updated)**
-  - **dtstat: v1.1.0 (Updated)**
+  - **dtfreq: v1.1.1 (Updated)**
+  - **dtstat: v1.1.1 (Updated)**
   - dtmeta: v1.0.2 (Unchanged)
   - **dtparquet: v2.0.10 (Updated)**
 
 ### Added
 
-- **dtfreq v1.1.0**:
+- **dtfreq v1.1.1**:
   - Survey tabulation: with `[pw=]` and an active `svyset` design, `dtfreq`
     estimates through `svy: tabulate` semantics and reports weighted
     frequencies and proportions alongside unweighted counts, with linearized
@@ -36,8 +36,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `svy: tabulate`, including a designed-in singleton stratum, zero weights,
     and missing weights.
 
-- **dtstat v1.1.0**:
-  - Design-based statistics: with `[pw=]` and an active `svyset` design,
+- **dtstat v1.1.1**:
+  - Design-based statistics: with `svy` and an active `svyset` design,
     `dtstat` delegates to `svy: mean`, `svy: total`, and `svy: ratio` and
     reports `estimate`, `se`, `ci_l`, `ci_u`, `df`, `n_unw`, and `n_w` for
     each variable and statistic.
@@ -53,12 +53,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Release workflow**:
+  - Updated the Rust toolchain pin from 1.93.0 to 1.98.1 to meet the
+    upgraded dependencies' minimum Rust version, and locked dependency
+    resolution during release builds.
+
 - **dtparquet v2.0.10**:
   - Upgraded polars from 0.53.0 to 0.55.2 (enabling its `streaming` feature
     and adapting to the 0.55 API renames) and `polars-readstat-rs` from
     0.20.1 to 0.24.2.
 
 ### Fixed
+
+- **dtfreq v1.1.1**:
+  - Preserved `by()` variables whose names match result-metric prefixes
+    during metric selection, binary reshaping, labeling, and frequency
+    calculations.
+  - Used the full survey sample count when `svy: tabulate` omits the
+    subpopulation count scalar, preserving the unweighted total for
+    tabulations without `subpop()`.
 
 - **dtparquet v2.0.10**:
   - Pinned the plugin image in memory at load time and stopped dropping and
