@@ -9,13 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Package Release [v2.1.0] - 2026-10-09
 
-- Feature release for survey-weighted estimation in `dtfreq` and `dtstat`.
+- Feature release for survey-weighted estimation in `dtfreq` and `dtstat`, and
+  a polars upgrade with a plugin unload-crash fix in `dtparquet`.
 - Component versions:
   - **dtkit: v2.1.0 (Updated)**
   - **dtfreq: v1.1.0 (Updated)**
   - **dtstat: v1.1.0 (Updated)**
   - dtmeta: v1.0.2 (Unchanged)
-  - dtparquet: v2.0.9 (Unchanged)
+  - **dtparquet: v2.0.10 (Updated)**
 
 ### Added
 
@@ -50,6 +51,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New regression suite `dtstat_test3.do` with 10 cases benchmarked against
     `svy: mean`, `svy: total`, and `svy: ratio`, including singleton strata,
     empty subpopulation domains, and by-group subpopulation estimation.
+
+### Changed
+
+- **dtparquet v2.0.10**:
+  - Upgraded polars from 0.53.0 to 0.55.2 (enabling its `streaming` feature
+    and adapting to the 0.55 API renames) and `polars-readstat-rs` from
+    0.20.1 to 0.24.2.
+
+### Fixed
+
+- **dtparquet v2.0.10**:
+  - Pinned the plugin image in memory at load time and stopped dropping and
+    redefining the plugin program on every execution. Dropping the plugin
+    while its rayon worker threads were still alive unloaded the DLL under
+    them and crashed Stata (0xC0000005); the image is now pinned for the
+    process lifetime and a re-`plugin using` reuses it.
+  - A failed plugin load now reports the DLL path and raises r601 instead of
+    a bare program-definition error.
 
 ## Package Release [v2.0.10] - 2026-09-10
 
