@@ -1,4 +1,4 @@
-*! Version 1.0.2 10sep2026
+*! Version 1.0.3 26oct2026
 program define dtmeta, rclass
     * Module to produce three metadata datasets in separate frames
     
@@ -308,10 +308,19 @@ program define _toexcel
 
     if "`replace'" == "" local replace "modify"
     if `"`fullname'"' != "" {
-        // Set export options
-        quietly frames dir _dt*
-        foreach fr in `r(frames)' {
+        // Export the metadata frames only. _dtsource holds raw data.
+        foreach fr in _dtinfo _dtlabel _dtnotes _dtvars {
+            capture confirm frame `fr'
+            if _rc continue
             frame `fr': local sheetname: data label
+            // Excel limits sheet names to 31 characters. Cut the file name
+            // inside "(name) kind" so every sheet keeps its own kind suffix.
+            if ustrlen("`sheetname'") > 31 & ustrregexm("`sheetname'", "^\((.*)\) ([^)]*)$") {
+                local stem = ustrregexs(1)
+                local kind = ustrregexs(2)
+                local stem = ustrleft("`stem'", 31 - 3 - ustrlen("`kind'"))
+                local sheetname "(`stem') `kind'"
+            }
             local exportcmd `"`fullname', sheet("`sheetname'", `replace') firstrow(varlabels)"'
             frame `fr': export excel using `exportcmd'
         }

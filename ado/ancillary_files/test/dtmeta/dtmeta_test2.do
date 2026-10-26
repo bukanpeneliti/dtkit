@@ -1,21 +1,25 @@
-*******************************************************
-* dtmeta_test.do
-* Comprehensive tests for dtmeta.ado
-* Place this file in test/dtmeta/dtmeta_test.do
-*******************************************************
+* dtmeta_test2.do
+* Network test suite for dtmeta.ado: remote data sources read through using.
+* Every case needs internet access. The offline suite is dtmeta_test1.do.
+* Refactored Oct 9, 2026 from the former 11-case suite: the remote file is
+* fetched once into a local fixture and reused, so each remaining download
+* covers a distinct code path.
 
 version 16
 clear frames
 capture log close
-if c(hostname) == "NUXS" {
-    cd d:/OneDrive/MyWork/00personal/stata/dtkit
-}
-else {
-    cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+capture confirm file "ado/dtmeta.ado"
+if _rc != 0 {
+    if c(hostname) == "NUXS" {
+        cd d:/OneDrive/MyWork/00personal/stata/dtkit
+    }
+    else {
+        cd c:/Users/hafiz/OneDrive/MyWork/00personal/stata/dtkit
+    }
 }
 log using ado/ancillary_files/test/log/dtmeta_test2.log, replace
 
-// manually drop main program and subroutines
+// drop the command and every subroutine so the run tests this source file
 capture program drop dtmeta
 capture program drop _makevars
 capture program drop _makevarnotes
@@ -28,261 +32,384 @@ capture program drop _argload
 capture program drop _makereport
 run ado/dtmeta.ado
 
-// Initialize test tracking
-local passed_tests ""
-local failed_tests ""
-local total_tests 0
+// ------------------------------------------------------------------ setup
+// Scratch directory for the exported workbooks and the downloaded fixture.
+local xldir "ado/ancillary_files/test/dtmeta/excel tmp"
+capture mkdir "`xldir'"
 
-capture program drop dtrace
-program define dtrace
-    set trace on        // Enable tracing
-    set tracedepth 2    // Set trace depth to 2 levels
-    capture noisily `0' // Execute user's command (with error handling)
-    set trace off       // Always disable tracing afterward
+// fullauto.dta holds 74 observations and 18 variables. The fixture keeps a
+// short name because dtmeta builds Excel sheet names from the source
+// filename, and Excel rejects sheet names longer than 31 characters.
+local url_auto "https://www.stata-press.com/data/r18/fullauto.dta"
+local url_nlsw "https://www.stata-press.com/data/r18/nlsw88.dta"
+local fixture "`xldir'/fa.dta"
+
+// ----------------------------------------------------------------- harness
+// dtmeta leaves frames behind, and a test that checks for a missing frame
+// depends on earlier tests not having created it. Every test therefore starts
+// from the same state: no dtmeta frames and no data in memory.
+capture program drop _dtmeta_reset
+program define _dtmeta_reset
+    capture frame change default
+    capture frames dir _dt*
+    capture frame drop `r(frames)'
+    clear
 end
 
-*******************************************************
-* Test 1: dtmeta with no data loaded - should error
-*******************************************************
-display as text "Test 1: dtmeta without data"
-local ++total_tests
-dtmeta
-if _rc {
-    display as result "  PASS: error as expected (rc=`_rc')"
-    local passed_tests "`passed_tests' 1"
-}
-else {
-    display as error "  FAIL: no error when no data loaded"
-    local failed_tests "`failed_tests' 1"
-}
+global dtmeta_total 0
+global dtmeta_pass ""
+global dtmeta_fail ""
 
-*******************************************************
-* Test 2: dtmeta on in-memory auto.dta
-*******************************************************
-display as text "Test 2: dtmeta on in-memory auto"
-local ++total_tests
-sysuse auto, clear
-dtmeta
-if _rc {
-    display as error "  FAIL: dtmeta on auto returned error (rc=`_rc')"
-    local failed_tests "`failed_tests' 2"
+capture program drop _dtmeta_next _dtmeta_ok _dtmeta_bad
+program define _dtmeta_next, rclass
+    global dtmeta_total = $dtmeta_total + 1
+    return local n "$dtmeta_total"
+end
+
+program define _dtmeta_ok
+    args n
+    global dtmeta_pass "${dtmeta_pass} `n'"
+    di as result "  PASS: test `n'"
+end
+
+program define _dtmeta_bad
+    args n
+    global dtmeta_fail "${dtmeta_fail} `n'"
+    di as error "  FAIL: test `n'"
+end
+
+// _dtmeta_sheets: collect the sheet names posted by import excel ..., describe
+// into the local macro `sheets`. Absent entries come back as "." and are
+// skipped.
+capture program drop _dtmeta_sheets
+program define _dtmeta_sheets
+    local sheets ""
+    forvalues i = 1/8 {
+        local w ""
+        capture local w = r(worksheet_`i')
+        if "`w'" != "" & "`w'" != "." local sheets "`sheets'[`w']"
+    }
+    c_local sheets "`sheets'"
+end
+
+di _n(2) "=========================================="
+di "dtmeta network test suite"
+di "Timestamp: " c(current_date) " " c(current_time)
+di "==========================================" _n
+
+// ----------------------------------------------------------- test 1
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': fetch the remote fixture once ==="
+_dtmeta_reset
+capture erase "`fixture'"
+local err 0
+capture noisily use "`url_auto'", clear
+if _rc != 0 {
+    di as error "  could not read `url_auto', rc " _rc
+    local ++err
 }
 else {
-    display as result "  PASS: dtmeta on auto ran OK"
-    local passed_tests "`passed_tests' 2"
-    foreach fr in _dtvars _dtnotes _dtlabel _dtinfo {
-        capture confirm frame `fr'
-        if _rc {
-            display as error "    FAIL: frame `fr' not created"
-        }
-        else {
-            display as result "    PASS: frame `fr' exists"
-        }
+    if c(N) != 74 | c(k) != 18 {
+        di as error "  remote file holds " c(N) " x " c(k) ", expected 74 x 18"
+        local ++err
+    }
+    capture noisily save "`fixture'", replace
+    if _rc != 0 {
+        di as error "  could not save the fixture, rc " _rc
+        local ++err
+    }
+    capture confirm file "`fixture'"
+    if _rc != 0 {
+        di as error "  `fixture' not created"
+        local ++err
     }
 }
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 3: dtmeta using auto.dta (disk file)
-*******************************************************
-display as text "Test 3: dtmeta using auto.dta"
-local ++total_tests
-dtmeta using "https://www.stata-press.com/data/r18/fullauto.dta"
-if _rc {
-    display as error "  FAIL: dtmeta using auto.dta error (rc=`_rc')"
-    local failed_tests "`failed_tests' 3"
+// ----------------------------------------------------------- test 2
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': using a remote file with no data in memory ==="
+_dtmeta_reset
+local err 0
+capture noisily dtmeta using "`url_auto'"
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as result "  PASS: dtmeta using auto.dta ran OK"
-    local passed_tests "`passed_tests' 3"
+    if "`r(source_frame)'" != "default" {
+        di as error "  r(source_frame) is [`r(source_frame)'], expected default"
+        local ++err
+    }
+    if c(N) != 74 | c(k) != 18 {
+        di as error "  default frame holds " c(N) " x " c(k) ", expected 74 x 18"
+        local ++err
+    }
+    frame _dtvars: count
+    if r(N) != 18 {
+        di as error "  _dtvars has " r(N) " rows, expected 18"
+        local ++err
+    }
+    frame _dtinfo: local t2_obs = dta_obs[1]
+    if `t2_obs' != 74 {
+        di as error "  dta_obs is `t2_obs', expected 74"
+        local ++err
+    }
 }
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 4: excel export (no replace)
-*******************************************************
-display as text "Test 4: dtmeta using auto, excel export"
-local ++total_tests
-local xfile = "dtmeta_auto.xlsx"
-dtmeta using "https://www.stata-press.com/data/r18/fullauto.dta", save("`xfile'")
-if _rc {
-    display as error "  FAIL: excel export error (rc=`_rc')"
-    local failed_tests "`failed_tests' 4"
+// ----------------------------------------------------------- test 3
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': using a remote file with data in memory ==="
+_dtmeta_reset
+sysuse auto, clear
+local err 0
+capture noisily dtmeta using "`url_auto'"
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as result "  PASS: excel export ran OK"
-    local passed_tests "`passed_tests' 4"
-    capture confirm file "`xfile'"
-    if !_rc {
-        display as result "    PASS: file `xfile' created"
+    if "`r(source_frame)'" != "_dtsource" {
+        di as error "  r(source_frame) is [`r(source_frame)'], expected _dtsource"
+        local ++err
+    }
+    capture confirm frame _dtsource
+    if _rc != 0 {
+        di as error "  frame _dtsource missing"
+        local ++err
     }
     else {
-        display as error "    FAIL: file `xfile' not found"
+        frame _dtsource: local t3_k = c(k)
+        frame _dtsource: local t3_N = c(N)
+        if `t3_k' != 18 | `t3_N' != 74 {
+            di as error "  _dtsource holds " `t3_N' " x " `t3_k' ", expected 74 x 18"
+            local ++err
+        }
     }
-    capture erase "`xfile'"
+    if c(N) != 74 | c(k) != 12 {
+        di as error "  data in memory changed to " c(N) " x " c(k) ", expected 74 x 12"
+        local ++err
+    }
 }
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 5: excel export with replace
-*******************************************************
-display as text "Test 5: dtmeta using auto, excel replace"
-local ++total_tests
-local xfile2 = "dtmeta_auto2.xlsx"
-* first create
-dtmeta using "https://www.stata-press.com/data/r18/fullauto.dta", save("`xfile2'")
-* now run with replace option
-// set trace on
-// set tracedepth 2
-dtmeta using "https://www.stata-press.com/data/r18/fullauto.dta", save("`xfile2'") replace
-// set trace off
-if _rc {
-    display as error "  FAIL: excel replace error (rc=`_rc')"
-    local failed_tests "`failed_tests' 5"
+// ----------------------------------------------------------- test 4
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': using a remote file with clear ==="
+_dtmeta_reset
+sysuse nlsw88, clear
+local err 0
+capture noisily dtmeta using "`url_auto'", clear
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as result "  PASS: excel replace ran OK"
-    local passed_tests "`passed_tests' 5"
+    if "`r(source_frame)'" != "default" {
+        di as error "  r(source_frame) is [`r(source_frame)'], expected default"
+        local ++err
+    }
+    if c(N) != 74 | c(k) != 18 {
+        di as error "  default frame holds " c(N) " x " c(k) ", expected 74 x 18 after clear"
+        local ++err
+    }
 }
-capture erase "`xfile2'"
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 6: clear without using - should error
-*******************************************************
-display as text "Test 6a: dtmeta , clear"
-local ++total_tests
-local test6_errors 0
-dtmeta, clear
-if _rc {
-    display as result "  PASS: clear without using errored (rc=`_rc')"
+// ----------------------------------------------------------- test 5
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': Excel export from a remote source ==="
+_dtmeta_reset
+local xfile "`xldir'/remote.xlsx"
+capture erase "`xfile'"
+local err 0
+capture noisily dtmeta using "`url_auto'", save("`xfile'") replace
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as error "  FAIL: clear without using should have errored"
-    local ++test6_errors
+    capture confirm file "`xfile'"
+    if _rc != 0 {
+        di as error "  `xfile' not created"
+        local ++err
+    }
+    else {
+        capture noisily import excel using "`xfile'", describe
+        if _rc != 0 {
+            di as error "  workbook not readable, rc " _rc
+            local ++err
+        }
+        else {
+            _dtmeta_sheets
+            di as text "  sheets: `sheets'"
+            foreach want in "(fullauto) Dataset metadata" ///
+                           "(fullauto) Value label metadata" ///
+                           "(fullauto) Variable metadata" {
+                if strpos("`sheets'", "[`want']") == 0 {
+                    di as error "  sheet [`want'] missing from `sheets'"
+                    local ++err
+                }
+            }
+        }
+    }
 }
+capture erase "`xfile'"
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-display as text "Test 6b: dtmeta using ..., replace (without clear)"
-dtmeta using "https://www.stata-press.com/data/r18/fullauto.dta", replace
-if _rc {
-    display as result "  PASS: replace without clear errored (rc=`_rc')"
-}
-else {
-    display as error "  FAIL: replace without clear should have errored"
-    local ++test6_errors
-}
-
-if `test6_errors' > 0 {
-    local failed_tests "`failed_tests' 6"
-}
-else {
-    local passed_tests "`passed_tests' 6"
-}
-
-*******************************************************
-* Test 7: dtmeta using remote nlsw88.dta, clear
-*******************************************************
-display as text "Test 7: dtmeta using remote nlsw88.dta, clear"
-local ++total_tests
-dtmeta using "https://www.stata-press.com/data/r18/nlsw88.dta", clear
-if _rc {
-    display as error "  FAIL: remote dtmeta error (rc=`_rc')"
-    local failed_tests "`failed_tests' 7"
-}
-else {
-    display as result "  PASS: remote dtmeta ran OK"
-    local passed_tests "`passed_tests' 7"
-}
-
-*******************************************************
-* Test 8: dtmeta using remote nlswork.dta, clear
-*******************************************************
-display as text "Test 8: dtmeta using remote nlswork.dta, clear"
-local ++total_tests
-dtmeta using "https://www.stata-press.com/data/r18/nlswork.dta", clear
-if _rc {
-    display as error "  FAIL: remote dtmeta error (rc=`_rc')"
-    local failed_tests "`failed_tests' 8"
-}
-else {
-    display as result "  PASS: remote dtmeta ran OK"
-    local passed_tests "`passed_tests' 8"
-}
-
-*******************************************************
-* Test 9: no variable notes frame dropped
-*******************************************************
-display as text "Test 9: frame _dtnotes dropped when no notes"
-local ++total_tests
+// ----------------------------------------------------------- test 6
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': Excel export from the local fixture ==="
+_dtmeta_reset
 sysuse auto, clear
-dtmeta
-capture confirm frame _dtnotes
-if _rc {
-    display as result "  PASS: _dtnotes not present for auto"
-    local passed_tests "`passed_tests' 9"
+local xfile "`xldir'/fixture.xlsx"
+capture erase "`xfile'"
+local err 0
+capture noisily dtmeta using "`fixture'", save("`xfile'") replace
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as error "  FAIL: _dtnotes present when it should be dropped"
-    local failed_tests "`failed_tests' 9"
+    capture confirm file "`xfile'"
+    if _rc != 0 {
+        di as error "  `xfile' not created"
+        local ++err
+    }
+    else {
+        capture noisily import excel using "`xfile'", describe
+        if _rc != 0 {
+            di as error "  workbook not readable, rc " _rc
+            local ++err
+        }
+        else {
+            _dtmeta_sheets
+            di as text "  sheets: `sheets'"
+            foreach want in "(fa) Dataset metadata" ///
+                           "(fa) Value label metadata" ///
+                           "(fa) Variable metadata" {
+                if strpos("`sheets'", "[`want']") == 0 {
+                    di as error "  sheet [`want'] missing from `sheets'"
+                    local ++err
+                }
+            }
+        }
+    }
 }
+capture erase "`xfile'"
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 10: rclass returns source_frame
-*******************************************************
-display as text "Test 10: r(source_frame) macro"
-local ++total_tests
-sysuse auto, clear
-dtmeta
-if "`r(source_frame)'" != "" {
-    display as result "  PASS: r(source_frame) = `r(source_frame)'"
-    local passed_tests "`passed_tests' 10"
+// ----------------------------------------------------------- test 7
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': using remote nlsw88 with clear ==="
+_dtmeta_reset
+local err 0
+capture noisily dtmeta using "`url_nlsw'", clear
+if _rc != 0 {
+    di as error "  dtmeta returned " _rc
+    local ++err
 }
 else {
-    display as error "  FAIL: r(source_frame) is empty"
-    local failed_tests "`failed_tests' 10"
+    if "`r(source_frame)'" != "default" {
+        di as error "  r(source_frame) is [`r(source_frame)'], expected default"
+        local ++err
+    }
+    frame _dtvars: count
+    if r(N) != c(k) {
+        di as error "  _dtvars has " r(N) " rows, expected " c(k)
+        local ++err
+    }
+    frame _dtlabel: count
+    if r(N) == 0 {
+        di as error "  _dtlabel is empty, nlsw88 carries value labels"
+        local ++err
+    }
+    frame _dtinfo: local t7_obs = dta_obs[1]
+    if `t7_obs' != c(N) {
+        di as error "  dta_obs is `t7_obs', expected " c(N)
+        local ++err
+    }
 }
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Test 11: show report
-*******************************************************
-display as text "Test 11: reporting results"
-local ++total_tests
-sysuse auto, clear
-dtmeta
-pwf
-dtmeta, report
-if _rc {
-    display as error "  FAIL: report functionality error (rc=`_rc')"
-    local failed_tests "`failed_tests' 11"
+// ----------------------------------------------------------- test 8
+_dtmeta_next
+local t `r(n)'
+di _n "=== TEST `t': webuse nlswork, dataset note and size ==="
+_dtmeta_reset
+local err 0
+capture noisily webuse nlswork, clear
+if _rc != 0 {
+    di as error "  webuse returned " _rc
+    local ++err
 }
 else {
-    display as result "  PASS: report functionality ran OK"
-    local passed_tests "`passed_tests' 11"
+    capture noisily dtmeta
+    if _rc != 0 {
+        di as error "  dtmeta returned " _rc
+        local ++err
+    }
+    else {
+        frame _dtvars: count
+        if r(N) != 21 {
+            di as error "  _dtvars has " r(N) " rows, expected 21"
+            local ++err
+        }
+        frame _dtinfo: local t8_note = dta_note[1]
+        frame _dtinfo: local t8_obs = dta_obs[1]
+        if `=strlen("`t8_note'")' < 20 {
+            di as error "  dta_note is [`t8_note'], expected the NLSY citation"
+            local ++err
+        }
+        if `t8_obs' != 28534 {
+            di as error "  dta_obs is `t8_obs', expected 28534"
+            local ++err
+        }
+    }
 }
+if `err' == 0 _dtmeta_ok `t'
+else _dtmeta_bad `t'
 
-*******************************************************
-* Finalize
-*******************************************************
+// -------------------------------------------------------------- summary
+_dtmeta_reset
+capture erase "`fixture'"
+capture erase "`xldir'/remote.xlsx"
+capture erase "`xldir'/fixture.xlsx"
 
-// Test Summary
 di _n(2) "=========================================="
 di "TEST SUMMARY"
 di "=========================================="
-
-// Count passed and failed tests
-local num_passed: word count `passed_tests'
-local num_failed: word count `failed_tests'
-
-di as text "Total tests run: " as result `total_tests'
-di as text "Tests passed: " as result `num_passed' as text " (" as result %4.1f (`num_passed'/`total_tests'*100) as text "%)"
-di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f (`num_failed'/`total_tests'*100) as text "%)"
+local num_passed: word count $dtmeta_pass
+local num_failed: word count $dtmeta_fail
+di as text "Total tests run: " as result $dtmeta_total
+di as text "Tests passed: " as result `num_passed' as text " (" as result %4.1f (`num_passed'/$dtmeta_total*100) as text "%)"
+di as text "Tests failed: " as result `num_failed' as text " (" as result %4.1f (`num_failed'/$dtmeta_total*100) as text "%)"
 
 if `num_passed' > 0 {
     di _n as text "PASSED TESTS:"
-    foreach test in `passed_tests' {
+    foreach test in $dtmeta_pass {
         di as result "  PASSED: Test `test'"
     }
 }
 
 if `num_failed' > 0 {
     di _n as text "FAILED TESTS:"
-    foreach test in `failed_tests' {
+    foreach test in $dtmeta_fail {
         di as error "  FAILED: Test `test'"
     }
 }
@@ -295,5 +422,10 @@ else {
     di as error "`num_failed' TEST(S) FAILED"
 }
 
+di _n as text "Run dtmeta_test1.do for the offline suite."
+di _n(2) "=========================================="
+di "Network test suite completed"
+di "Timestamp: " c(current_date) " " c(current_time)
+di "=========================================="
+
 log close
-display as text "All tests completed - see dtmeta_test.log for details."
