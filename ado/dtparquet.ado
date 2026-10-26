@@ -425,7 +425,23 @@ capture program drop dtparquet_use
 program dtparquet_use, rclass
     version 16
 
-    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string) PARallel(string) TIMER(string)]
+    syntax [anything(everything)] [if] [in] [, Clear NOLabel CHunksize(string) ALLstring CATMODE(string) PARallel(string) GEOmetry(string) TIMER(string)]
+
+    // GeoParquet geometry handling: wkt (default), hex, drop; centroid and
+    // bbox add coordinate variables. The plugin reads the normalized text.
+    local geometry_spec = lower(trim(subinstr("`geometry'", ",", " ", .)))
+    foreach geometry_token of local geometry_spec {
+        if !inlist("`geometry_token'", "wkt", "hex", "drop", "centroid", "bbox") {
+            display as error "geometry() must combine: wkt, hex, drop, centroid, bbox"
+            exit 198
+        }
+    }
+    local geometry_storage_count = (strpos(" `geometry_spec' ", " wkt ") > 0) + (strpos(" `geometry_spec' ", " hex ") > 0) + (strpos(" `geometry_spec' ", " drop ") > 0)
+    if (`geometry_storage_count' > 1) {
+        display as error "geometry() accepts only one of: wkt, hex, drop"
+        exit 198
+    }
+
     local timer_mode = lower(trim("`timer'"))
     if "`timer_mode'" == "" {
         local timer_mode "off"
@@ -1005,6 +1021,17 @@ program dtparquet_use, rclass
         timer off 88
         quietly timer list 88
         local t_meta_ms = round(`=r(t88)' * 1000, 1)
+    }
+
+    if "`geo_present'" == "1" {
+        char _dta[geoparquet_version] "`geo_version'"
+        char _dta[geoparquet_primary] "`geo_primary'"
+        char _dta[geoparquet_columns] "`geo_columns'"
+        char _dta[geoparquet_encoding] "`geo_encoding'"
+        char _dta[geoparquet_crs] `"`geo_crs'"'
+        char _dta[geoparquet_geometry_types] "`geo_types'"
+        char _dta[geoparquet_mode] "`geo_mode'"
+        display as text "GeoParquet `geo_version', CRS `geo_crs': column {bf:`geo_primary'} read with geometry({bf:`geo_mode'}). See help dtparquet."
     }
 
     return clear

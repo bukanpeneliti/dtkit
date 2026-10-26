@@ -137,6 +137,18 @@ dtparquet save "data.parquet", replace
 dtparquet use "data.parquet", clear
 ```
 
+Read GeoParquet files with `dtparquet use`. The `geometry()` option sets how
+the WKB geometry column is converted: `wkt` (default), `hex`, `drop`,
+`centroid` (adds `_CX` and `_CY`), and `bbox` (adds `_xmin`, `_ymin`, `_xmax`,
+`_ymax`):
+
+```stata
+dtparquet use "buildings.parquet", clear geometry(centroid bbox)
+```
+
+The file's CRS and GeoParquet version are stored in `_dta[geoparquet_*]`
+characteristics. Writing GeoParquet is not supported.
+
 If you get a plugin mismatch error:
 
 ```stata

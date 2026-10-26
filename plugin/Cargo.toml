@@ -25,6 +25,8 @@ polars = { version = "0.55.2", default-features = false, features=[
     "lazy",
     "parquet",
     "dtype-categorical",
+    "dtype-extension",
+    "dtype-struct",
     "dtype-i8",
     "dtype-i16",
     "dtype-u8",

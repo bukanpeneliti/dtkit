@@ -6,6 +6,7 @@ use std::slice;
 pub mod engine;
 pub mod error;
 pub mod filter;
+pub mod geo;
 pub mod logic;
 pub mod transfer;
 
@@ -32,6 +33,11 @@ pub extern "C" fn pginit(p: *mut stata_sys::ST_plugin) -> stata_sys::ST_retcode 
         _stata_ = p;
     }
     pin_plugin_image();
+    // GeoParquet writers tag geometry with Arrow extension types such as
+    // geoarrow.wkb. Load unknown extensions as their storage type (Binary).
+    polars_core::datatypes::extension::set_unknown_extension_type_behavior(
+        polars_core::datatypes::extension::UnknownExtensionTypeBehavior::LoadAsStorage,
+    );
     stata_sys::SD_PLUGINVER
 }
 

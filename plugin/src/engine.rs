@@ -15,6 +15,7 @@ use std::time::Instant;
 
 use crate::error::DtparquetError;
 use crate::filter::*;
+use crate::geo::{spec_from_macro, GeoPlan};
 use crate::logic::*;
 use crate::transfer::*;
 
@@ -625,10 +626,31 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         }
     }
     let row_width_bytes = estimate_transfer_row_width_bytes(&plan.transfer_columns);
+
+    // GeoParquet: derived geometry variables (_CX, _xmin, ...) do not exist in
+    // the file, so scan only file columns plus the geometry source they need.
+    let geo_plan = GeoPlan::from_file(req.path, &spec_from_macro())
+        .map_err(DtparquetError::Custom)?;
+    let derived_names = geo_plan
+        .as_ref()
+        .map(GeoPlan::derived_names)
+        .unwrap_or_default();
+    let mut file_cols: Vec<&str> = col_list
+        .iter()
+        .copied()
+        .filter(|c| !derived_names.contains(c))
+        .collect();
+    if let Some(primary) = geo_plan.as_ref().and_then(GeoPlan::primary) {
+        if file_cols.len() < col_list.len() && !file_cols.contains(&primary) {
+            file_cols.push(primary);
+        }
+    }
+    let selected_set: HashSet<&str> = col_list.iter().copied().collect();
+
     let execute_started = Instant::now();
     let (loaded, batches, tuner) = if plan.can_use_eager {
-        if !col_list.is_empty() {
-            if let Err(e) = validate_parquet_schema(req.path, &col_list) {
+        if !file_cols.is_empty() {
+            if let Err(e) = validate_parquet_schema(req.path, &file_cols) {
                 display(&format!("Schema validation warning: {e}"));
             }
         }
@@ -636,12 +658,15 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         // Project needed columns at scan time so the reader decodes and
         // decompresses only those columns. The select below is kept to fix
         // column order; on the projected frame it moves no data.
-        let projection: Option<Vec<String>> = (!col_list.is_empty())
-            .then(|| col_list.iter().map(|s| s.to_string()).collect());
+        let projection: Option<Vec<String>> = (!file_cols.is_empty())
+            .then(|| file_cols.iter().map(|s| s.to_string()).collect());
         let mut df = ParquetReader::new(File::open(req.path)?)
             .with_slice(Some((req.offset, req.n_rows)))
             .with_columns(projection)
             .finish()?;
+        if let Some(geo) = &geo_plan {
+            geo.apply(&mut df, &selected_set)?;
+        }
         df = df.select(
             col_list
                 .iter()
@@ -723,7 +748,12 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
         }
         let mut t = AdaptiveBatchTuner::new(row_width_bytes, req.batch_size, 0);
         let n_t = get_compute_thread_pool().current_num_threads().max(1);
-        let columns: Vec<Expr> = col_list.iter().map(|s| col(*s)).collect();
+        let columns: Vec<Expr> = file_cols.iter().map(|s| col(*s)).collect();
+        let geo_finish = GeoFinish {
+            plan: geo_plan.as_ref(),
+            keep: &selected_set,
+            final_cols: &col_list,
+        };
         let use_legacy_batches = lazy_execution_uses_legacy_batches();
         set_macro(
             "read_lazy_mode",
@@ -754,12 +784,31 @@ pub fn import_parquet_request(req: &ReadRequest<'_>) -> Result<i32, DtparquetErr
             &mut collects,
             batch_mode,
             &strl_names,
+            &geo_finish,
         )?;
         (l, b, t)
     };
     set_elapsed_ms_macro("read_execute_elapsed_ms", execute_started);
     finalize_runtime("read", batches, loaded, collects, processed, &tuner, start);
     Ok(0)
+}
+
+/// Post-collect GeoParquet step for the lazy read path: converts geometry
+/// columns, adds derived variables, then restores the selected column set.
+struct GeoFinish<'a> {
+    plan: Option<&'a GeoPlan>,
+    keep: &'a HashSet<&'a str>,
+    final_cols: &'a [&'a str],
+}
+
+impl GeoFinish<'_> {
+    fn finish(&self, df: &mut DataFrame) -> PolarsResult<()> {
+        if let Some(plan) = self.plan {
+            plan.apply(df, self.keep)?;
+            *df = df.select(self.final_cols.iter().map(|c| PlSmallStr::from(*c)))?;
+        }
+        Ok(())
+    }
 }
 
 fn apply_df_casts(df: &mut DataFrame, cast_json: &str) -> PolarsResult<()> {
@@ -1006,6 +1055,7 @@ fn run_lazy_pipeline(
     collects: &mut usize,
     batch_mode: bool,
     strl_names: &[String],
+    geo: &GeoFinish<'_>,
 ) -> PolarsResult<(usize, usize)> {
     let mut lf = lf.select(cols);
     if src_off > 0 {
@@ -1031,7 +1081,8 @@ fn run_lazy_pipeline(
             let b_lf = lf.clone().slice(b_off as i64, b_len as u32);
             let collect_started = Instant::now();
             *collects += 1;
-            let b_df = b_lf.collect()?;
+            let mut b_df = b_lf.collect()?;
+            geo.finish(&mut b_df)?;
             collect_elapsed_ms += collect_started.elapsed().as_millis();
             if b_df.height() == 0 {
                 break;
@@ -1065,7 +1116,8 @@ fn run_lazy_pipeline(
     } else {
         let collect_started = Instant::now();
         *collects += 1;
-        let df = lf.collect()?;
+        let mut df = lf.collect()?;
+        geo.finish(&mut df)?;
         collect_elapsed_ms = collect_started.elapsed().as_millis();
         if !strl_names.is_empty() {
             let strl_dta_started = Instant::now();

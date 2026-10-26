@@ -133,6 +133,7 @@ Also allowed: {cmd:lz4}, {cmd:snappy}, {cmd:gzip}, {cmd:brotli}, {cmd:zstd}, {cm
 {synopt :{opt all:string}}import 64-bit integers as strings to preserve precision{p_end}
 {synopt :{opt cat:mode(mode)}}handling for foreign categorical/enum columns:
 {cmd:encode} (default), {cmd:raw}, or {cmd:both}.{p_end}
+{synopt :{opt geo:metry(spec)}}GeoParquet geometry handling: {cmd:wkt} (default), {cmd:hex}, {cmd:drop}, {cmd:centroid}, {cmd:bbox}{p_end}
 {synopt :{opt timer(mode)}}timer mode: {cmd:stata}, {cmd:plugin}, {cmd:all}, or {cmd:off} (default){p_end}
 {synoptline}
 
@@ -197,6 +198,30 @@ faster than loading the entire file and filtering in Stata.
 string variable.
 
 {pstd}
+{bf:GeoParquet Files}
+{break}A GeoParquet file stores geometry as WKB bytes in a binary column and
+describes it in the {cmd:geo} file metadata. Stata cannot hold WKB in a
+variable that other commands can use, so {cmd:dtparquet use} converts each WKB
+geometry column while it reads. {opt geometry()} selects the conversion:
+{break}{cmd:wkt}: well-known text in a {it:strL} variable (default).
+{break}{cmd:hex}: WKB as upper-case hexadecimal text in a {it:strL} variable.
+{break}{cmd:drop}: omit the geometry column.
+{break}{cmd:centroid}: add {cmd:_CX} and {cmd:_CY} (area-weighted for polygons).
+{break}{cmd:bbox}: add {cmd:_xmin}, {cmd:_ymin}, {cmd:_xmax}, and {cmd:_ymax}.
+{break}{cmd:centroid} and {cmd:bbox} apply to the primary geometry column and
+replace the geometry column unless you also list {cmd:wkt} or {cmd:hex}.
+{cmd:geometry(centroid bbox)} gives coordinates only, which is much smaller than
+text for millions of buildings.
+
+{pstd}
+The plugin stores the file's GeoParquet version, primary column, encoding,
+CRS (for example {cmd:EPSG:4326}), geometry types, and load mode in the dataset
+characteristics {cmd:_dta[geoparquet_*]}. It does not reproject coordinates.
+Geometry stored in GeoArrow native encodings (point, polygon, and so on) and
+GeoParquet 1.1 {cmd:bbox} covering columns are skipped. GeoParquet 2.0 files
+that use the native Parquet {cmd:GEOMETRY} type cannot be read yet.
+
+{pstd}
 {bf:Resource Control}
 {break}By default, the plugin uses all available CPU threads for parallel I/O. 
 You can limit this by setting the {cmd:DTPARQUET_THREADS} environment variable 
@@ -217,6 +242,12 @@ before running the command.
 
 {pstd}Import large IDs from a foreign Parquet file as strings{p_end}
 {phang2}{cmd:. dtparquet use using big_ids.parquet, allstring clear}{p_end}
+
+{pstd}Load a GeoParquet file with building centroids and bounding boxes only{p_end}
+{phang2}{cmd:. dtparquet use using buildings.parquet, clear geometry(centroid bbox)}{p_end}
+
+{pstd}Load a GeoParquet file with geometry as WKT (default){p_end}
+{phang2}{cmd:. dtparquet use using buildings.parquet, clear geometry(wkt)}{p_end}
 
 {pstd}Inspect a Parquet file without loading the data{p_end}
 {phang2}{cmd:. dtparquet describe using big_ids.parquet, numbers detailed}{p_end}

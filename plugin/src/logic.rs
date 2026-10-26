@@ -14,6 +14,8 @@ use std::thread;
 use std::time::Instant;
 use walkdir::WalkDir;
 
+use crate::geo::{spec_from_macro, GeoPlan};
+
 pub use stata_sys::{
     display, set_macro, SF_error, SF_is_missing, SF_nobs, SF_nvar, SF_sdata, SF_sdatalen,
     SF_strldata, SF_vdata,
@@ -1075,6 +1077,25 @@ pub fn file_summary(path: &str, det: bool, q: bool) -> ST_retcode {
             display(&format!("Error: {e:?}"));
             return 198;
         }
+    };
+
+    let geo_plan = match GeoPlan::from_file(path, &spec_from_macro()) {
+        Ok(plan) => plan,
+        Err(e) => {
+            display(&format!("dtparquet: {e}"));
+            return 198;
+        }
+    };
+    GeoPlan::publish_macros(geo_plan.as_ref());
+    let schema = match &geo_plan {
+        Some(plan) => match plan.adjust_schema(&schema) {
+            Ok(adjusted) => adjusted,
+            Err(e) => {
+                display(&format!("dtparquet: {e}"));
+                return 198;
+            }
+        },
+        None => schema,
     };
 
     let mut lens = HashMap::new();
