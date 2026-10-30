@@ -6,7 +6,7 @@ members = [
 
 [package]
 name = "dtparquet"
-version = "2.0.10"
+version = "2.1.0"
 authors = ["Hafiz <your.email@example.com>"]
 edition = "2021"
 description = "Fast Stata plugin for Parquet I/O with metadata preservation"
@@ -14,7 +14,7 @@ license = "MIT"
 build = "build.rs"
 
 [package.metadata.dtparquet]
-api = "2.0"
+api = "2.1"
 
 [lib]
 name = "dtparquet"

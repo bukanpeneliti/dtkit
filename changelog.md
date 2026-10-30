@@ -7,6 +7,50 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.2.0] - 2026-10-30
+
+- Feature release for GeoParquet reading in `dtparquet`, with Parquet read-path
+  performance improvements and `dtmeta` Excel-export fixes.
+- Component versions:
+  - **dtkit: v2.2.0 (Updated)**
+  - dtfreq: v1.1.1 (Unchanged)
+  - dtstat: v1.1.1 (Unchanged)
+  - **dtmeta: v1.0.3 (Updated)**
+  - **dtparquet: v2.1.0 (Updated)**
+
+### Added
+
+- **dtparquet v2.1.0**:
+  - Read WKB geometry columns from GeoParquet files with `dtparquet use`.
+  - Added `geometry()` modes: `wkt` (default), `hex`, `drop`, `centroid`, and
+    `bbox`. Centroid and bounding-box outputs can be combined.
+  - Stored GeoParquet version, primary geometry column, encoding, CRS, geometry
+    types, and load mode in `_dta[geoparquet_*]` characteristics.
+
+### Changed
+
+- **dtparquet v2.1.0**:
+  - Projected requested columns in eager Parquet reads, reduced temporary-file
+    and merge work for `strL` columns, and cached numeric read callbacks per
+    column.
+- **Regression suites**:
+  - Consolidated `dtfreq` and `dtstat` tests into two suites per component,
+    and `dtparquet` tests into three suites with an optional benchmark block.
+  - Split `dtmeta` coverage into offline and network suites, with per-test
+    state resets and regression cases for Excel export.
+
+### Fixed
+
+- **dtparquet v2.1.0**:
+  - Handled Arrow extension types and skipped GeoParquet bounding-box covering
+    columns that previously caused plugin panics during reads.
+- **dtmeta v1.0.3**:
+  - Shortened the source-filename portion of Excel worksheet names to meet
+    Excel's 31-character limit while preserving each metadata-type suffix.
+  - Restricted Excel export to the four metadata frames, excluding the
+    `_dtsource` helper frame that holds raw data when `using` is combined with
+    data in memory.
+
 ## Package Release [v2.1.0] - 2026-10-09
 
 - Feature release for survey-weighted estimation in `dtfreq` and `dtstat`, and

@@ -1,4 +1,4 @@
-*! version 2.0.10 09oct2026
+*! version 2.1.0 30oct2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 
@@ -200,7 +200,7 @@ if _rc != 0 & _rc != 110 {
 
 capture program drop dtparquet__verify_plugin_version
 program dtparquet__verify_plugin_version
-    local expected_api "2.0"
+    local expected_api "2.1"
 
     capture confirm file "ado/dtparquet.dll"
     if _rc != 0 {

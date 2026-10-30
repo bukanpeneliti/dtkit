@@ -6,7 +6,7 @@
 * UTF-8, empty/long strings, strL stress and temp-name fixtures, row-key
 * collision guard, large-file strL scale, foreign categorical catmode matrix
 * (encode/raw/both/validation + pandas/arrow fixtures), wide data, chunk
-* boundary.
+* boundary, GeoParquet geometry modes, and CRS metadata.
 * Consolidates: old test1 T3/T11 (metadata, LF), old test5 T1-T3/T5b/T6/T7/T11
 * (wide, boundary, UTF-8, strL, categorical, native), old test6 T8 (strings),
 * old test7 T6b-T6h/T13-T15d (categorical, metadata, strL).
@@ -14,10 +14,17 @@
 * weaker categorical checks (covered by fixture-backed T6f-T6h copies), old
 * test6 T9 BPOM smoke (covered by the exact-dimension check in C12).
 * Run from the checkout root.
+// Objective: Check data types, metadata, and GeoParquet geometry conversion.
 
 version 16
 clear all
 macro drop _all
+global fnum "02"
+global fmain "dtparquet"
+global ftype "test"
+global vernum "v01"
+global fname "${fnum}_${fmain}_${ftype}_${vernum}"
+global logname "${ftype}_${vernum}"
 
 capture confirm file "ado/dtparquet.ado"
 if _rc != 0 {
@@ -936,6 +943,135 @@ timer off 18
 timer list 18
 display as text "Test 18 finished in" as result %6.2f r(t18) "s"
 
+// * geoparquet fixture
+// Use a point, a rectangle, and a null geometry. PyArrow is required.
+python:
+import json
+import struct
+import tempfile
+from pathlib import Path
+
+import pyarrow as pa
+import pyarrow.parquet as pq
+from sfi import Macro
+
+geo_tmp = tempfile.TemporaryDirectory(prefix="dtkit-geoparquet-")
+geo_file = Path(geo_tmp.name) / "geometry.parquet"
+Macro.setLocal("geo_file", geo_file.as_posix())
+bounds = ["xmin", "ymin", "xmax", "ymax"]
+geo_meta = {
+    "version": "1.1.0",
+    "primary_column": "geometry",
+    "columns": {"geometry": {
+        "encoding": "WKB",
+        "geometry_types": ["Point", "Polygon"],
+        "covering": {"bbox": {n: ["bbox", n] for n in bounds}},
+    }},
+}
+geo_schema = pa.schema([
+    pa.field("id", pa.int32()),
+    pa.field("geometry", pa.binary(), metadata={
+        "ARROW:extension:name": "geoarrow.wkb",
+        "ARROW:extension:metadata": "{}",
+    }),
+    pa.field("bbox", pa.struct([(n, pa.float64()) for n in bounds])),
+], metadata={"geo": json.dumps(geo_meta)})
+point = struct.pack("<BIdd", 1, 1, 1, 2)
+rectangle = struct.pack("<BIII10d", 1, 3, 1, 5,
+                        0, 0, 4, 0, 4, 2, 0, 2, 0, 0)
+pq.write_table(pa.Table.from_pydict({
+    "id": [1, 2, 3],
+    "geometry": [point, rectangle, None],
+    "bbox": [dict(zip(bounds, b)) if b else None
+             for b in [(1, 2, 1, 2), (0, 0, 4, 2), None]],
+}, schema=geo_schema), geo_file)
+end
+
+// * geoparquet text and metadata
+display _newline "=== TEST CASE 19: GeoParquet Text and Metadata ==="
+local ++total_tests
+capture noisily {
+    dtparquet use using "`geo_file'", clear
+    assert c(N) == 3 & c(k) == 2
+    assert id == _n
+    assert geometry[1] == "POINT (1 2)"
+    assert geometry[2] == "POLYGON ((0 0, 4 0, 4 2, 0 2, 0 0))"
+    assert geometry[3] == ""
+    local geo_type : type geometry
+    assert "`geo_type'" == "strL"
+    assert "`: char _dta[geoparquet_version]'" == "1.1.0"
+    assert "`: char _dta[geoparquet_primary]'" == "geometry"
+    assert "`: char _dta[geoparquet_encoding]'" == "WKB"
+    assert "`: char _dta[geoparquet_crs]'" == "OGC:CRS84"
+    assert "`: char _dta[geoparquet_mode]'" == "wkt"
+
+    dtparquet use using "`geo_file'", clear geometry(hex)
+    assert geometry[1] == "0101000000000000000000F03F0000000000000040"
+    assert geometry[3] == ""
+    assert "`: char _dta[geoparquet_mode]'" == "hex"
+}
+if _rc == 0 {
+    display as result "Test 19 completed successfully"
+    local passed_tests "`passed_tests' 19"
+}
+else {
+    display as error "Test 19 failed: GeoParquet text or metadata mismatch"
+    local failed_tests "`failed_tests' 19"
+}
+
+// * geoparquet coordinates and geometry removal
+display _newline "=== TEST CASE 20: GeoParquet Coordinates and Drop ==="
+local ++total_tests
+capture noisily {
+    dtparquet use using "`geo_file'", clear geometry(centroid bbox)
+    assert c(N) == 3 & c(k) == 7
+    assert _CX[1] == 1 & _CY[1] == 2
+    assert _CX[2] == 2 & _CY[2] == 1
+    assert _xmin[1] == 1 & _ymin[1] == 2
+    assert _xmax[1] == 1 & _ymax[1] == 2
+    assert _xmin[2] == 0 & _ymin[2] == 0
+    assert _xmax[2] == 4 & _ymax[2] == 2
+    foreach v in _CX _CY _xmin _ymin _xmax _ymax {
+        assert missing(`v'[3])
+    }
+
+    dtparquet use using "`geo_file'" if id == 2, clear ///
+        geometry(wkt centroid bbox)
+    assert c(N) == 1 & c(k) == 8
+    assert id == 2 & _CX == 2 & _CY == 1
+    assert geometry == "POLYGON ((0 0, 4 0, 4 2, 0 2, 0 0))"
+
+    dtparquet use using "`geo_file'", clear geometry(drop)
+    assert c(N) == 3 & c(k) == 1
+    assert id == _n
+}
+if _rc == 0 {
+    display as result "Test 20 completed successfully"
+    local passed_tests "`passed_tests' 20"
+}
+else {
+    display as error "Test 20 failed: GeoParquet coordinates or drop mismatch"
+    local failed_tests "`failed_tests' 20"
+}
+
+// * invalid geometry options
+display _newline "=== TEST CASE 21: Invalid Geometry Options ==="
+local ++total_tests
+local t21_err 0
+foreach spec in invalid "wkt hex" {
+    capture noisily dtparquet use using "`geo_file'", clear geometry(`spec')
+    if _rc != 198 local ++t21_err
+}
+if `t21_err' == 0 {
+    display as result "Test 21 completed successfully"
+    local passed_tests "`passed_tests' 21"
+}
+else {
+    display as error "Test 21 failed: expected r(198) for invalid geometry()"
+    local failed_tests "`failed_tests' 21"
+}
+python: geo_tmp.cleanup()
+
 // Cleanup
 capture erase "t2c1_meta.parquet"
 capture erase "t2c3_nodlabel.parquet"
@@ -976,5 +1112,5 @@ if wordcount("`failed_tests'") > 0 {
 else {
     display as result "All tests passed!"
     log close
-    exit 0
 }
+exit, clear

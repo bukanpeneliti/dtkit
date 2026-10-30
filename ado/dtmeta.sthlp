@@ -1,5 +1,5 @@
 {smcl}
-{* *! version 1.0.2  10sep2026}{...}
+{* *! version 1.0.3  26oct2026}{...}
 {vieweralsosee "[R] describe" "help describe"}{...}
 {vieweralsosee "[R] label" "help label"}{...}
 {vieweralsosee "[R] notes" "help notes"}{...}
@@ -81,7 +81,10 @@ This report includes:
 
 {phang}
 {opt save(excelname)} exports all metadata frames to an Excel file.
-Each frame occupies a separate worksheet named after the frame.
+Each frame occupies a separate worksheet named from its dataset label.
+For long source filenames, the command shortens the filename portion to keep
+each worksheet name within Excel's 31-character limit while preserving the
+metadata-type suffix.
 {cmd:dtmeta} requires {opt replace} to overwrite existing files.
 The command accepts {it:excelname} with or without the {cmd:.xlsx} extension.
 
