@@ -45,7 +45,7 @@ program define dtmeta, rclass
 
     // export to save
     if `"`save'"' != "" _toexcel, fullname("`fullname'") replace(`replace')
-    if "`_defaultframe'" != "" cwf `_defaultframe'
+    if "`_defaultframe'" != "" frame change `_defaultframe'
     return local source_frame `source_frame'
 
     // Generate report if requested
@@ -221,7 +221,7 @@ program define _makedtainfo
     }
 
     frame `collector' {
-        if c(N) == 0 set obs 1
+        if c(N) == 0 quietly set obs 1
         // Add new variables with appropriate storage types
         quietly generate long dta_obs = `nobs'
         quietly generate int dta_vars = `nvars'
@@ -243,7 +243,7 @@ program define _isempty
     }
     if `emptyframe' == 0 {
         frame drop `frame'
-        di as text "Note: `message'"
+        display as text "Note: `message'"
         exit 0
     }
 end
@@ -322,7 +322,7 @@ program define _toexcel
                 local sheetname "(`stem') `kind'"
             }
             local exportcmd `"`fullname', sheet("`sheetname'", `replace') firstrow(varlabels)"'
-            frame `fr': export excel using `exportcmd'
+            frame `fr': quietly export excel using `exportcmd'
         }
     }
 
@@ -411,7 +411,7 @@ program define _argload, rclass
             return local _defaultframe = c(frame)
             capture frame drop _dtsource
             frame create _dtsource
-            cwf _dtsource
+            frame change _dtsource
             return local source_frame "_dtsource"
             quietly use `"`using'"', clear
         }

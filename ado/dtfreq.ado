@@ -298,14 +298,14 @@ program define _xtab_core
             quietly ds freq*
             local freqvars `r(varlist)'
             local freqvars : list freqvars - by
-            egen rowfreq = rowtotal(`freqvars'), missing
-            egen total_all = total(rowfreq)
-            generate colprop_ = rowfreq / total_all
-            generate colpct_ = colprop_ * 100
+            quietly egen rowfreq = rowtotal(`freqvars'), missing
+            quietly egen total_all = total(rowfreq)
+            quietly generate colprop_ = rowfreq / total_all
+            quietly generate colpct_ = colprop_ * 100
         }
         else {
             // One-way
-            egen total = total(freq)
+            quietly egen total = total(freq)
         }
 
         drop numlab
@@ -416,12 +416,12 @@ program define _xtab_core
                 local fvars "`fvars' freq`val'"
                 local fuwars "`fuwars' freq_unw`val'"
             }
-            egen rowfreq = rowtotal(`fvars'), missing
-            egen rowfreq_unw = rowtotal(`fuwars'), missing
-            egen total_all = total(rowfreq)
-            egen total_all_unw = total(rowfreq_unw)
-            generate colprop_ = rowfreq / total_all
-            generate colpct_ = colprop_ * 100
+            quietly egen rowfreq = rowtotal(`fvars'), missing
+            quietly egen rowfreq_unw = rowtotal(`fuwars'), missing
+            quietly egen total_all = total(rowfreq)
+            quietly egen total_all_unw = total(rowfreq_unw)
+            quietly generate colprop_ = rowfreq / total_all
+            quietly generate colpct_ = colprop_ * 100
         }
         else {
             quietly generate double total = `total_w'
@@ -468,7 +468,7 @@ program define _crosstotal
         local vallabname "vallab"
         capture confirm variable vallab
         if _rc {
-            di as text "Note: Creating missing 'vallab' variable"
+            display as text "Note: Creating missing 'vallab' variable"
             quietly generate vallab = ""
         }
     }
@@ -497,7 +497,7 @@ program define _crosstotal
         // Create total rows
         preserve
             collapse (sum) `freqvars' `rowfreq' `rowfrequnw' , by(varname varlab)
-            merge 1:1 varname using `totals', nogen
+            merge 1:1 varname using `totals', nogenerate
 
             // Set category label to "Total"
             replace `vallabname' = "Total"
@@ -688,7 +688,7 @@ program define _toexcel
         }
         
         // Perform export with error handling
-        export excel using `exportcmd'
+        quietly export excel using `exportcmd'
     }
 
 end
@@ -911,7 +911,7 @@ program define _argcheck, rclass
                 if "`lbl'" == "" {
                     // Create temporary value label
                     tempname tmplbl
-                    qui levelsof `var', local(values)
+                    quietly levelsof `var', local(values)
                     foreach val in `values' {
                         local lbltxt = strofreal(`val') // Convert number to string
                         label define `tmplbl' `val' "`lbltxt'", add
@@ -921,7 +921,7 @@ program define _argcheck, rclass
             }
 
             quietly uselabel, clear var
-            ren lname labelname
+            rename lname labelname
             quietly generate varname = ""
             foreach lbl in `r(__labnames__)' {
                 quietly replace varname = "`r(`lbl')'" if labelname == "`lbl'"
@@ -937,7 +937,7 @@ program define _argcheck, rclass
             }
                 
             quietly reshape wide value label trunc, i(labelname varname) j(index)
-            egen grup = group(value* label*), missing
+            quietly egen grup = group(value* label*), missing
             sort grup, stable
             quietly levelsof grup, local(grupvals)
             if `r(r)' > 1 {
@@ -1019,7 +1019,7 @@ program define _argload, rclass
         if `_inmemory' == 1 & "`clear'" == "" {
             capture frame drop _dtsource
             frame create _dtsource
-            cwf _dtsource
+            frame change _dtsource
             return local source_frame "_dtsource"
             quietly use `"`using'"', clear
         }

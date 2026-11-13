@@ -552,7 +552,9 @@ program define _byprocess
 
         capture `collapsecmd' `collapse_stats' `wtexp' `ifcmd', by(`by') fast favor(speed)
         if _rc != 0 `collapsecmd' `collapse_stats' `wtexp' `ifcmd', by(`by') fast
-        quietly for var `by': drop if missing(X)
+        foreach byvar of local by {
+            quietly drop if missing(`byvar')
+        }
 
     }
 end
@@ -725,7 +727,7 @@ program define _toexcel
         }
 
         // Perform export with error handling
-        export excel using `exportcmd'
+        quietly export excel using `exportcmd'
     }
 
 end
@@ -821,7 +823,7 @@ program define _argcheck, rclass
         if "`var'" != "" {
             capture confirm numeric variable `var'
             if _rc {
-                di as error "Variable `var' not numeric"
+                display as error "Variable `var' not numeric"
                 exit 111
             }
         }
@@ -845,7 +847,7 @@ program define _argload, rclass
             return local _defaultframe = c(frame)
             capture frame drop _dtsource
             frame create _dtsource
-            cwf _dtsource
+            frame change _dtsource
             return local source_frame "_dtsource"
             quietly use `"`using'"', clear
         }

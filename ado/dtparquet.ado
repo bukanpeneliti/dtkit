@@ -789,7 +789,7 @@ program dtparquet_use, rclass
     // number (Stata's C plugin API cannot sstore into strL variables).
     if `"`strl_dta_path'"' != "" {
         confirm file `"`strl_dta_path'"'
-        gen long _dtparquet_strl_key = _n
+        quietly generate long _dtparquet_strl_key = _n
         // The plugin publishes the temp file's strL variable names because
         // the .dta writer sanitizes overlength/invalid names, plus one
         // included flag per variable (all-missing variables kept under
@@ -833,7 +833,7 @@ program dtparquet_use, rclass
                     if (`_strl_pregen' | "`_incl'" == "0") {
                         local _hit: list posof "`_stv'" in _master_vars
                         if (`_hit' == 0) {
-                            gen strL `_stv' = ""
+                            quietly generate strL `_stv' = ""
                             // Match the temp .dta writer's default string
                             // format so merged variables carry the same
                             // display format as the classic merge+recast path.
@@ -850,14 +850,14 @@ program dtparquet_use, rclass
             else local merge_assert assert(match)
         }
         if (`_strl_pregen') local merge_update update
-        capture merge 1:1 `_strl_key_name' using `"`strl_dta_path'"', `merge_update' `merge_assert' gen(_dtparquet_merge_flag)
+        capture merge 1:1 `_strl_key_name' using `"`strl_dta_path'"', `merge_update' `merge_assert' generate(_dtparquet_merge_flag)
         if _rc {
-            di as error "dtparquet: failed to merge strL columns from temporary file"
+            display as error "dtparquet: failed to merge strL columns from temporary file"
             exit _rc
         }
         quietly count if _dtparquet_merge_flag == 2
         if r(N) > 0 {
-            di as error "dtparquet: strL row count mismatch while loading `file'"
+            display as error "dtparquet: strL row count mismatch while loading `file'"
             error 459
         }
         quietly keep if inlist(_dtparquet_merge_flag, 1, 3, 4, 5)
@@ -1069,7 +1069,7 @@ program _apply_foreign_cat_labels
         }
 
         tempvar encoded
-        quietly encode `vari', gen(`encoded')
+        quietly encode `vari', generate(`encoded')
         local tmp_label : value label `encoded'
         local stable_label = "cat_`i'"
         capture label drop `stable_label'
@@ -1087,13 +1087,13 @@ program _apply_foreign_cat_labels
                     exit 198
                 }
             }
-            gen long `id_name' = `encoded'
+            quietly generate long `id_name' = `encoded'
             label values `id_name' `stable_label'
             drop `encoded'
         }
         else {
             drop `vari'
-            gen long `vari' = `encoded'
+            quietly generate long `vari' = `encoded'
             label values `vari' `stable_label'
             drop `encoded'
         }
@@ -1711,7 +1711,7 @@ program dtparquet_match_variables, rclass
     }
 
     if "`unmatched'" != "" {
-        di as error "The following variable(s) were not found: `unmatched'"
+        display as error "The following variable(s) were not found: `unmatched'"
         error 111
     }
 
@@ -1745,7 +1745,7 @@ program dtparquet_gen_or_recast
 
     if ("`type_new'" == "string") {
         if `b_gen' {
-            quietly gen `type_str' `name' = ""
+            quietly generate `type_str' `name' = ""
         }
         else {
             if regexm("`vartype'", "^str([0-9]+)$") {
@@ -1755,27 +1755,27 @@ program dtparquet_gen_or_recast
                 }
             }
             else if inlist("`vartype'", "byte", "int", "long", "float", "double") {
-                tostring `name', replace force
+                quietly tostring `name', replace force
             }
         }
     }
     else if (lower("`type_new'") == "strl") {
         if `b_gen' {
-            quietly gen strL `name' = ""
+            quietly generate strL `name' = ""
         }
         else {
             if regexm("`vartype'", "^str([0-9]+)$") {
                 recast strL `name'
             }
             else if inlist("`vartype'", "byte", "int", "long", "float", "double") {
-                tostring `name', replace force
+                quietly tostring `name', replace force
                 recast strL `name'
             }
         }
     }
     else if ("`type_new'" == "float") {
         if `b_gen' {
-            quietly gen float `name' = .
+            quietly generate float `name' = .
         }
         else {
             if inlist("`vartype'", "long", "double") {
@@ -1788,7 +1788,7 @@ program dtparquet_gen_or_recast
     }
     else if ("`type_new'" == "long") {
         if `b_gen' {
-            quietly gen long `name' = .
+            quietly generate long `name' = .
         }
         else {
             if inlist("`vartype'", "byte", "int") {
@@ -1801,7 +1801,7 @@ program dtparquet_gen_or_recast
     }
     else if ("`type_new'" == "int") {
         if `b_gen' {
-            quietly gen int `name' = .
+            quietly generate int `name' = .
         }
         else {
             if inlist("`vartype'", "byte") {
@@ -1811,15 +1811,15 @@ program dtparquet_gen_or_recast
     }
     else if ("`type_new'" == "byte") {
         if `b_gen' {
-            quietly gen byte `name' = .
+            quietly generate byte `name' = .
         }
     }
     else if ("`type_new'" == "binary") {
-        di "Dropping `name' as cannot process binary columns"
+        display "Dropping `name' as cannot process binary columns"
     }
     else {
         if `b_gen' {
-            quietly gen double `name' = .
+            quietly generate double `name' = .
         }
         else {
             if inlist("`vartype'", "byte", "int", "long", "float") {
