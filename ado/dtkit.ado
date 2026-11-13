@@ -325,6 +325,13 @@ program dtkit_sync_dtparquet_plugin
         exit 0
     }
 
+    if ustrregexm(`"`tag'"', "[ \t&|<>^]") ///
+        | strpos(`"`tag'"', char(34)) > 0 ///
+        | strpos(`"`tag'"', char(39)) > 0 {
+        display as error "Invalid characters in tag() option."
+        exit 198
+    }
+
     capture quietly findfile dtparquet.ado
     if _rc {
         display as error "Could not locate dtparquet.ado after installation."
@@ -335,27 +342,282 @@ program dtkit_sync_dtparquet_plugin
     local target_dir : subinstr local ado_path "dtparquet.ado" "", all
     local target_dll `"`target_dir'dtparquet.dll"'
 
-    local release_base "https://github.com/bukanpeneliti/dtkit/releases"
-    local download_url `"`release_base'/latest/download/dtparquet.dll"'
-    if `"`tag'"' != "" {
-        local download_url `"`release_base'/download/`tag'/dtparquet.dll"'
+    // Clean up unlocked .old* files left over from earlier locked replacements
+    local old_files : dir `"`target_dir'"' files "dtparquet.dll.old*"
+    foreach old_file of local old_files {
+        capture erase `"`target_dir'`old_file'"'
     }
 
-    capture copy `"`download_url'"' `"`target_dll'"', replace
+    local release_base "https://github.com/bukanpeneliti/dtkit/releases"
+    local dll_url `"`release_base'/latest/download/dtparquet.dll"'
+    local sha_url `"`release_base'/latest/download/dtparquet.sha256"'
+    if `"`tag'"' != "" {
+        local dll_url `"`release_base'/download/`tag'/dtparquet.dll"'
+        local sha_url `"`release_base'/download/`tag'/dtparquet.sha256"'
+    }
+
+    // Run shell commands from target_dir with relative names so directory
+    // spaces never break cmd /c quoting.
+    local orig_pwd `"`c(pwd)'"'
+    capture noisily dtkit_sync_dtparquet_body ///
+        `"`target_dir'"' `"`target_dll'"' `"`dll_url'"' `"`sha_url'"'
+    local sync_rc = _rc
+    quietly cd `"`orig_pwd'"'
+    if `sync_rc' {
+        exit `sync_rc'
+    }
+end
+
+capture program drop dtkit_sync_dtparquet_body
+program dtkit_sync_dtparquet_body
+    version 16
+    args target_dir target_dll dll_url sha_url
+
+    quietly cd `"`target_dir'"'
+
+    // Download checksum file first and validate format
+    local sha_tmp "dtparquet_sha.tmp"
+    capture noisily dtkit_download_file `"`sha_url'"' `"`sha_tmp'"'
     if _rc {
-        display as error "Could not install dtparquet plugin binary from GitHub Releases."
-        display as text ""
-        display as text "Try the following:"
-        display as text "  1) Check internet/proxy access to GitHub release assets."
-        display as text "  2) Close Stata sessions using dtparquet and retry: {stata dtkit, update}"
-        display as text "  3) Manual install: place dtparquet.dll in `target_dir'"
-        display as text ""
-        display as text "Attempted asset URL:"
-        display as text "  `download_url'"
-        display as text "Release page:"
-        display as text "  https://github.com/bukanpeneliti/dtkit/releases"
+        capture erase `"`sha_tmp'"'
+        display as error ///
+            "Could not download dtparquet.sha256 from GitHub Releases."
+        dtkit_sync_error_help `"`sha_url'"' `"`target_dir'"'
         exit 601
     }
 
-    display as result "Installed dtparquet plugin: `target_dll'"
+    local expected_hash ""
+    tempname fh
+    file open `fh' using `"`sha_tmp'"', read text
+    file read `fh' line
+    while r(eof) == 0 & `"`expected_hash'"' == "" {
+        local trimmed = trim(`"`line'"')
+        if `"`trimmed'"' != "" {
+            gettoken first_tok : trimmed
+            local expected_hash = lower(trim(`"`first_tok'"'))
+        }
+        file read `fh' line
+    }
+    file close `fh'
+    capture erase `"`sha_tmp'"'
+
+    if !ustrregexm(`"`expected_hash'"', "^[0-9a-f]{64}$") {
+        display as error ///
+            "Invalid SHA256 checksum in downloaded dtparquet.sha256."
+        dtkit_sync_error_help `"`sha_url'"' `"`target_dir'"'
+        exit 601
+    }
+
+    // Compare local DLL hash without loading the DLL into Stata
+    local has_local = 0
+    capture confirm file "dtparquet.dll"
+    if _rc == 0 {
+        local has_local = 1
+        capture dtkit_file_sha256 "dtparquet.dll"
+        if _rc == 0 {
+            if `"`r(sha256)'"' == `"`expected_hash'"' {
+                display as result ///
+                    "dtparquet plugin is already up to date: `target_dll'"
+                exit 0
+            }
+        }
+    }
+
+    // Download to staging file and verify checksum before replacing target
+    local staging_name "dtparquet.dll.new"
+    capture erase `"`staging_name'"'
+    capture noisily dtkit_download_file `"`dll_url'"' `"`staging_name'"'
+    if _rc {
+        capture erase `"`staging_name'"'
+        display as error ///
+            "Could not install dtparquet plugin binary from GitHub Releases."
+        dtkit_sync_error_help `"`dll_url'"' `"`target_dir'"'
+        exit 601
+    }
+
+    capture noisily dtkit_file_sha256 `"`staging_name'"'
+    if _rc {
+        capture erase `"`staging_name'"'
+        display as error ///
+            "Could not verify SHA256 checksum of downloaded dtparquet.dll."
+        exit 601
+    }
+
+    local staged_hash `"`r(sha256)'"'
+    if `"`staged_hash'"' != `"`expected_hash'"' {
+        capture erase `"`staging_name'"'
+        display as error ///
+            "SHA256 verification failed for downloaded dtparquet.dll."
+        display as text "  Expected: `expected_hash'"
+        display as text "  Actual:   `staged_hash'"
+        exit 601
+    }
+
+    // Check whether dtparquet_plugin is already loaded without loading it
+    local plugin_loaded = 0
+    capture plugin call dtparquet_plugin, "version"
+    if _rc == 0 {
+        local plugin_loaded = 1
+    }
+
+    // Rename existing DLL in place (works on Windows even while loaded)
+    local old_name ""
+    local old_locked = 0
+    if `has_local' {
+        local ts_date = subinstr("`c(current_date)'", " ", "", .)
+        local ts_time = subinstr("`c(current_time)'", ":", "", .)
+        local suffix `"`ts_date'_`ts_time'"'
+        local old_name `"dtparquet.dll.old.`suffix'"'
+        local attempt = 0
+        capture confirm file `"`old_name'"'
+        while _rc == 0 {
+            local attempt = `attempt' + 1
+            local old_name `"dtparquet.dll.old.`suffix'_`attempt'"'
+            capture confirm file `"`old_name'"'
+        }
+
+        capture erase "dtparquet_ok.tmp"
+        local mv_cmd "move /y dtparquet.dll `old_name' > nul 2>&1"
+        local mv_cmd `"`mv_cmd' && echo OK > dtparquet_ok.tmp"'
+        quietly shell cmd /c "`mv_cmd'"
+        capture confirm file "dtparquet_ok.tmp"
+        local move_rc = _rc
+        capture erase "dtparquet_ok.tmp"
+        if `move_rc' {
+            capture erase `"`staging_name'"'
+            display as error ///
+                "Could not rename existing dtparquet.dll before update."
+            display as text ///
+                "Check write permissions in `target_dir' and retry."
+            exit 601
+        }
+    }
+
+    capture erase "dtparquet_ok.tmp"
+    local ins_cmd "move /y `staging_name' dtparquet.dll > nul 2>&1"
+    local ins_cmd `"`ins_cmd' && echo OK > dtparquet_ok.tmp"'
+    quietly shell cmd /c "`ins_cmd'"
+    capture confirm file "dtparquet_ok.tmp"
+    local install_rc = _rc
+    capture erase "dtparquet_ok.tmp"
+    if `install_rc' {
+        if `has_local' & `"`old_name'"' != "" {
+            quietly shell cmd /c "move /y `old_name' dtparquet.dll > nul 2>&1"
+        }
+        capture erase `"`staging_name'"'
+        display as error ///
+            "Could not move verified dtparquet.dll into `target_dir'."
+        exit 601
+    }
+
+    if `has_local' & `"`old_name'"' != "" {
+        capture erase `"`old_name'"'
+        if _rc {
+            local old_locked = 1
+        }
+    }
+
+    if `plugin_loaded' | `old_locked' {
+        display as result "Updated dtparquet plugin on disk: `target_dll'"
+        display as text "{bf:Note:} dtparquet.dll was in use; " ///
+            "restart Stata to load the new DLL in this session."
+    }
+    else {
+        display as result "Installed dtparquet plugin: `target_dll'"
+    }
+end
+
+capture program drop dtkit_download_file
+program dtkit_download_file
+    version 16
+    args url dest_name
+
+    capture erase `"`dest_name'"'
+    capture erase "dtparquet_ok.tmp"
+    local dl_cmd "curl.exe -fsSL -o `dest_name' `url' > nul 2>&1"
+    local dl_cmd `"`dl_cmd' && echo OK > dtparquet_ok.tmp"'
+    quietly shell cmd /c "`dl_cmd'"
+
+    capture confirm file "dtparquet_ok.tmp"
+    local curl_ok = (_rc == 0)
+    capture erase "dtparquet_ok.tmp"
+
+    if `curl_ok' {
+        capture confirm file `"`dest_name'"'
+        if _rc == 0 {
+            exit 0
+        }
+    }
+
+    capture erase `"`dest_name'"'
+    capture copy `"`url'"' `"`dest_name'"', replace
+    if _rc {
+        capture erase `"`dest_name'"'
+        exit _rc
+    }
+    capture confirm file `"`dest_name'"'
+    if _rc {
+        exit 601
+    }
+end
+
+capture program drop dtkit_file_sha256
+program dtkit_file_sha256, rclass
+    version 16
+    args filename
+
+    confirm file `"`filename'"'
+
+    capture erase "dtparquet_hash.tmp"
+    capture erase "dtparquet_ok.tmp"
+    local hash_cmd "certutil -hashfile `filename' SHA256"
+    local hash_cmd `"`hash_cmd' > dtparquet_hash.tmp 2>&1"'
+    local hash_cmd `"`hash_cmd' && echo OK > dtparquet_ok.tmp"'
+    quietly shell cmd /c "`hash_cmd'"
+
+    local computed ""
+    capture confirm file "dtparquet_ok.tmp"
+    if _rc == 0 {
+        tempname fh
+        file open `fh' using "dtparquet_hash.tmp", read text
+        file read `fh' line
+        while r(eof) == 0 & `"`computed'"' == "" {
+            local candidate : subinstr local line " " "", all
+            local candidate = lower(trim(`"`candidate'"'))
+            if ustrregexm(`"`candidate'"', "^[0-9a-f]{64}$") {
+                local computed `"`candidate'"'
+            }
+            file read `fh' line
+        }
+        file close `fh'
+    }
+
+    capture erase "dtparquet_hash.tmp"
+    capture erase "dtparquet_ok.tmp"
+
+    if `"`computed'"' == "" {
+        display as error "Could not compute SHA256 hash for `filename'."
+        exit 601
+    }
+
+    return local sha256 `"`computed'"'
+end
+
+capture program drop dtkit_sync_error_help
+program dtkit_sync_error_help
+    version 16
+    args asset_url target_dir
+
+    display as text ""
+    display as text "Try the following:"
+    display as text ///
+        "  1) Check internet/proxy access to GitHub release assets."
+    display as text "  2) Retry: {stata dtkit, update}"
+    display as text ///
+        "  3) Manual install: place dtparquet.dll in `target_dir'"
+    display as text ""
+    display as text "Attempted asset URL:"
+    display as text "  `asset_url'"
+    display as text "Release page:"
+    display as text "  https://github.com/bukanpeneliti/dtkit/releases"
 end

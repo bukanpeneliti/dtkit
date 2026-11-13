@@ -76,6 +76,12 @@ It reports the current installation status and checks for package updates.
 {phang}
 {opt update} updates dtkit to the latest version available on GitHub.
 It uninstalls the current version and installs the latest version from the main branch.
+On Windows, it verifies {cmd:dtparquet.sha256} against the local
+{cmd:dtparquet.dll} and skips downloading {cmd:dtparquet.dll} when unchanged.
+If {cmd:dtparquet.dll} is updated while loaded or in use, the active DLL is
+renamed in place ({cmd:dtparquet.dll.old.*}) and Stata must be restarted to
+load the new DLL in the current session; unlocked {cmd:.old*} files are
+cleaned up on subsequent updates.
 
 {phang}
 {opt upgrade} performs the same action as {opt update}.
