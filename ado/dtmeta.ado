@@ -1,4 +1,4 @@
-*! Version 1.0.3 26oct2026
+*! Version 1.0.4 13nov2026
 program define dtmeta, rclass
     * Module to produce three metadata datasets in separate frames
     

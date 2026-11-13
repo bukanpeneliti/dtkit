@@ -7,6 +7,30 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.2.1] - 2026-11-13
+
+- Maintenance release standardizing Stata command names and suppressing routine
+  console output across `dtfreq`, `dtstat`, `dtmeta`, and `dtparquet`.
+- Component versions:
+  - **dtkit: v2.2.1 (Updated)**
+  - **dtfreq: v1.1.2 (Updated)**
+  - **dtstat: v1.1.2 (Updated)**
+  - **dtmeta: v1.0.4 (Updated)**
+  - **dtparquet: v2.1.1 (Updated)**
+
+### Changed
+
+- **dtfreq v1.1.2, dtstat v1.1.2, dtmeta v1.0.4, dtparquet v2.1.1**:
+  - Replaced abbreviated Stata commands and options (`gen`, `qui`, `ren`, `di`,
+    `cwf`, `nogen`) with full command and option names.
+  - Replaced the deprecated Stata 7 `for var` loop in `dtstat` with `foreach`.
+
+### Fixed
+
+- **dtfreq v1.1.2, dtstat v1.1.2, dtmeta v1.0.4, dtparquet v2.1.1**:
+  - Added `quietly` to routine `generate`, `egen`, `tostring`, `set obs`, and
+    `export excel` calls so internal operations do not print extraneous output.
+
 ## Package Release [v2.2.0] - 2026-10-30
 
 - Feature release for GeoParquet reading in `dtparquet`, with Parquet read-path

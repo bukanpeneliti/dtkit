@@ -1,4 +1,4 @@
-*! version 2.1.0 30oct2026
+*! version 2.1.1 13nov2026
 *! 
 *! Credits & Attribution:
 *! This package (dtparquet) is inspired by and incorporates concepts 

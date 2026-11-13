@@ -1,4 +1,4 @@
-*! Version 1.1.1 09oct2026
+*! Version 1.1.2 13nov2026
 program define dtstat
     * Module to produce descriptive statistics dataset
 
