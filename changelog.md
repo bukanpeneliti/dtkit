@@ -7,6 +7,34 @@ All notable changes to the dtkit project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Package Release [v2.2.2] - 2026-11-13
+
+- Maintenance release fixing Windows `dtparquet.dll` updates when the plugin
+  is loaded or already up to date.
+- Component versions:
+  - **dtkit: v2.2.2 (Updated)**
+  - dtfreq: v1.1.2 (Unchanged)
+  - dtstat: v1.1.2 (Unchanged)
+  - dtmeta: v1.0.4 (Unchanged)
+  - dtparquet: v2.1.1 (Unchanged)
+
+### Changed
+
+- **dtkit v2.2.2**:
+  - Updated `dtkit, update` / `dtkit, upgrade` on Windows to verify
+    `dtparquet.sha256` before downloading `dtparquet.dll` and skip redundant
+    downloads when checksums match.
+  - Updated `ado/dtkit.sthlp` to document Windows checksum checks, in-place DLL
+    replacement, and restart guidance.
+
+### Fixed
+
+- **dtkit v2.2.2**:
+  - Fixed Windows file-lock failures when updating an active `dtparquet.dll` by
+    staging and verifying `dtparquet.dll.new`, renaming the active DLL to
+    `dtparquet.dll.old.*`, cleaning up unlocked `.old*` leftovers, and noting
+    when a Stata restart is required.
+
 ## Package Release [v2.2.1] - 2026-11-13
 
 - Maintenance release standardizing Stata command names and suppressing routine

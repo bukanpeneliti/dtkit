@@ -1,4 +1,4 @@
-*! version 2.2.1 13nov2026
+*! version 2.2.2 13nov2026
 *! Program for managing the dtkit package installation
 
 capture program drop dtkit
